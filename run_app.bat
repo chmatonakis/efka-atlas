@@ -1,0 +1,9 @@
+@echo off
+echo Starting e-EFKA PDF Extractor Web App (Tabs Version)...
+echo.
+echo Installing required packages...
+pip install -r requirements.txt
+echo.
+echo Starting Streamlit app with separate tabs for main data and additional tables...
+streamlit run app_final.py
+pause
