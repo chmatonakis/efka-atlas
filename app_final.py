@@ -95,21 +95,68 @@ st.markdown("""
     }
     .app-container { max-width: 680px; margin: 0 auto; }
     .main-header { margin-top: 0.5rem; }
-    .hero {
-        background: linear-gradient(135deg, #f5f9ff 0%, #ffffff 100%);
-        border: 1px solid #e6eefc;
-        box-shadow: 0 8px 24px rgba(31, 119, 180, 0.08);
-        border-radius: 16px;
-        padding: 1.25rem 1.5rem;
-        margin: 0.5rem auto 1rem auto;
-        display: flex;
-        align-items: center;
-        gap: 0.9rem;
+    
+    /* Μωβ Header - Full Width */
+    .purple-header {
+        background: linear-gradient(135deg, #7b2cbf 0%, #5a189a 100%);
+        color: white;
+        text-align: center;
+        padding: 4rem 1rem;
+        margin: -5rem -5rem 3rem -5rem;
+        font-size: 1.8rem;
+        font-weight: 600;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
-    .hero .icon { font-size: 2.2rem; color: #1f77b4; }
-    .hero .text h1 { font-size: 1.8rem; margin: 0; color: #152536; letter-spacing: 0.2px; }
-    .hero .text p { margin: 0.25rem 0 0 0; color: #4b5563; font-size: 0.95rem; }
-    .stButton > button { font-size: 1.4rem; padding: 0.75rem 1.25rem; }
+    
+    /* Upload Container - Κεντρικό 40% */
+    .upload-container {
+        max-width: 40%;
+        margin: 0 auto 2rem auto;
+        text-align: center;
+    }
+    @media (max-width: 1200px) {
+        .upload-container { max-width: 60%; }
+    }
+    @media (max-width: 768px) {
+        .upload-container { max-width: 85%; }
+    }
+    
+    .upload-prompt {
+        font-size: 1.1rem;
+        font-weight: 500;
+        color: #000000;
+        margin-bottom: 1.5rem;
+    }
+    
+    /* Οδηγίες Box - Κεντρικό 40% */
+    .instructions-box {
+        max-width: 40%;
+        margin: 3rem auto 2rem auto;
+        background: white;
+        border: 2px solid #cbd5e1;
+        border-radius: 8px;
+        padding: 2rem;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    @media (max-width: 1200px) {
+        .instructions-box { max-width: 60%; }
+    }
+    @media (max-width: 768px) {
+        .instructions-box { max-width: 90%; }
+    }
+    .instructions-title {
+        font-size: 1.3rem;
+        font-weight: 600;
+        color: #000000;
+        margin-bottom: 1rem;
+        text-align: center;
+    }
+    .instructions-list {
+        text-align: left;
+        color: #333333;
+        font-size: 0.95rem;
+        line-height: 1.8;
+    }
     .success-box {
         padding: 1rem;
         border-radius: 0.5rem;
@@ -145,6 +192,28 @@ st.markdown("""
         width: 100%;
         font-size: 1.2rem;
         padding: 0.5rem 1rem;
+    }
+    
+    /* Μεγαλύτερα εικονίδια για τα dataframe controls */
+    [data-testid="stDataFrame"] button {
+        transform: scale(1.5) !important;
+        margin: 0.3rem !important;
+    }
+    [data-testid="stDataFrame"] [data-testid="baseButton-header"] {
+        transform: scale(1.5) !important;
+    }
+    [data-testid="stDataFrame"] .stElementContainer button {
+        transform: scale(1.5) !important;
+        margin: 0.5rem !important;
+    }
+    /* Μεγαλύτερο μέγεθος για τα toolbar buttons */
+    div[data-testid="stDataFrameToolbar"] button {
+        transform: scale(1.5) !important;
+        transform-origin: center !important;
+        margin: 0.3rem !important;
+    }
+    div[data-testid="stDataFrameToolbar"] {
+        padding: 0.5rem !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -506,6 +575,104 @@ def detect_currency(value):
         # Αν δεν υπάρχει νόμισμα, υποθέτουμε € (μετά το 2002)
         return '€'
 
+def format_currency(value):
+    """Μορφοποίηση νομισματικών ποσών για εμφάνιση με Ελληνικό πρότυπο
+    
+    Ελληνικό πρότυπο:
+    - Διαχωριστικό χιλιάδων: τελεία (.)
+    - Διαχωριστικό δεκαδικών: κόμμα (,)
+    - Σύμβολο νομίσματος: € ή ΔΡΧ
+    Παράδειγμα: 1.234,56 € ή 50.000 ΔΡΧ
+    """
+    try:
+        if pd.isna(value) or value == '' or value == '-':
+            return ''
+        
+        # Ανίχνευση νομίσματος πριν τον καθαρισμό
+        currency_symbol = detect_currency(value)
+        if currency_symbol is None:
+            currency_symbol = '€'  # Default
+        
+        # Μετατροπή σε float αν είναι αριθμός
+        if isinstance(value, (int, float)):
+            numeric_value = float(value)
+        else:
+            numeric_value = clean_numeric_value(value)
+        
+        if numeric_value == 0:
+            return ''
+        
+        # Μορφοποίηση με Αμερικανικό format πρώτα (κόμμα=χιλιάδες, τελεία=δεκαδικά)
+        formatted = f"{numeric_value:,.2f}"
+        
+        # Αφαίρεση των .00 αν είναι ακέραιος
+        if formatted.endswith('.00'):
+            formatted = formatted[:-3]
+        
+        # Μετατροπή σε Ελληνικό format
+        # Αντικατάσταση κόμματος (χιλιάδες) με placeholder
+        formatted = formatted.replace(',', '|||')
+        # Αντικατάσταση τελείας (δεκαδικά) με κόμμα
+        formatted = formatted.replace('.', ',')
+        # Αντικατάσταση placeholder με τελεία (χιλιάδες)
+        formatted = formatted.replace('|||', '.')
+        
+        # Προσθήκη συμβόλου νομίσματος
+        formatted = f"{formatted} {currency_symbol}"
+        
+        return formatted
+    except (ValueError, TypeError):
+        return str(value) if value else ''
+
+def format_number_greek(value, decimals=None):
+    """Μορφοποίηση αριθμού με ελληνικό format (τελεία για χιλιάδες, κόμμα για δεκαδικά)
+    
+    Args:
+        value: Ο αριθμός προς μορφοποίηση
+        decimals: Αριθμός δεκαδικών (None = αυτόματα, 0 = χωρίς δεκαδικά, 1+ = συγκεκριμένος αριθμός)
+    
+    Παράδειγμα: 
+        3804 -> 3.804
+        123.4 -> 123,4
+        9.6 -> 9,6
+    """
+    try:
+        if pd.isna(value) or value == '' or value == '-':
+            return ''
+        
+        # Μετατροπή σε float
+        if isinstance(value, (int, float)):
+            numeric_value = float(value)
+        else:
+            numeric_value = float(str(value).replace(',', '.'))
+        
+        # Καθορισμός δεκαδικών ψηφίων
+        if decimals is None:
+            # Αυτόματος καθορισμός: αν είναι ακέραιος, χωρίς δεκαδικά
+            if numeric_value == int(numeric_value):
+                decimals = 0
+            else:
+                # Βρίσκουμε πόσα δεκαδικά υπάρχουν (max 2)
+                decimals = min(len(str(numeric_value).split('.')[-1]), 2) if '.' in str(numeric_value) else 1
+        
+        # Μορφοποίηση με αμερικανικό format πρώτα (κόμμα=χιλιάδες, τελεία=δεκαδικά)
+        if decimals == 0:
+            formatted = f"{int(numeric_value):,}"
+        else:
+            formatted = f"{numeric_value:,.{decimals}f}"
+        
+        # Μετατροπή σε ελληνικό format
+        # Αντικατάσταση κόμματος (χιλιάδες) με placeholder
+        formatted = formatted.replace(',', '|||')
+        # Αντικατάσταση τελείας (δεκαδικά) με κόμμα
+        formatted = formatted.replace('.', ',')
+        # Αντικατάσταση placeholder με τελεία (χιλιάδες)
+        formatted = formatted.replace('|||', '.')
+        
+        return formatted
+    except (ValueError, TypeError):
+        return str(value) if value else ''
+
 def clean_numeric_value(value, exclude_drx=False):
     """Καθαρισμός και μετατροπή αριθμητικών τιμών σε float
     
@@ -567,31 +734,166 @@ def clean_numeric_value(value, exclude_drx=False):
     except (ValueError, TypeError):
         return 0.0
 
-def format_currency(value):
-    """Μορφοποίηση νομισματικών τιμών με χιλιάδες και δεκαδικά"""
-    try:
-        # Μετατροπή σε float αν είναι δυνατό
-        if pd.isna(value) or value == '' or value == '-':
-            return '-'
+def find_gaps_in_insurance_data(df):
+    """
+    Εντοπίζει κενά διαστήματα στα ασφαλιστικά δεδομένα
+    
+    Args:
+        df: DataFrame με τα ασφαλιστικά δεδομένα
         
-        # Αφαίρεση κενών, € και μετατροπή σε float
-        clean_value = str(value).strip().replace(',', '').replace(' ', '').replace('€', '')
-        if not clean_value or clean_value == '-':
-            return '-'
+    Returns:
+        DataFrame με τα κενά διαστήματα
+    """
+    if 'Από' not in df.columns or 'Έως' not in df.columns:
+        return pd.DataFrame()
+    
+    # Φιλτράρουμε μόνο τις γραμμές με έγκυρες ημερομηνίες
+    gaps_df = df.copy()
+    gaps_df['Από_DateTime'] = pd.to_datetime(gaps_df['Από'], format='%d/%m/%Y', errors='coerce')
+    gaps_df['Έως_DateTime'] = pd.to_datetime(gaps_df['Έως'], format='%d/%m/%Y', errors='coerce')
+    gaps_df = gaps_df.dropna(subset=['Από_DateTime', 'Έως_DateTime'])
+    
+    if gaps_df.empty:
+        return pd.DataFrame()
+    
+    # Βρίσκουμε το παλιότερο "Από" και το νεότερο "Έως"
+    min_date = gaps_df['Από_DateTime'].min()
+    max_date = gaps_df['Έως_DateTime'].max()
+    
+    # Δημιουργούμε λίστα με όλα τα διαστήματα
+    intervals = []
+    for _, row in gaps_df.iterrows():
+        intervals.append((row['Από_DateTime'], row['Έως_DateTime']))
+    
+    # Ταξινομούμε τα διαστήματα κατά ημερομηνία έναρξης
+    intervals.sort(key=lambda x: x[0])
+    
+    # Εντοπίζουμε τα κενά
+    gaps = []
+    current_end = min_date
+    
+    for start, end in intervals:
+        # Αν υπάρχει κενό μεταξύ του current_end και του start
+        if start > current_end + pd.Timedelta(days=1):
+            gap_start = current_end + pd.Timedelta(days=1)
+            gap_end = start - pd.Timedelta(days=1)
+            gaps.append({
+                'Από': gap_start.strftime('%d/%m/%Y'),
+                'Έως': gap_end.strftime('%d/%m/%Y'),
+                'Ημερολογιακές ημέρες': (gap_end - gap_start).days + 1,
+                'Μήνες': round((gap_end - gap_start).days / 30.44, 1),
+                'Έτη': round((gap_end - gap_start).days / 365.25, 1)
+            })
+        
+        # Ενημερώνουμε το current_end με το μεγαλύτερο από το τρέχον και το end
+        current_end = max(current_end, end)
+    
+    if not gaps:
+        return pd.DataFrame()
+    
+    # Δημιουργούμε DataFrame με τα κενά
+    gaps_df_result = pd.DataFrame(gaps)
+    
+    # Ταξινομούμε κατά ημερομηνία έναρξης
+    gaps_df_result['Από_DateTime'] = pd.to_datetime(gaps_df_result['Από'], format='%d/%m/%Y')
+    gaps_df_result = gaps_df_result.sort_values('Από_DateTime')
+    gaps_df_result = gaps_df_result.drop('Από_DateTime', axis=1)
+    
+    return gaps_df_result
+
+def normalize_column_name(name):
+    """
+    Κανονικοποιεί ένα όνομα στήλης για σύγκριση
+    Αφαιρεί \n, πολλαπλά κενά, και μετατρέπει σε πεζά
+    """
+    if pd.isna(name):
+        return ""
+    # Αντικατάσταση \n και tabs με κενό
+    normalized = str(name).replace('\n', ' ').replace('\t', ' ').replace('\r', ' ')
+    # Αφαίρεση πολλαπλών κενών
+    normalized = ' '.join(normalized.split())
+    # Αφαίρεση περιττών κενών στην αρχή/τέλος
+    normalized = normalized.strip()
+    return normalized
+
+def find_column_by_pattern(df, patterns):
+    """
+    Βρίσκει μια στήλη με βάση patterns (υποστηρίζει πολλαπλά patterns)
+    Επιστρέφει το πραγματικό όνομα της στήλης ή None
+    """
+    if isinstance(patterns, str):
+        patterns = [patterns]
+    
+    for col in df.columns:
+        col_normalized = normalize_column_name(col).lower()
+        for pattern in patterns:
+            pattern_normalized = pattern.lower().strip()
+            if pattern_normalized in col_normalized or col_normalized in pattern_normalized:
+                return col
+    return None
+
+def normalize_column_names(df):
+    """
+    Κανονικοποίηση ονομάτων στηλών με mapping σε standard names
+    """
+    # Mapping από patterns -> standard name (με προτεραιότητα - πιο συγκεκριμένα πρώτα)
+    column_mapping = {
+        'Συνολικές εισφορές': ['συνολικές εισφορές', 'συνολικες εισφορες', 'συνολικ εισφορ'],
+        'Μικτές αποδοχές': ['μικτές αποδοχές', 'μικτες αποδοχες', 'μικτ αποδοχ'],
+        'Τύπος Αποδοχών': ['τύπος αποδοχών', 'τυπος αποδοχων', 'τυπος απο'],
+        'Κλάδος/Πακέτο Κάλυψης': ['κλάδος πακέτο κάλυψης', 'κλαδος πακετο καλυψης', 'κλάδος', 'πακέτο κάλυψης'],
+        'Α/Μ εργοδότη': ['α μ εργοδότη', 'α/μ εργοδ', 'εργοδότη'],
+        'Ημέρες': ['ημέρες', 'ημερες', 'ημερ'],
+        'Έτη': ['έτη', 'ετη'],
+        'Μήνες': ['μήνες', 'μηνες'],
+        'Από': ['από'],
+        'Έως': ['έως', 'εως'],
+    }
+    
+    # Δημιουργία mapping από παλιό -> νέο όνομα
+    rename_dict = {}
+    used_standards = set()  # Για να μην αντιστοιχίσουμε δύο στήλες στο ίδιο standard name
+    
+    # Πρώτα ψάχνουμε για exact matches ή πολύ κοντινά matches
+    for col in df.columns:
+        col_normalized = normalize_column_name(col).lower()
+        
+        # Ελέγχουμε για κάθε standard name (με τη σειρά προτεραιότητας)
+        for standard_name, patterns in column_mapping.items():
+            if standard_name in used_standards:
+                continue
+                
+            # Έλεγχος για match
+            matched = False
+            for pattern in patterns:
+                # Ελέγχουμε αν το pattern ταιριάζει
+                if pattern == col_normalized:
+                    # Exact match
+                    rename_dict[col] = standard_name
+                    used_standards.add(standard_name)
+                    matched = True
+                    break
+                elif len(pattern) > 5 and pattern in col_normalized:
+                    # Substring match (αλλά μόνο για μακρά patterns)
+                    rename_dict[col] = standard_name
+                    used_standards.add(standard_name)
+                    matched = True
+                    break
+                elif len(col_normalized) > 5 and col_normalized in pattern:
+                    # Reverse substring match
+                    rename_dict[col] = standard_name
+                    used_standards.add(standard_name)
+                    matched = True
+                    break
             
-        num_value = float(clean_value)
-        
-        # Μορφοποίηση με χιλιάδες και δεκαδικά (χιλιάδες με . και δεκαδικά με ,)
-        if num_value == 0:
-            return '0,00€'
-        elif num_value >= 1000:
-            formatted = f"{num_value:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-            return f"{formatted}€"
-        else:
-            formatted = f"{num_value:.2f}".replace('.', ',')
-            return f"{formatted}€"
-    except (ValueError, TypeError):
-        return str(value) if value else '-'
+            if matched:
+                break
+    
+    # Εφαρμογή mapping
+    if rename_dict:
+        df = df.rename(columns=rename_dict)
+    
+    return df
 
 def extract_efka_data(uploaded_file):
     """
@@ -611,10 +913,15 @@ def extract_efka_data(uploaded_file):
             st.error("Δεν βρέθηκαν πίνακες στο PDF αρχείο")
             return pd.DataFrame()
         
+        # Κανονικοποίηση ονομάτων στηλών για όλους τους πίνακες
+        for i in range(len(all_tables)):
+            all_tables[i] = normalize_column_names(all_tables[i])
+        
         # Συνδυάζουμε όλα τα DataFrames
         with st.spinner("Συνδυασμός δεδομένων..."):
             combined_df = pd.concat(all_tables, ignore_index=True)
         
+        st.success(f"🎉 Συνολικά εξήχθησαν {len(combined_df)} γραμμές δεδομένων από {len(all_tables)} πίνακες")
         return combined_df
     
     except Exception as e:
@@ -630,6 +937,32 @@ def show_results_page(df, filename):
     """
     Εμφανίζει τη σελίδα αποτελεσμάτων
     """
+    
+    # Έλεγχος για αναμενόμενες στήλες
+    expected_columns = ['Από', 'Έως', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές']
+    missing_columns = []
+    found_columns = []
+    
+    for col in expected_columns:
+        if col in df.columns:
+            found_columns.append(col)
+        else:
+            missing_columns.append(col)
+    
+    # Δημιουργία mapping για περιγραφές πακέτων κάλυψης (για χρήση σε φίλτρα)
+    description_map = {}
+    if 'Κωδικός Κλάδων / Πακέτων Κάλυψης' in df.columns and 'Περιγραφή' in df.columns:
+        desc_df = df[['Κωδικός Κλάδων / Πακέτων Κάλυψης', 'Περιγραφή']].copy()
+        desc_df = desc_df.dropna(subset=['Κωδικός Κλάδων / Πακέτων Κάλυψης', 'Περιγραφή'])
+        desc_df = desc_df[desc_df['Κωδικός Κλάδων / Πακέτων Κάλυψης'] != '']
+        desc_df = desc_df[desc_df['Περιγραφή'] != '']
+        desc_df = desc_df.drop_duplicates(subset=['Κωδικός Κλάδων / Πακέτων Κάλυψης'])
+        # Δημιουργούμε dictionary: κωδικός -> περιγραφή
+        for _, row in desc_df.iterrows():
+            code = str(row['Κωδικός Κλάδων / Πακέτων Κάλυψης']).strip()
+            desc = str(row['Περιγραφή']).strip()
+            description_map[code] = desc
+    
     # Professional Header
     st.markdown("""
     <div class="professional-header">
@@ -637,7 +970,7 @@ def show_results_page(df, filename):
             <div class="header-left">
                 <div class="header-icon">📊</div>
                 <div class="header-text">
-                    <h1>Ατομικός Λογαριασμός e-EFKA</h1>
+                    <h1>Ασφαλιστικό βιογραφικό ΑΤΛΑΣ</h1>
                     <p>Ανάλυση και Επεξεργασία Ασφαλιστικών Δεδομένων</p>
                 </div>
             </div>
@@ -652,8 +985,21 @@ def show_results_page(df, filename):
     
     
     
+    # CSS για μεγαλύτερους τίτλους tabs
+    st.markdown("""
+    <style>
+    .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
+        font-size: 1.2rem !important;
+        font-weight: 600 !important;
+    }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 2rem !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
     # Δημιουργία tabs για διαφορετικούς τύπους δεδομένων
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Κύρια Δεδομένα", "📋 Επιπλέον Πίνακες", "📈 Συνοπτική Αναφορά", "📅 Ετήσια Αναφορά", "📆 Ημέρες Ασφάλισης"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Κύρια Δεδομένα", "Επιπλέον Πίνακες", "Συνοπτική Αναφορά", "Ετήσια Αναφορά", "Ημέρες Ασφάλισης", "Κενά Διαστήματα"])
     
     with tab1:
         # Κύρια δεδομένα (χωρίς τις στήλες από τελευταίες σελίδες)
@@ -715,17 +1061,33 @@ def show_results_page(df, filename):
                             main_df = main_df[main_df['Τύπος Ασφάλισης'].isin(selected_typos)]
 
                 with col3:
-                    # Φίλτρο Κλάδου/Πακέτου
-                    if 'Κλάδος/\nΠακέτο\nΚάλυψης' in main_df.columns:
-                        klados_options = ['Όλα'] + sorted(main_df['Κλάδος/\nΠακέτο\nΚάλυψης'].dropna().unique().tolist())
+                    # Φίλτρο Κλάδου/Πακέτου με περιγραφές
+                    if 'Κλάδος/Πακέτο Κάλυψης' in main_df.columns:
+                        # Δημιουργούμε options με περιγραφές
+                        klados_codes = sorted(main_df['Κλάδος/Πακέτο Κάλυψης'].dropna().unique().tolist())
+                        klados_options_with_desc = ['Όλα']
+                        klados_code_map = {}  # Mapping από "Κωδικός - Περιγραφή" -> Κωδικός
+                        
+                        for code in klados_codes:
+                            if code in description_map and description_map[code]:
+                                option_label = f"{code} - {description_map[code]}"
+                                klados_options_with_desc.append(option_label)
+                                klados_code_map[option_label] = code
+                            else:
+                                klados_options_with_desc.append(code)
+                                klados_code_map[code] = code
+                        
                         selected_klados = st.multiselect(
                             "Κλάδος/Πακέτο:",
-                            options=klados_options,
+                            options=klados_options_with_desc,
                             default=['Όλα'],
                             key="filter_klados"
                         )
+                        
                         if 'Όλα' not in selected_klados:
-                            main_df = main_df[main_df['Κλάδος/\nΠακέτο\nΚάλυψης'].isin(selected_klados)]
+                            # Μετατρέπουμε τις επιλογές σε κωδικούς
+                            selected_codes = [klados_code_map.get(opt, opt) for opt in selected_klados]
+                            main_df = main_df[main_df['Κλάδος/Πακέτο Κάλυψης'].isin(selected_codes)]
 
                 with col4:
                     # Φίλτρο Τύπου Αποδοχών (σταθερή και ανθεκτική ανίχνευση ονόματος)
@@ -810,10 +1172,18 @@ def show_results_page(df, filename):
         display_df = main_df.copy()
         
         # Εφαρμόζουμε μορφοποίηση νομισμάτων μόνο για εμφάνιση
-        currency_columns = ['Μικτές αποδοχές', 'Συνολικές\nΕισφορές']
+        currency_columns = ['Μικτές αποδοχές', 'Συνολικές εισφορές']
         for col in currency_columns:
             if col in display_df.columns:
                 display_df[col] = display_df[col].apply(format_currency)
+        
+        # Εφαρμόζουμε ελληνική μορφοποίηση για αριθμητικές στήλες
+        numeric_columns = ['Ημερολογιακές ημέρες', 'Μήνες', 'Έτη']
+        for col in numeric_columns:
+            if col in display_df.columns:
+                # Μήνες και Έτη με 1 δεκαδικό, ημέρες χωρίς δεκαδικά
+                decimals = 1 if col in ['Μήνες', 'Έτη'] else 0
+                display_df[col] = display_df[col].apply(lambda x: format_number_greek(x, decimals=decimals) if pd.notna(x) and x != '' else x)
         
         st.markdown("### 📊 Κύρια Δεδομένα e-EFKA (Μόνο με Ημερομηνίες)")
         st.dataframe(
@@ -849,16 +1219,16 @@ def show_results_page(df, filename):
             st.info("Δεν βρέθηκαν επιπλέον πίνακες από τις τελευταίες σελίδες.")
     
     with tab3:
-        # Συνοπτική Αναφορά - Ομαδοποίηση με βάση Κλάδος/\nΠακέτο\nΚάλυψης
+        # Συνοπτική Αναφορά - Ομαδοποίηση με βάση Κλάδος/Πακέτο Κάλυψης
         st.markdown("### 📈 Συνοπτική Αναφορά - Ομαδοποίηση κατά Κλάδο/Πακέτο Κάλυψης")
         st.info("💡 **Σημείωση**: Στα αθροίσματα συμπεριλαμβάνονται μόνο τα ποσά σε €. Τα ποσά σε ΔΡΧ (πριν το 2002) εμφανίζονται αλλά δεν υπολογίζονται στα συνολικά.")
         
-        if 'Κλάδος/\nΠακέτο\nΚάλυψης' in df.columns:
+        if 'Κλάδος/Πακέτο Κάλυψης' in df.columns:
             # Προετοιμασία δεδομένων
             summary_df = df.copy()
             # Κανονικοποίηση τιμών κλάδου/πακέτου
-            summary_df['Κλάδος/\nΠακέτο\nΚάλυψης'] = (
-                summary_df['Κλάδος/\nΠακέτο\nΚάλυψης'].astype(str).str.strip()
+            summary_df['Κλάδος/Πακέτο Κάλυψης'] = (
+                summary_df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
             )
             # Μετατροπή ημερομηνιών σε datetime για ορθή min/max
             summary_df['Από_dt'] = pd.to_datetime(summary_df.get('Από'), format='%d/%m/%Y', errors='coerce')
@@ -869,7 +1239,7 @@ def show_results_page(df, filename):
             # Καθαρισμός αριθμητικών στηλών πριν την ομαδοποίηση
             # Για τα ποσά, εξαιρούμε τα ΔΡΧ από τα αθροίσματα
             numeric_columns = ['Έτη', 'Μήνες', 'Ημέρες']
-            currency_columns = ['Μικτές αποδοχές', 'Συνολικές\nΕισφορές']
+            currency_columns = ['Μικτές αποδοχές', 'Συνολικές εισφορές']
             
             for col in numeric_columns:
                 if col in summary_df.columns:
@@ -881,14 +1251,14 @@ def show_results_page(df, filename):
                     summary_df[col] = summary_df[col].apply(lambda x: clean_numeric_value(x, exclude_drx=True))
             
             # Ομαδοποίηση με βάση Κλάδος/Πακέτο και υπολογισμός min/max σε datetime
-            grouped = summary_df.groupby('Κλάδος/\nΠακέτο\nΚάλυψης').agg({
+            grouped = summary_df.groupby('Κλάδος/Πακέτο Κάλυψης').agg({
                 'Από_dt': 'min',
                 'Έως_dt': 'max',
                 'Έτη': 'sum',
                 'Μήνες': 'sum',
                 'Ημέρες': 'sum',
                 'Μικτές αποδοχές': 'sum',
-                'Συνολικές\nΕισφορές': 'sum'
+                'Συνολικές εισφορές': 'sum'
             }).reset_index()
             # Μορφοποίηση ημερομηνιών ξανά σε dd/mm/yyyy
             grouped['Από'] = grouped['Από_dt'].dt.strftime('%d/%m/%Y')
@@ -908,22 +1278,51 @@ def show_results_page(df, filename):
             ).round(0).astype(int)
             
             # Μετράμε τις εγγραφές για κάθε κλάδο
-            record_counts = summary_df['Κλάδος/\nΠακέτο\nΚάλυψης'].value_counts().reset_index()
-            record_counts.columns = ['Κλάδος/\nΠακέτο\nΚάλυψης', 'Αριθμός Εγγραφών']
+            record_counts = summary_df['Κλάδος/Πακέτο Κάλυψης'].value_counts().reset_index()
+            record_counts.columns = ['Κλάδος/Πακέτο Κάλυψης', 'Αριθμός Εγγραφών']
             
             # Συνδυάζουμε τα δεδομένα
-            summary_final = grouped.merge(record_counts, on='Κλάδος/\nΠακέτο\nΚάλυψης', how='left')
+            summary_final = grouped.merge(record_counts, on='Κλάδος/Πακέτο Κάλυψης', how='left')
             
-            # Αναδιατάσσουμε τις στήλες
-            summary_final = summary_final[['Κλάδος/\nΠακέτο\nΚάλυψης', 'Από', 'Έως', 'Συνολικές ημέρες', 'Έτη', 'Μήνες', 'Ημέρες', 
-                                         'Μικτές αποδοχές', 'Συνολικές\nΕισφορές', 'Αριθμός Εγγραφών']]
+            # Προσθήκη περιγραφής από τα Επιπλέον Πίνακες
+            if 'Κωδικός Κλάδων / Πακέτων Κάλυψης' in df.columns and 'Περιγραφή' in df.columns:
+                # Δημιουργούμε mapping από Κωδικός -> Περιγραφή
+                description_map = df[['Κωδικός Κλάδων / Πακέτων Κάλυψης', 'Περιγραφή']].copy()
+                description_map = description_map.dropna(subset=['Κωδικός Κλάδων / Πακέτων Κάλυψης', 'Περιγραφή'])
+                description_map = description_map[description_map['Κωδικός Κλάδων / Πακέτων Κάλυψης'] != '']
+                description_map = description_map[description_map['Περιγραφή'] != '']
+                # Αφαιρούμε duplicates - κρατάμε την πρώτη περιγραφή για κάθε κωδικό
+                description_map = description_map.drop_duplicates(subset=['Κωδικός Κλάδων / Πακέτων Κάλυψης'])
+                description_map.columns = ['Κλάδος/Πακέτο Κάλυψης', 'Περιγραφή']
+                
+                # Κανονικοποίηση τιμών για matching
+                description_map['Κλάδος/Πακέτο Κάλυψης'] = description_map['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
+                
+                # Merge με τη συνοπτική αναφορά
+                summary_final = summary_final.merge(description_map, on='Κλάδος/Πακέτο Κάλυψης', how='left')
+            
+            # Αναδιατάσσουμε τις στήλες - Περιγραφή δεξιά από Κλάδος/Πακέτο
+            columns_order = ['Κλάδος/Πακέτο Κάλυψης']
+            if 'Περιγραφή' in summary_final.columns:
+                columns_order.append('Περιγραφή')
+            columns_order += ['Από', 'Έως', 'Συνολικές ημέρες', 'Έτη', 'Μήνες', 'Ημέρες', 
+                             'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
+            summary_final = summary_final[columns_order]
             
             # Δημιουργούμε αντίγραφο για εμφάνιση με μορφοποίηση
             display_summary = summary_final.copy()
             
             # Εφαρμόζουμε μορφοποίηση νομισμάτων μόνο για εμφάνιση
             display_summary['Μικτές αποδοχές'] = display_summary['Μικτές αποδοχές'].apply(format_currency)
-            display_summary['Συνολικές\nΕισφορές'] = display_summary['Συνολικές\nΕισφορές'].apply(format_currency)
+            display_summary['Συνολικές εισφορές'] = display_summary['Συνολικές εισφορές'].apply(format_currency)
+            
+            # Εφαρμόζουμε ελληνική μορφοποίηση για αριθμητικές στήλες
+            numeric_columns_summary = ['Συνολικές ημέρες', 'Έτη', 'Μήνες', 'Ημέρες', 'Αριθμός Εγγραφών']
+            for col in numeric_columns_summary:
+                if col in display_summary.columns:
+                    # Έτη και Μήνες με 1 δεκαδικό, οι υπόλοιπες χωρίς δεκαδικά
+                    decimals = 1 if col in ['Έτη', 'Μήνες'] else 0
+                    display_summary[col] = display_summary[col].apply(lambda x: format_number_greek(x, decimals=decimals) if pd.notna(x) and x != '' else x)
             
             # Εμφάνιση του πίνακα
             st.dataframe(
@@ -933,7 +1332,7 @@ def show_results_page(df, filename):
             )
             render_print_button("print_summary", "Συνοπτική Αναφορά", display_summary)
         else:
-            st.warning("Η στήλη 'Κλάδος/\nΠακέτο\nΚάλυψης' δεν βρέθηκε στα δεδομένα.")
+            st.warning("Η στήλη 'Κλάδος/Πακέτο Κάλυψης' δεν βρέθηκε στα δεδομένα.")
     
     with tab4:
         # Ετήσια Αναφορά - Ομαδοποίηση με βάση έτος, ταμείο και κλάδο/πακέτο
@@ -978,11 +1377,26 @@ def show_results_page(df, filename):
                         yearly_df = yearly_df[yearly_df['Τύπος Ασφάλισης'].isin(sel_tyas)]
 
             with y3:
-                if 'Κλάδος/\nΠακέτο\nΚάλυψης' in yearly_df.columns:
-                    klados_opts = ['Όλα'] + sorted(yearly_df['Κλάδος/\nΠακέτο\nΚάλυψης'].dropna().astype(str).unique().tolist())
-                    sel_klados = st.multiselect("Κλάδος/Πακέτο:", klados_opts, default=['Όλα'], key="y_filter_klados")
+                if 'Κλάδος/Πακέτο Κάλυψης' in yearly_df.columns:
+                    # Δημιουργούμε options με περιγραφές
+                    klados_codes = sorted(yearly_df['Κλάδος/Πακέτο Κάλυψης'].dropna().astype(str).unique().tolist())
+                    klados_opts_with_desc = ['Όλα']
+                    klados_code_map_y = {}
+                    
+                    for code in klados_codes:
+                        if code in description_map and description_map[code]:
+                            option_label = f"{code} - {description_map[code]}"
+                            klados_opts_with_desc.append(option_label)
+                            klados_code_map_y[option_label] = code
+                        else:
+                            klados_opts_with_desc.append(code)
+                            klados_code_map_y[code] = code
+                    
+                    sel_klados = st.multiselect("Κλάδος/Πακέτο:", klados_opts_with_desc, default=['Όλα'], key="y_filter_klados")
+                    
                     if 'Όλα' not in sel_klados:
-                        yearly_df = yearly_df[yearly_df['Κλάδος/\nΠακέτο\nΚάλυψης'].isin(sel_klados)]
+                        selected_codes = [klados_code_map_y.get(opt, opt) for opt in sel_klados]
+                        yearly_df = yearly_df[yearly_df['Κλάδος/Πακέτο Κάλυψης'].isin(selected_codes)]
 
             with y4:
                 if earnings_col and earnings_col in yearly_df.columns:
@@ -1022,7 +1436,7 @@ def show_results_page(df, filename):
             # Καθαρισμός αριθμητικών στηλών πριν την ομαδοποίηση
             # Για τα ποσά, εξαιρούμε τα ΔΡΧ από τα αθροίσματα
             numeric_columns = ['Έτη', 'Μήνες', 'Ημέρες']
-            currency_columns = ['Μικτές αποδοχές', 'Συνολικές\nΕισφορές']
+            currency_columns = ['Μικτές αποδοχές', 'Συνολικές εισφορές']
             
             for col in numeric_columns:
                 if col in yearly_df.columns:
@@ -1034,7 +1448,7 @@ def show_results_page(df, filename):
                     yearly_df[col] = yearly_df[col].apply(lambda x: clean_numeric_value(x, exclude_drx=True))
             
             # Ομαδοποίηση με βάση: Έτος, Ταμείο, Κλάδος/Πακέτο και Τύπος Αποδοχών (αν υπάρχει)
-            group_keys = ['Έτος', 'Ταμείο', 'Κλάδος/\nΠακέτο\nΚάλυψης']
+            group_keys = ['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης']
             if earnings_col:
                 group_keys.append(earnings_col)
             yearly_grouped = yearly_df.groupby(group_keys).agg({
@@ -1044,11 +1458,11 @@ def show_results_page(df, filename):
                 'Μήνες': 'sum',
                 'Ημέρες': 'sum',
                 'Μικτές αποδοχές': 'sum',
-                'Συνολικές\nΕισφορές': 'sum'
+                'Συνολικές εισφορές': 'sum'
             }).reset_index()
             
             # Μετράμε τις εγγραφές για κάθε συνδυασμό
-            count_keys = ['Έτος', 'Ταμείο', 'Κλάδος/\nΠακέτο\nΚάλυψης']
+            count_keys = ['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης']
             if earnings_col:
                 count_keys.append(earnings_col)
             yearly_counts = yearly_df.groupby(count_keys).size().reset_index()
@@ -1080,14 +1494,14 @@ def show_results_page(df, filename):
             display_order = ['Έτος', 'Ταμείο']
             if 'Τύπος Ασφάλισης (Σύνοψη)' in yearly_final.columns:
                 display_order.append('Τύπος Ασφάλισης (Σύνοψη)')
-            display_order += ['Κλάδος/\nΠακέτο\nΚάλυψης', 'Από', 'Έως']
+            display_order += ['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως']
             if 'Τύπος Αποδοχών' in yearly_final.columns:
                 display_order.append('Τύπος Αποδοχών')
-            display_order += ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές\nΕισφορές', 'Αριθμός Εγγραφών']
+            display_order += ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
             yearly_final = yearly_final[display_order]
             
             # Ταξινομούμε πρώτα ανά έτος, μετά ανά ταμείο, μετά ανά κλάδο
-            sort_keys = ['Έτος', 'Ταμείο', 'Κλάδος/\nΠακέτο\nΚάλυψης']
+            sort_keys = ['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης']
             if 'Τύπος Αποδοχών' in yearly_final.columns:
                 sort_keys.append('Τύπος Αποδοχών')
             yearly_final = yearly_final.sort_values(sort_keys)
@@ -1097,7 +1511,7 @@ def show_results_page(df, filename):
             
             # Εφαρμόζουμε μορφοποίηση νομισμάτων μόνο για εμφάνιση
             display_yearly['Μικτές αποδοχές'] = display_yearly['Μικτές αποδοχές'].apply(format_currency)
-            display_yearly['Συνολικές\nΕισφορές'] = display_yearly['Συνολικές\nΕισφορές'].apply(format_currency)
+            display_yearly['Συνολικές εισφορές'] = display_yearly['Συνολικές εισφορές'].apply(format_currency)
             
             # Βελτιώνουμε την εμφάνιση για καλύτερη αναγνωσιμότητα
             # Δημιουργούμε μια νέα στήλη για εμφάνιση με κενά όπου επαναλαμβάνονται τα έτη/ταμεία
@@ -1140,18 +1554,21 @@ def show_results_page(df, filename):
                 sum_months = yearly_final.loc[yr_mask, 'Μήνες'].sum() if 'Μήνες' in yearly_final.columns else 0
                 sum_days = yearly_final.loc[yr_mask, 'Ημέρες'].sum() if 'Ημέρες' in yearly_final.columns else 0
                 sum_gross = yearly_final.loc[yr_mask, 'Μικτές αποδοχές'].sum() if 'Μικτές αποδοχές' in yearly_final.columns else 0
-                sum_contrib = yearly_final.loc[yr_mask, 'Συνολικές\nΕισφορές'].sum() if 'Συνολικές\nΕισφορές' in yearly_final.columns else 0
+                sum_contrib = yearly_final.loc[yr_mask, 'Συνολικές εισφορές'].sum() if 'Συνολικές εισφορές' in yearly_final.columns else 0
                 sum_count = yearly_final.loc[yr_mask, 'Αριθμός Εγγραφών'].sum() if 'Αριθμός Εγγραφών' in yearly_final.columns else 0
 
                 # Δημιουργία γραμμής συνόλου σε επίπεδο εμφάνισης
                 total_row = {col: '' for col in display_yearly_detailed.columns}
                 # Στήλες εμφάνισης για έτος/ταμείο/τύπος ασφάλισης
                 if 'Έτος_Display' in total_row:
-                    total_row['Έτος_Display'] = f"Σύνολο {int(year_value)}"
+                    total_row['Έτος_Display'] = ''
                 if 'Ταμείο_Display' in total_row:
                     total_row['Ταμείο_Display'] = ''
                 if 'Τύπος_Ασφάλισης_Display' in total_row:
                     total_row['Τύπος_Ασφάλισης_Display'] = ''
+                # Το "Σύνολο ΧΧΧΧ" πηγαίνει στη στήλη Έως
+                if 'Έως' in total_row:
+                    total_row['Έως'] = f"Σύνολο {int(year_value)}"
                 # Αθροιστικές στήλες
                 if 'Έτη' in total_row:
                     total_row['Έτη'] = int(sum_years)
@@ -1161,8 +1578,8 @@ def show_results_page(df, filename):
                     total_row['Ημέρες'] = int(sum_days)
                 if 'Μικτές αποδοχές' in total_row:
                     total_row['Μικτές αποδοχές'] = format_currency(sum_gross)
-                if 'Συνολικές\nΕισφορές' in total_row:
-                    total_row['Συνολικές\nΕισφορές'] = format_currency(sum_contrib)
+                if 'Συνολικές εισφορές' in total_row:
+                    total_row['Συνολικές εισφορές'] = format_currency(sum_contrib)
                 if 'Αριθμός Εγγραφών' in total_row:
                     total_row['Αριθμός Εγγραφών'] = int(sum_count)
 
@@ -1176,10 +1593,10 @@ def show_results_page(df, filename):
             display_columns = ['Έτος_Display', 'Ταμείο_Display']
             if 'Τύπος_Ασφάλισης_Display' in display_yearly_detailed.columns:
                 display_columns.append('Τύπος_Ασφάλισης_Display')
-            display_columns += ['Κλάδος/\nΠακέτο\nΚάλυψης', 'Από', 'Έως']
+            display_columns += ['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως']
             if 'Τύπος Αποδοχών' in display_yearly_detailed.columns:
                 display_columns.append('Τύπος Αποδοχών')
-            display_columns += ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές\nΕισφορές', 'Αριθμός Εγγραφών']
+            display_columns += ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
             
             # Δημιουργούμε τον τελικό πίνακα για εμφάνιση
             display_final = display_yearly_detailed[display_columns].copy()
@@ -1191,20 +1608,47 @@ def show_results_page(df, filename):
             final_headers += ['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως']
             if 'Τύπος Αποδοχών' in display_yearly_detailed.columns:
                 final_headers.append('Τύπος Αποδοχών')
-            final_headers += ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές Αποδοχές', 'Συνολικές Εισφορές', 'Αριθμός Εγγραφών']
+            final_headers += ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές Αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
             display_final.columns = final_headers
             
-            # Στυλ για γραμμές "Σύνολο <Έτος>"
+            # Εφαρμόζουμε ελληνική μορφοποίηση για αριθμητικές στήλες
+            numeric_cols_yearly = ['Έτη', 'Μήνες', 'Ημέρες', 'Αριθμός Εγγραφών']
+            for col in numeric_cols_yearly:
+                if col in display_final.columns:
+                    # Έτη και Μήνες με 1 δεκαδικό, οι υπόλοιπες χωρίς δεκαδικά
+                    decimals = 1 if col in ['Έτη', 'Μήνες'] else 0
+                    display_final[col] = display_final[col].apply(lambda x: format_number_greek(x, decimals=decimals) if pd.notna(x) and x != '' and str(x).strip() != '' else x)
+            
+            # Στυλ για γραμμές "Σύνολο <Έτος>" και σκούρα γραμματοσειρά στη στήλη Έτος
             def _highlight_totals(row):
-                value = str(row.get('Έτος', ''))
+                value = str(row.get('Έως', ''))
+                styles = []
+                
+                # Βρίσκουμε τη θέση της στήλης "Έως"
+                eos_index = list(row.index).index('Έως') if 'Έως' in row.index else -1
+                
                 if value.startswith('Σύνολο'):
-                    return [
-                        'background-color: #e6f2ff; color: #000000; font-weight: 700;'
-                    ] * len(row)
-                return [''] * len(row)
+                    # Για κάθε στήλη
+                    for i, col_name in enumerate(row.index):
+                        if i >= eos_index and eos_index != -1:
+                            # Από "Έως" και δεξιότερα: μπλε background
+                            styles.append('background-color: #e6f2ff; color: #000000; font-weight: 700;')
+                        else:
+                            # Αριστερά από "Έως": χωρίς background
+                            styles.append('font-weight: 700;')
+                else:
+                    styles = [''] * len(row)
+                
+                return styles
+            
+            def _bold_year_column(row):
+                styles = [''] * len(row)
+                # Η στήλη Έτος είναι η πρώτη (index 0)
+                styles[0] = 'font-weight: bold; color: #000000;'
+                return styles
 
             try:
-                styled = display_final.style.apply(_highlight_totals, axis=1)
+                styled = display_final.style.apply(_highlight_totals, axis=1).apply(_bold_year_column, axis=1)
                 st.dataframe(
                     styled,
                     use_container_width=True,
@@ -1310,7 +1754,7 @@ def show_results_page(df, filename):
             days_df['Διάστημα'] = days_df['Από_DateTime'].dt.strftime('%d/%m/%Y') + ' - ' + days_df['Έως_DateTime'].dt.strftime('%d/%m/%Y')
 
             # Έλεγχος ότι υπάρχει στήλη πακέτου
-            pkg_col = 'Κλάδος/\nΠακέτο\nΚάλυψης'
+            pkg_col = 'Κλάδος/Πακέτο Κάλυψης'
             if pkg_col not in days_df.columns:
                 st.warning("Η στήλη 'Κλάδος/\\nΠακέτο\\nΚάλυψης' δεν βρέθηκε στα δεδομένα.")
             else:
@@ -1394,10 +1838,14 @@ def show_results_page(df, filename):
                         return ['background-color: #e6f2ff; color: #000000; font-weight: 700;'] * len(row)
                     return [''] * len(row)
 
-                # Προβολή: κενά αντί για μηδενικές τιμές μέσω Styler.format
+                # Προβολή: κενά αντί για μηδενικές τιμές μέσω Styler.format με ελληνική μορφοποίηση
                 def _blank_zero(x):
                     try:
-                        return '' if float(x) == 0 else f"{int(round(float(x)))}"
+                        if float(x) == 0:
+                            return ''
+                        # Χρήση ελληνικής μορφοποίησης για αριθμούς >= 1000
+                        num = int(round(float(x)))
+                        return format_number_greek(num, decimals=0)
                     except Exception:
                         return ''
 
@@ -1430,6 +1878,67 @@ def show_results_page(df, filename):
                 for col in ['Σύνολο Ημερών'] + package_cols:
                     print_days[col] = print_days[col].apply(lambda v: '' if pd.isna(v) or float(v) == 0 else int(round(float(v))))
                 render_print_button("print_ins_days", "Αναφορά Ημερών Ασφάλισης", print_days)
+        else:
+            st.warning("Οι στήλες 'Από' και 'Έως' δεν βρέθηκαν στα δεδομένα.")
+    
+    with tab6:
+        # Αναφορά Κενών Διαστήματων
+        st.markdown("### 🔍 Αναφορά Κενών Διαστήματων")
+        st.info("💡 **Σκοπός**: Εντοπίζει χρονικά διαστήματα που δεν καλύπτονται από κανένα ασφαλιστικό διάστημα.")
+        
+        if 'Από' in df.columns and 'Έως' in df.columns:
+            # Εντοπισμός κενών διαστημάτων
+            gaps_df = find_gaps_in_insurance_data(df)
+            
+            if not gaps_df.empty:
+                st.markdown("#### 📊 Εντοπισμένα Κενά Διαστήματα")
+                
+                # Στατιστικά
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Συνολικά Κενά", len(gaps_df))
+                with col2:
+                    total_days = gaps_df['Ημερολογιακές ημέρες'].sum()
+                    st.metric("Συνολικές Ημερολογιακές Ημέρες", format_number_greek(total_days, decimals=0))
+                with col3:
+                    total_months = gaps_df['Μήνες'].sum()
+                    st.metric("Συνολικοί Μήνες", format_number_greek(total_months, decimals=1))
+                with col4:
+                    total_years = gaps_df['Έτη'].sum()
+                    st.metric("Συνολικά Έτη", format_number_greek(total_years, decimals=1))
+                
+                # Δημιουργούμε αντίγραφο για εμφάνιση με μορφοποίηση
+                display_gaps = gaps_df.copy()
+                
+                # Εφαρμόζουμε ελληνική μορφοποίηση για αριθμητικές στήλες
+                numeric_cols_gaps = ['Ημερολογιακές ημέρες', 'Μήνες', 'Έτη']
+                for col in numeric_cols_gaps:
+                    if col in display_gaps.columns:
+                        # Μήνες και Έτη με 1 δεκαδικό, ημέρες χωρίς δεκαδικά
+                        decimals = 1 if col in ['Μήνες', 'Έτη'] else 0
+                        display_gaps[col] = display_gaps[col].apply(lambda x: format_number_greek(x, decimals=decimals) if pd.notna(x) and x != '' else x)
+                
+                # Εμφάνιση πίνακα
+                st.dataframe(
+                    display_gaps,
+                    use_container_width=True,
+                    height=600
+                )
+                
+                # Κουμπί εκτύπωσης
+                render_print_button("print_gaps", "Κενά Διαστήματα", gaps_df)
+                
+                # Συμβουλές
+                st.markdown("#### 💡 Συμβουλές")
+                if len(gaps_df) > 0:
+                    st.warning("⚠️ **Σημαντικό**: Τα εντοπισμένα κενά διαστήματα μπορεί να επηρεάσουν τη θεμελίωση δικαιώματος για σύνταξη.")
+                    
+                    # Εμφάνιση του μεγαλύτερου κενού
+                    max_gap = gaps_df.loc[gaps_df['Ημερολογιακές ημέρες'].idxmax()]
+                    st.info(f"🔍 **Μεγαλύτερο κενό**: {max_gap['Από']} - {max_gap['Έως']} ({max_gap['Ημερολογιακές ημέρες']} ημερολογιακές ημέρες)")
+            else:
+                st.success("✅ **Καμία κενή περίοδος δεν εντοπίστηκε!** Όλα τα διαστήματα είναι συνεχή.")
+                st.info("💡 **Σημείωση**: Αυτό σημαίνει ότι δεν υπάρχουν κενά μεταξύ των ασφαλιστικών σας περιόδων.")
         else:
             st.warning("Οι στήλες 'Από' και 'Έως' δεν βρέθηκαν στα δεδομένα.")
     
@@ -1478,28 +1987,28 @@ def show_results_page(df, filename):
                 extra_df.to_excel(writer, sheet_name='Επιπλέον_Πίνακες', index=False)
             
             # Προσθήκη Συνοπτικής Αναφοράς
-            if 'Κλάδος/\nΠακέτο\nΚάλυψης' in df.columns:
+            if 'Κλάδος/Πακέτο Κάλυψης' in df.columns:
                 summary_df = df.copy()
                 if 'Από' in summary_df.columns:
                     summary_df['Από_DateTime'] = pd.to_datetime(summary_df['Από'], format='%d/%m/%Y', errors='coerce')
                     summary_df = summary_df.dropna(subset=['Από_DateTime'])
                 
-                grouped = summary_df.groupby('Κλάδος/\nΠακέτο\nΚάλυψης').agg({
+                grouped = summary_df.groupby('Κλάδος/Πακέτο Κάλυψης').agg({
                     'Από': 'min',
                     'Έως': 'max',
                     'Έτη': 'sum',
                     'Μήνες': 'sum',
                     'Ημέρες': 'sum',
                     'Μικτές αποδοχές': 'sum',
-                    'Συνολικές\nΕισφορές': 'sum'
+                    'Συνολικές εισφορές': 'sum'
                 }).reset_index()
                 
-                record_counts = summary_df['Κλάδος/\nΠακέτο\nΚάλυψης'].value_counts().reset_index()
-                record_counts.columns = ['Κλάδος/\nΠακέτο\nΚάλυψης', 'Αριθμός Εγγραφών']
+                record_counts = summary_df['Κλάδος/Πακέτο Κάλυψης'].value_counts().reset_index()
+                record_counts.columns = ['Κλάδος/Πακέτο Κάλυψης', 'Αριθμός Εγγραφών']
                 
-                summary_final = grouped.merge(record_counts, on='Κλάδος/\nΠακέτο\nΚάλυψης', how='left')
-                summary_final = summary_final[['Κλάδος/\nΠακέτο\nΚάλυψης', 'Από', 'Έως', 'Έτη', 'Μήνες', 'Ημέρες', 
-                                             'Μικτές αποδοχές', 'Συνολικές\nΕισφορές', 'Αριθμός Εγγραφών']]
+                summary_final = grouped.merge(record_counts, on='Κλάδος/Πακέτο Κάλυψης', how='left')
+                summary_final = summary_final[['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως', 'Έτη', 'Μήνες', 'Ημέρες', 
+                                             'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']]
                 
                 summary_final.to_excel(writer, sheet_name='Συνοπτική_Αναφορά', index=False)
                 
@@ -1511,37 +2020,42 @@ def show_results_page(df, filename):
                     yearly_df['Έτος'] = yearly_df['Από_DateTime'].dt.year
                     
                     # Καθαρισμός αριθμητικών στηλών
-                    numeric_columns = ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές\nΕισφορές']
+                    numeric_columns = ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές']
                     for col in numeric_columns:
                         if col in yearly_df.columns:
                             yearly_df[col] = yearly_df[col].apply(clean_numeric_value)
                     
                     # Ομαδοποίηση με βάση έτος, ταμείο και κλάδο/πακέτο κάλυψης
-                    yearly_grouped = yearly_df.groupby(['Έτος', 'Ταμείο', 'Κλάδος/\nΠακέτο\nΚάλυψης']).agg({
+                    yearly_grouped = yearly_df.groupby(['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης']).agg({
                         'Από': 'min',
                         'Έως': 'max',
                         'Έτη': 'sum',
                         'Μήνες': 'sum',
                         'Ημέρες': 'sum',
                         'Μικτές αποδοχές': 'sum',
-                        'Συνολικές\nΕισφορές': 'sum'
+                        'Συνολικές εισφορές': 'sum'
                     }).reset_index()
                     
                     # Μετράμε τις εγγραφές για κάθε έτος, ταμείο και κλάδο
-                    yearly_counts = yearly_df.groupby(['Έτος', 'Ταμείο', 'Κλάδος/\nΠακέτο\nΚάλυψης']).size().reset_index()
-                    yearly_counts.columns = ['Έτος', 'Ταμείο', 'Κλάδος/\nΠακέτο\nΚάλυψης', 'Αριθμός Εγγραφών']
+                    yearly_counts = yearly_df.groupby(['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης']).size().reset_index()
+                    yearly_counts.columns = ['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης', 'Αριθμός Εγγραφών']
                     
                     # Συνδυάζουμε τα δεδομένα
-                    yearly_final = yearly_grouped.merge(yearly_counts, on=['Έτος', 'Ταμείο', 'Κλάδος/\nΠακέτο\nΚάλυψης'], how='left')
+                    yearly_final = yearly_grouped.merge(yearly_counts, on=['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης'], how='left')
                     
                     # Αναδιατάσσουμε τις στήλες (πρώτα Έτος, μετά Ταμείο, μετά Κλάδος/Πακέτο)
-                    yearly_final = yearly_final[['Έτος', 'Ταμείο', 'Κλάδος/\nΠακέτο\nΚάλυψης', 'Από', 'Έως', 'Έτη', 'Μήνες', 'Ημέρες', 
-                                               'Μικτές αποδοχές', 'Συνολικές\nΕισφορές', 'Αριθμός Εγγραφών']]
+                    yearly_final = yearly_final[['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως', 'Έτη', 'Μήνες', 'Ημέρες', 
+                                               'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']]
                     
                     # Ταξινομούμε πρώτα ανά έτος, μετά ανά ταμείο, μετά ανά κλάδο
-                    yearly_final = yearly_final.sort_values(['Έτος', 'Ταμείο', 'Κλάδος/\nΠακέτο\nΚάλυψης'])
+                    yearly_final = yearly_final.sort_values(['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης'])
                     
                     yearly_final.to_excel(writer, sheet_name='Ετήσια_Αναφορά', index=False)
+                
+                # Προσθήκη αναφοράς κενών διαστημάτων στο Excel
+                gaps_df = find_gaps_in_insurance_data(df)
+                if not gaps_df.empty:
+                    gaps_df.to_excel(writer, sheet_name='Κενά_Διαστήματα', index=False)
         
         all_output.seek(0)
         
@@ -1608,104 +2122,139 @@ def main():
         show_results_page(df, filename)
         return
     
-    # Header (μοντέρνο hero)
-    st.markdown(
-        '<div class="app-container">\
-            <div class="hero">\
-                <div class="icon">📄</div>\
-                <div class="text">\
-                    <h1>Ασφαλιστικό βιογραφικό ΑΤΛΑΣ</h1>\
-                    <p>Ανέβασε το PDF του e‑EFKA και δες έξυπνες αναφορές</p>\
-                </div>\
-            </div>\
-        </div>',
-        unsafe_allow_html=True,
-    )
+    # Μωβ Header - Full Width
+    st.markdown('''
+        <div class="purple-header">
+            Ασφαλιστικό βιογραφικό ΑΤΛΑΣ
+        </div>
+    ''', unsafe_allow_html=True)
     
     # Εμφάνιση ανεβάσματος αρχείου
     if not st.session_state['file_uploaded']:
-        st.markdown('<div class="app-container">', unsafe_allow_html=True)
-        left, right = st.columns([1, 1])
-        with left:
-            st.markdown("#### 🧭 Οδηγίες Χρήσης")
-            st.markdown("- Κατεβάστε το PDF του Ατομικού Λογαριασμού από τον e‑EFKA.")
-            st.markdown("- Προτείνεται Chrome/Edge για καλύτερη συμβατότητα.")
-            st.markdown("- Ανεβάστε το αρχείο από τη φόρμα δεξιά.")
-            st.markdown("- Μετά την επεξεργασία θα εμφανιστούν αναλυτικά αποτελέσματα.")
-            st.markdown("- Τα δεδομένα επεξεργάζονται τοπικά και δεν αποθηκεύονται.")
-        with right:
-            st.markdown("#### 📤 Ανεβάστε το PDF αρχείο σας")
-            uploaded_file = st.file_uploader(
-                "Επιλέξτε PDF αρχείο",
-                type=['pdf'],
-                help="Ανεβάστε το PDF αρχείο e‑EFKA",
-                label_visibility="collapsed"
-            )
-            if uploaded_file is not None:
-                st.session_state['uploaded_file'] = uploaded_file
-                st.session_state['filename'] = uploaded_file.name
-                st.session_state['file_uploaded'] = True
-                st.success(f"✅ Επιλεγμένο αρχείο: {uploaded_file.name}")
-                st.info(f"📊 Μέγεθος αρχείου: {uploaded_file.size:,} bytes")
-                st.rerun()
+        # Προτροπή και Upload Button - Κεντρικό 30%
+        st.markdown('<div class="upload-container">', unsafe_allow_html=True)
+        st.markdown('<p class="upload-prompt">Ανεβάστε το pdf αρχείο από τον ΕΦΚΑ</p>', unsafe_allow_html=True)
+        
+        uploaded_file = st.file_uploader(
+            "Επιλέξτε PDF αρχείο",
+            type=['pdf'],
+            help="Ανεβάστε το PDF αρχείο e‑EFKA",
+            label_visibility="collapsed"
+        )
+        
+        if uploaded_file is not None:
+            st.session_state['uploaded_file'] = uploaded_file
+            st.session_state['filename'] = uploaded_file.name
+            st.session_state['file_uploaded'] = True
+            st.rerun()
+        
         st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Οδηγίες σε πλαίσιο - Κεντρικό 30%
+        st.markdown('''
+            <div class="instructions-box">
+                <div class="instructions-title">Οδηγίες</div>
+                <div class="instructions-list">
+                    • Κατεβάστε το PDF του Ασφαλιστικού βιογραφικού από τον e‑EFKA<br>
+                    • Προτείνεται Chrome/Edge για καλύτερη συμβατότητα<br>
+                    • Ανεβάστε το αρχείο από τη φόρμα παραπάνω<br>
+                    • Πατήστε το κουμπί "Επεξεργασία" για ανάλυση των δεδομένων<br>
+                    • Μετά την επεξεργασία θα εμφανιστούν αναλυτικά αποτελέσματα<br>
+                    • Τα δεδομένα επεξεργάζονται τοπικά και δεν αποθηκεύονται
+                </div>
+            </div>
+        ''', unsafe_allow_html=True)
     
-    # Εμφάνιση κουμπιού επεξεργασίας
+    # Εμφάνιση κουμπιού αναζήτησης
     elif not st.session_state['processing_done']:
         st.markdown('<div class="app-container upload-section">', unsafe_allow_html=True)
         st.markdown("### ✅ Επιλεγμένο αρχείο")
         st.success(f"📄 {st.session_state['uploaded_file'].name}")
         st.info(f"📊 Μέγεθος: {st.session_state['uploaded_file'].size:,} bytes")
         
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col2:
-            if st.button("🚀 Εκκίνηση Επεξεργασίας", type="primary", use_container_width=True):
-                st.session_state['processing_done'] = True
-                st.rerun()
+        if st.button("Επεξεργασία", type="primary"):
+            st.session_state['processing_done'] = True
+            st.rerun()
         
         st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Οδηγίες σε πλαίσιο - Κεντρικό 30%
+        st.markdown('''
+            <div class="instructions-box">
+                <div class="instructions-title">Οδηγίες</div>
+                <div class="instructions-list">
+                    • Κατεβάστε το PDF του Ασφαλιστικού βιογραφικ από τον e‑EFKA<br>
+                    • Προτείνεται Chrome/Edge για καλύτερη συμβατότητα<br>
+                    • Ανεβάστε το αρχείο από τη φόρμα παραπάνω<br>
+                    • Πατήστε το κουμπί "αναζήτηση" για επεξεργασία<br>
+                    • Μετά την επεξεργασία θα εμφανιστούν αναλυτικά αποτελέσματα<br>
+                    • Τα δεδομένα επεξεργάζονται τοπικά και δεν αποθηκεύονται
+                </div>
+            </div>
+        ''', unsafe_allow_html=True)
     
     # Επεξεργασία και εμφάνιση αποτελεσμάτων
     else:
-        # Επεξεργασία
-        with st.spinner("Επεξεργασία PDF αρχείου..."):
-            df = extract_efka_data(st.session_state['uploaded_file'])
-        
-        if not df.empty:
-            st.session_state['extracted_data'] = df
-            st.session_state['show_results'] = True
+        # Ελέγχουμε αν τα δεδομένα υπάρχουν ήδη (για να μην ξανακάνουμε επεξεργασία)
+        if 'extracted_data' in st.session_state and not st.session_state['extracted_data'].empty:
+            # Τα δεδομένα υπάρχουν ήδη - εμφάνιση κουμπιού απευθείας
+            df = st.session_state['extracted_data']
             
-            # Εμφάνιση επιτυχίας και κουμπιού για τα αποτελέσματα
-            st.markdown('<div class="app-container results-section">', unsafe_allow_html=True)
             st.markdown("### ✅ Επεξεργασία Ολοκληρώθηκε!")
-            st.success(f"📊 Εξήχθησαν {len(df)} γραμμές δεδομένων από {df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες")
             
             col1, col2, col3 = st.columns([1, 1, 1])
             with col2:
-                if st.button("📊 Προβολή Αποτελεσμάτων", type="primary", use_container_width=True):
-                    # Επιστροφή στην κορυφή και εμφάνιση αποτελεσμάτων
+                if st.button("📊 Προβολή Αποτελεσμάτων", type="primary", use_container_width=True, key="show_results_btn"):
                     st.session_state['show_results'] = True
-                    js_scroll = """
-                    <script>
-                    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-                    </script>
-                    """
-                    st.markdown(js_scroll, unsafe_allow_html=True)
                     st.rerun()
             
-            st.markdown('</div>', unsafe_allow_html=True)
+            st.success(f"📊 Εξήχθησαν {len(df)} γραμμές δεδομένων από {df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες")
         else:
-            st.error("Δεν βρέθηκαν δεδομένα για εξαγωγή")
+            # Πρώτη φορά - κάνουμε επεξεργασία
+            # Δημιουργία placeholders για ελεγχόμενη σειρά εμφάνισης
+            header_placeholder = st.empty()
+            button_placeholder = st.empty()
+            summary_placeholder = st.empty()
+            messages_placeholder = st.empty()
             
-            # Reset button
-            col1, col2, col3 = st.columns([1, 1, 1])
-            with col2:
-                if st.button("🔄 Δοκιμάστε Ξανά", use_container_width=True):
-                    # Reset session state
-                    for key in ['file_uploaded', 'processing_done', 'uploaded_file', 'extracted_data', 'show_results', 'filename']:
-                        if key in st.session_state:
-                            del st.session_state[key]
-                    st.rerun()
+            # Εμφάνιση header
+            with header_placeholder.container():
+                st.markdown("### 🔄 Επεξεργασία σε εξέλιξη...")
+            
+            # Container για μηνύματα επεξεργασίας (θα εμφανιστούν κάτω)
+            with messages_placeholder.container():
+                df = extract_efka_data(st.session_state['uploaded_file'])
+            
+            if not df.empty:
+                st.session_state['extracted_data'] = df
+                
+                # Ενημέρωση header
+                with header_placeholder.container():
+                    st.markdown("### ✅ Επεξεργασία Ολοκληρώθηκε!")
+                
+                # Εμφάνιση κουμπιού
+                with button_placeholder.container():
+                    col1, col2, col3 = st.columns([1, 1, 1])
+                    with col2:
+                        if st.button("📊 Προβολή Αποτελεσμάτων", type="primary", use_container_width=True, key="show_results_btn"):
+                            st.session_state['show_results'] = True
+                            st.rerun()
+                
+                # Εμφάνιση summary
+                with summary_placeholder.container():
+                    st.success(f"📊 Εξήχθησαν {len(df)} γραμμές δεδομένων από {df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες")
+            else:
+                st.error("Δεν βρέθηκαν δεδομένα για εξαγωγή")
+                
+                # Reset button
+                col1, col2, col3 = st.columns([1, 1, 1])
+                with col2:
+                    if st.button("🔄 Δοκιμάστε Ξανά", use_container_width=True):
+                        # Reset session state
+                        for key in ['file_uploaded', 'processing_done', 'uploaded_file', 'extracted_data', 'show_results', 'filename']:
+                            if key in st.session_state:
+                                del st.session_state[key]
+                        st.rerun()
 
 if __name__ == "__main__":
     main()
