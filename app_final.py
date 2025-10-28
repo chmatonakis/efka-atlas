@@ -32,7 +32,7 @@ except ImportError:
 # Ρύθμιση σελίδας
 st.set_page_config(
     page_title="Ασφαλιστικό βιογραφικό ΑΤΛΑΣ",
-    page_icon="📄",
+    page_icon=None,
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -40,6 +40,12 @@ st.set_page_config(
 # CSS για καλύτερη εμφάνιση
 st.markdown("""
 <style>
+    /* Καθολικό φόντο και γραμματοσειρά */
+    .stApp { background-color: #f5f6f7; }
+    html, body, [data-testid="stAppViewContainer"], .block-container {
+        font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif !important;
+        font-size: 17px;
+    }
     .main-header {
         font-size: 3rem;
         color: #1f77b4;
@@ -49,7 +55,7 @@ st.markdown("""
     }
     .professional-header {
         background: linear-gradient(135deg, #6f42c1 0%, #8e44ad 100%);
-        color: white;
+        color: #ffffff;
         padding: 1.5rem 2rem;
         margin: -1rem -1rem 2rem -1rem;
         box-shadow: 0 2px 10px rgba(0,0,0,0.1);
@@ -74,17 +80,19 @@ st.markdown("""
     }
     .header-text h1 {
         margin: 0;
-        font-size: 2rem;
-        font-weight: 700;
+        font-size: 2.8rem;
+        font-weight: 800;
+        letter-spacing: 0.2px;
     }
     .header-text p {
         margin: 0.25rem 0 0 0;
         font-size: 1rem;
         opacity: 0.9;
+        color: #ffffff !important;
     }
     .header-right { display: flex; gap: 1.5rem; }
-    .nav-link { color: #ffffff; text-decoration: none; font-weight: 600; padding: 0; }
-    .nav-link:hover { text-decoration: underline; }
+    .nav-link { color: #ffffff !important; text-decoration: none; font-weight: 600; padding: 0; }
+    .nav-link:hover { text-decoration: underline; color: #ffffff !important; }
     .upload-section {
         background-color: transparent;
         padding: 1.5rem 1rem;
@@ -92,6 +100,26 @@ st.markdown("""
         border: 0;
         text-align: center;
         margin: 1rem 0 2rem 0;
+    }
+    /* Σκιές και περίγραμμα για το πλαίσιο μεταφοράς/απόθεσης */
+    [data-testid="stFileUploader"] {
+        background: #ffffff;
+        border: 1px solid #d0d7de;
+        border-radius: 12px;
+        padding: 1.25rem;
+        box-shadow: 0 6px 16px rgba(0,0,0,0.06);
+    }
+    /* Έλεγχος πλάτους του ίδιου του file uploader (χωρίς wrapper) */
+    div[data-testid="stFileUploader"] {
+        max-width: 45% !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+    }
+    @media (max-width: 1200px) {
+        div[data-testid="stFileUploader"] { max-width: 65% !important; }
+    }
+    @media (max-width: 768px) {
+        div[data-testid="stFileUploader"] { max-width: 85% !important; }
     }
     .app-container { max-width: 680px; margin: 0 auto; }
     .main-header { margin-top: 0.5rem; }
@@ -101,31 +129,32 @@ st.markdown("""
         background: linear-gradient(135deg, #7b2cbf 0%, #5a189a 100%);
         color: white;
         text-align: center;
-        padding: 4rem 1rem;
+        padding: 4rem 1.25rem;
         margin: -5rem -5rem 3rem -5rem;
-        font-size: 1.8rem;
-        font-weight: 600;
+        font-size: 2.6rem;
+        font-weight: 700;
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
     
-    /* Upload Container - Κεντρικό 40% */
+    /* Upload Container - Κεντρικό 45% */
     .upload-container {
-        max-width: 40%;
+        max-width: 45%;
         margin: 0 auto 2rem auto;
         text-align: center;
     }
     @media (max-width: 1200px) {
-        .upload-container { max-width: 60%; }
+        .upload-container { max-width: 65%; }
     }
     @media (max-width: 768px) {
         .upload-container { max-width: 85%; }
     }
     
     .upload-prompt {
-        font-size: 1.1rem;
-        font-weight: 500;
+        font-size: 1.25rem;
+        font-weight: 700;
         color: #000000;
         margin-bottom: 1.5rem;
+        text-align: center;
     }
     
     /* Οδηγίες Box - Κεντρικό 40% */
@@ -145,17 +174,17 @@ st.markdown("""
         .instructions-box { max-width: 90%; }
     }
     .instructions-title {
-        font-size: 1.3rem;
-        font-weight: 600;
+        font-size: 1.6rem;
+        font-weight: 700;
         color: #000000;
         margin-bottom: 1rem;
-        text-align: center;
+        text-align: left;
     }
     .instructions-list {
         text-align: left;
         color: #333333;
-        font-size: 0.95rem;
-        line-height: 1.8;
+        font-size: 1.1rem;
+        line-height: 1.9;
     }
     .success-box {
         padding: 1rem;
@@ -199,21 +228,32 @@ st.markdown("""
         transform: scale(1.5) !important;
         margin: 0.3rem !important;
     }
+    [data-testid="stDataFrame"] button svg {
+        width: 22px !important;
+        height: 22px !important;
+    }
     [data-testid="stDataFrame"] [data-testid="baseButton-header"] {
         transform: scale(1.5) !important;
     }
     [data-testid="stDataFrame"] .stElementContainer button {
         transform: scale(1.5) !important;
-        margin: 0.5rem !important;
+        margin: 0.4rem !important;
     }
     /* Μεγαλύτερο μέγεθος για τα toolbar buttons */
     div[data-testid="stDataFrameToolbar"] button {
         transform: scale(1.5) !important;
         transform-origin: center !important;
         margin: 0.3rem !important;
+        padding: 0.3rem !important;
+    }
+    div[data-testid="stDataFrameToolbar"] button svg {
+        width: 22px !important;
+        height: 22px !important;
     }
     div[data-testid="stDataFrameToolbar"] {
         padding: 0.5rem !important;
+        z-index: 1000 !important;
+        position: relative !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -228,7 +268,7 @@ def render_print_button(button_key: str, title: str, dataframe: pd.DataFrame) ->
     """
     col_spacer, col_btn = st.columns([1, 0.12])
     with col_btn:
-        if st.button("🖨️ Εκτύπωση", key=button_key, use_container_width=True):
+        if st.button("Εκτύπωση", key=button_key, use_container_width=True):
             # Μοναδικό nonce ώστε το component να επανα-τοποθετείται και να εκτελείται κάθε φορά
             nonce_key = f"_print_nonce_{button_key}"
             nonce = st.session_state.get(nonce_key, 0) + 1
@@ -340,7 +380,7 @@ def extract_header_info(page):
                 return taimeio, typos
                 
     except Exception as e:
-        st.warning(f"⚠️ Σφάλμα εξαγωγής header info: {str(e)}")
+        st.warning(f"Σφάλμα εξαγωγής header info: {str(e)}")
     
     return None, None
 
@@ -356,7 +396,7 @@ def extract_tables_adaptive(pdf_path):
     
     with pdfplumber.open(pdf_path) as pdf:
         total_pages = len(pdf.pages)
-        st.info(f"📄 Σύνολο σελίδων: {total_pages}")
+        st.info(f"Σύνολο σελίδων: {total_pages}")
         
         # Δημιουργία progress bar
         progress_bar = st.progress(0)
@@ -369,14 +409,14 @@ def extract_tables_adaptive(pdf_path):
             # Ενημέρωση progress
             progress = (page_num - 1) / (total_pages - 2) if total_pages > 2 else 0
             progress_bar.progress(progress)
-            status_text.text(f"🔍 Επεξεργασία σελίδας {page_num + 1} από {total_pages - 1}...")
+            status_text.text(f"Επεξεργασία σελίδας {page_num + 1} από {total_pages - 1}...")
             
             # Εξαγωγή header info (Ταμείο & Τύπος)
             taimeio, typos = extract_header_info(page)
             if taimeio and typos:
                 current_taimeio = taimeio
                 current_typos = typos
-                st.info(f"📋 Σελίδα {page_num + 1}: Ταμείο='{taimeio}', Τύπος='{typos}'")
+                st.info(f"Σελίδα {page_num + 1}: Ταμείο='{taimeio}', Τύπος='{typos}'")
             
             # Στρατηγική 1: Κανονική εξαγωγή πινάκων
             tables = page.extract_tables()
@@ -392,7 +432,7 @@ def extract_tables_adaptive(pdf_path):
                     df.insert(1, 'Τύπος Ασφάλισης', current_typos)
                     
                     all_tables.append(df)
-                    st.success(f"✅ Σελίδα {page_num + 1}: Εξήχθησαν {len(df)} γραμμές")
+                    st.success(f"Σελίδα {page_num + 1}: Εξήχθησαν {len(df)} γραμμές")
                     continue
             
             # Στρατηγική 2: Εξαγωγή με διαφορετικές παραμέτρους
@@ -413,7 +453,7 @@ def extract_tables_adaptive(pdf_path):
                         df.insert(1, 'Τύπος Ασφάλισης', current_typos)
                         
                         all_tables.append(df)
-                        st.success(f"✅ Σελίδα {page_num + 1}: Εξήχθησαν {len(df)} γραμμές")
+                        st.success(f"Σελίδα {page_num + 1}: Εξήχθησαν {len(df)} γραμμές")
                         continue
             except Exception:
                 pass
@@ -432,7 +472,7 @@ def extract_tables_adaptive(pdf_path):
                         df.insert(1, 'Τύπος Ασφάλισης', current_typos)
                         
                         all_tables.append(df)
-                        st.success(f"✅ Σελίδα {page_num + 1}: Εξήχθησαν {len(df)} γραμμές")
+                        st.success(f"Σελίδα {page_num + 1}: Εξήχθησαν {len(df)} γραμμές")
                         continue
             except Exception:
                 pass
@@ -451,7 +491,7 @@ def extract_tables_adaptive(pdf_path):
                         df.insert(1, 'Τύπος Ασφάλισης', current_typos)
                         
                         all_tables.append(df)
-                        st.success(f"✅ Σελίδα {page_num + 1}: Εξήχθησαν {len(df)} γραμμές")
+                        st.success(f"Σελίδα {page_num + 1}: Εξήχθησαν {len(df)} γραμμές")
                         continue
             except Exception:
                 pass
@@ -471,7 +511,7 @@ def extract_tables_adaptive(pdf_path):
                             df.insert(1, 'Τύπος Ασφάλισης', current_typos)
                             
                             all_tables.append(df)
-                            st.success(f"✅ Σελίδα {page_num + 1}: Εξήχθησαν {len(df)} γραμμές (πίνακας {table_idx + 1})")
+                            st.success(f"Σελίδα {page_num + 1}: Εξήχθησαν {len(df)} γραμμές (πίνακας {table_idx + 1})")
                             break
             except Exception:
                 pass
@@ -496,18 +536,18 @@ def extract_tables_adaptive(pdf_path):
                             df.insert(1, 'Τύπος Ασφάλισης', current_typos)
                             
                             all_tables.append(df)
-                            st.success(f"✅ Σελίδα {page_num + 1}: Εξήχθησαν {len(df)} γραμμές")
+                            st.success(f"Σελίδα {page_num + 1}: Εξήχθησαν {len(df)} γραμμές")
                             doc.close()
                             continue
                     doc.close()
                 except Exception:
                     pass
             
-            st.warning(f"⚠️ Σελίδα {page_num + 1}: Δεν βρέθηκε πίνακας")
+            st.warning(f"Σελίδα {page_num + 1}: Δεν βρέθηκε πίνακας")
         
         # Τελικό progress
         progress_bar.progress(1.0)
-        status_text.text("✅ Επεξεργασία ολοκληρώθηκε!")
+        status_text.text("Επεξεργασία ολοκληρώθηκε!")
     
     return all_tables
 
@@ -968,16 +1008,15 @@ def show_results_page(df, filename):
     <div class="professional-header">
         <div class="header-content">
             <div class="header-left">
-                <div class="header-icon">📊</div>
                 <div class="header-text">
                     <h1>Ασφαλιστικό βιογραφικό ΑΤΛΑΣ</h1>
-                    <p>Ανάλυση και Επεξεργασία Ασφαλιστικών Δεδομένων</p>
+                    <p>Ανάλυση και Επεξεργασία Ασφαλιστικών Δεδομένων από το syntaksi.com</p>
                 </div>
             </div>
             <div class="header-right">
-                <a href="#" class="nav-link" onclick="resetToHome()">🏠 Αρχική</a>
-                <a href="#" class="nav-link">📋 Οδηγίες</a>
-                <a href="#" class="nav-link">ℹ️ Σχετικά</a>
+                <a href="#" class="nav-link" onclick="resetToHome()">Αρχική</a>
+                <a href="#" class="nav-link">Οδηγίες</a>
+                <a href="#" class="nav-link">Σχετικά</a>
             </div>
         </div>
     </div>
@@ -995,8 +1034,84 @@ def show_results_page(df, filename):
     .stTabs [data-baseweb="tab-list"] {
         gap: 2rem !important;
     }
+    /* Λευκό φόντο για πεδία φίλτρων */
+    .stSelectbox [data-baseweb="select"] > div,
+    .stMultiSelect [data-baseweb="select"] > div,
+    .stTextInput input,
+    .stDateInput input,
+    .stNumberInput input,
+    .stTextArea textarea,
+    div[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+    div[data-testid="stMultiSelect"] [data-baseweb="select"] > div {
+        background-color: #ffffff !important;
+        border-color: #d0d7de !important;
+        box-shadow: inset 0 1px 2px rgba(16,24,40,0.04) !important;
+    }
+    /* Βελτίωση αντίθεσης labels φίλτρων */
+    label, .stMarkdown p {
+        color: #111827;
+    }
+    /* Βελτιωμένο z-index για popover menus χωρίς να επηρεάζουμε το μέγεθος */
+    body > div[data-baseweb="popover"],
+    body > div[role="dialog"] {
+        z-index: 10000 !important;
+    }
+    /* Σταθερή θέση toolbar επάνω δεξιά του πίνακα */
+    div[data-testid="stDataFrameToolbar"] {
+        position: sticky !important;
+        top: 8px !important;
+        right: 8px !important;
+        z-index: 100 !important;
+    }
+    /* Dataframe container χαμηλότερο z-index από τα popover */
+    div[data-testid="stDataFrame"] {
+        z-index: 1 !important;
+        position: relative !important;
+    }
     </style>
     """, unsafe_allow_html=True)
+
+    # Μετάφραση ενδείξεων του file uploader στα Ελληνικά
+    components.html(
+        """
+        <script>
+          const translateUploader = () => {
+            const root = document.querySelector('div[data-testid="stFileUploader"]');
+            if (!root) return;
+            // Κείμενα drag & drop
+            const hints = root.querySelectorAll('span, div');
+            hints.forEach((el) => {
+              if (el.textContent && el.textContent.includes('Drag and drop')) {
+                el.textContent = 'Σύρετε και αφήστε το αρχείο εδώ';
+              }
+              if (el.textContent && el.textContent.includes('Drag and drop files here')) {
+                el.textContent = 'Σύρετε και αφήστε τα αρχεία εδώ';
+              }
+              if (el.textContent && el.textContent.includes('Limit')) {
+                el.textContent = el.textContent
+                  .replace('Limit', 'Όριο')
+                  .replace('per file', 'ανά αρχείο');
+              }
+            });
+            // Κουμπί Browse
+            const btns = root.querySelectorAll('button, span, label');
+            btns.forEach((b) => {
+              if (b.textContent && b.textContent.trim() === 'Επιλογή αρχείου') {
+                b.textContent = 'Επιλογή αρχείου';
+              }
+              if (b.textContent && b.textContent.trim() === 'Browse file') {
+                b.textContent = 'Επιλογή αρχείου';
+              }
+            });
+          };
+          const obs = new MutationObserver(() => translateUploader());
+          obs.observe(document.body, { childList: true, subtree: true });
+          window.addEventListener('load', translateUploader);
+          setTimeout(translateUploader, 800);
+        </script>
+        """,
+        height=0
+    )
     
     # Δημιουργία tabs για διαφορετικούς τύπους δεδομένων
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Κύρια Δεδομένα", "Επιπλέον Πίνακες", "Συνοπτική Αναφορά", "Ετήσια Αναφορά", "Ημέρες Ασφάλισης", "Κενά Διαστήματα"])
@@ -1025,12 +1140,12 @@ def show_results_page(df, filename):
         # Κουμπί για άνοιγμα popup φίλτρων
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            if st.button("🔧 Άνοιγμα Φίλτρων", type="secondary", use_container_width=True):
+            if st.button("Άνοιγμα Φίλτρων", type="secondary", use_container_width=True):
                 st.session_state['show_filters'] = not st.session_state.get('show_filters', False)
         
         # Popup φίλτρων
         if st.session_state.get('show_filters', False):
-            with st.expander("🔍 Φίλτρα Δεδομένων", expanded=True):
+            with st.expander("Φίλτρα Δεδομένων", expanded=True):
                 # Όλα τα φίλτρα σε μία γραμμή
                 col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([1.1, 1.1, 1.4, 1.1, 1.0, 1.0, 0.6, 0.6])
 
@@ -1134,7 +1249,8 @@ def show_results_page(df, filename):
 
                 with col7:
                     # Κουμπί επαναφοράς
-                    if st.button("🔄", help="Επαναφορά", use_container_width=True):
+                    reset_label = "↻"
+                    if st.button(reset_label, help="Επαναφορά", use_container_width=True):
                         st.session_state['show_filters'] = False
                         st.rerun()
 
@@ -1153,20 +1269,20 @@ def show_results_page(df, filename):
                             from_date_pd = pd.to_datetime(from_date_str, format='%d/%m/%Y')
                             main_df = main_df[main_df['Από_DateTime'] >= from_date_pd]
                         except:
-                            st.error("⚠️ Μη έγκυρη μορφή ημερομηνίας 'Από'")
+                            st.error("Μη έγκυρη μορφή ημερομηνίας 'Από'")
                     
                     if to_date_str:
                         try:
                             to_date_pd = pd.to_datetime(to_date_str, format='%d/%m/%Y')
                             main_df = main_df[main_df['Από_DateTime'] <= to_date_pd]
                         except:
-                            st.error("⚠️ Μη έγκυρη μορφή ημερομηνίας 'Έως'")
+                            st.error("Μη έγκυρη μορφή ημερομηνίας 'Έως'")
                     
                     main_df = main_df.drop('Από_DateTime', axis=1)
         
         # Εμφάνιση αποτελεσμάτων φίλτρων (σε πραγματικό χρόνο)
         if st.session_state.get('show_filters', False):
-            st.info(f"📊 Εμφανίζονται {len(main_df)} γραμμές")
+            st.info(f"Εμφανίζονται {len(main_df)} γραμμές")
         
         # Δημιουργούμε αντίγραφο για εμφάνιση με μορφοποίηση
         display_df = main_df.copy()
@@ -1185,7 +1301,7 @@ def show_results_page(df, filename):
                 decimals = 1 if col in ['Μήνες', 'Έτη'] else 0
                 display_df[col] = display_df[col].apply(lambda x: format_number_greek(x, decimals=decimals) if pd.notna(x) and x != '' else x)
         
-        st.markdown("### 📊 Κύρια Δεδομένα e-EFKA (Μόνο με Ημερομηνίες)")
+        st.markdown("### Κύρια Δεδομένα e-EFKA (Με χρονολογική σειρά)")
         st.dataframe(
             display_df,
             use_container_width=True,
@@ -1206,7 +1322,7 @@ def show_results_page(df, filename):
             extra_df = extra_df[~((extra_df == 'None') | (extra_df == '') | (extra_df.isna())).all(axis=1)]  # Αφαιρούμε γραμμές με "None" ή κενά
             
             if not extra_df.empty:
-                st.markdown("### 📋 Επιπλέον Πίνακες (Τελευταίες Σελίδες)")
+                st.markdown("### Επιπλέον Πίνακες (Τελευταίες Σελίδες)")
                 st.dataframe(
                     extra_df,
                     use_container_width=True,
@@ -1220,8 +1336,8 @@ def show_results_page(df, filename):
     
     with tab3:
         # Συνοπτική Αναφορά - Ομαδοποίηση με βάση Κλάδος/Πακέτο Κάλυψης
-        st.markdown("### 📈 Συνοπτική Αναφορά - Ομαδοποίηση κατά Κλάδο/Πακέτο Κάλυψης")
-        st.info("💡 **Σημείωση**: Στα αθροίσματα συμπεριλαμβάνονται μόνο τα ποσά σε €. Τα ποσά σε ΔΡΧ (πριν το 2002) εμφανίζονται αλλά δεν υπολογίζονται στα συνολικά.")
+        st.markdown("### Συνοπτική Αναφορά - Ομαδοποίηση κατά Κλάδο/Πακέτο Κάλυψης")
+        st.info("Σημείωση: Στα αθροίσματα συμπεριλαμβάνονται μόνο τα ποσά σε €. Τα ποσά σε ΔΡΧ (πριν το 2002) εμφανίζονται αλλά δεν υπολογίζονται στα συνολικά.")
         
         if 'Κλάδος/Πακέτο Κάλυψης' in df.columns:
             # Προετοιμασία δεδομένων
@@ -1336,8 +1452,8 @@ def show_results_page(df, filename):
     
     with tab4:
         # Ετήσια Αναφορά - Ομαδοποίηση με βάση έτος, ταμείο και κλάδο/πακέτο
-        st.markdown("### 📅 Ετήσια Αναφορά - Ομαδοποίηση κατά Έτος, Ταμείο και Κλάδο/Πακέτο")
-        st.info("💡 **Σημείωση**: Στα αθροίσματα συμπεριλαμβάνονται μόνο τα ποσά σε €. Τα ποσά σε ΔΡΧ (πριν το 2002) εμφανίζονται αλλά δεν υπολογίζονται στα συνολικά.")
+        st.markdown("### Ετήσια Αναφορά - Ομαδοποίηση κατά Έτος, Ταμείο και Κλάδο/Πακέτο")
+        st.info("Σημείωση: Στα αθροίσματα συμπεριλαμβάνονται μόνο τα ποσά σε €. Τα ποσά σε ΔΡΧ (πριν το 2002) εμφανίζονται αλλά δεν υπολογίζονται στα συνολικά.")
         
         if 'Από' in df.columns and 'Ταμείο' in df.columns:
             # Φιλτράρουμε μόνο τις γραμμές με έγκυρες ημερομηνίες
@@ -1410,7 +1526,8 @@ def show_results_page(df, filename):
             with y6:
                 to_y_str = st.text_input("Έως (dd/mm/yyyy):", value="", placeholder="31/12/2025", key="y_filter_to_date")
             with y7:
-                if st.button("🔄", help="Επαναφορά", use_container_width=True, key="y_filter_reset"):
+                reset_label = "↻"
+                if st.button(reset_label, help="Επαναφορά", use_container_width=True, key="y_filter_reset"):
                     for _k in [
                         'y_filter_tameio', 'y_filter_typos_asfal', 'y_filter_klados',
                         'y_filter_apodochon', 'y_filter_from_date', 'y_filter_to_date']:
@@ -1664,7 +1781,7 @@ def show_results_page(df, filename):
             render_print_button("print_yearly", "Ετήσια Αναφορά", display_final)
             
             # Στατιστικά
-            st.markdown("#### 📊 Στατιστικά Ετήσιας Αναφοράς")
+            st.markdown("#### Στατιστικά Ετήσιας Αναφοράς")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric("Συνολικά Έτη", yearly_final['Έτος'].nunique())
@@ -1682,7 +1799,7 @@ def show_results_page(df, filename):
     
     with tab5:
         # Αναφορά Ημερών Ασφάλισης ανά Έτος και Διάστημα, με στήλες τα Πακέτα Κάλυψης
-        st.markdown("### 📆 Αναφορά Ημερών Ασφάλισης (Έτος × Διάστημα × Πακέτα)")
+        st.markdown("### Αναφορά Ημερών Ασφάλισης (Έτος × Διάστημα × Πακέτα)")
 
         if 'Από' in df.columns and 'Έως' in df.columns:
             days_df = df.copy()
@@ -1704,7 +1821,8 @@ def show_results_page(df, filename):
             with f3:
                 to_str = st.text_input('Έως (dd/mm/yyyy):', value='', placeholder='31/12/2025', key='insdays_filter_to')
             with f4:
-                if st.button('🔄', help='Επαναφορά', use_container_width=True, key='insdays_filter_reset'):
+                reset_label = "↻"
+                if st.button(reset_label, help='Επαναφορά', use_container_width=True, key='insdays_filter_reset'):
                     # Καθαρισμός κατάστασης widgets ώστε να επανέλθουν στις προεπιλογές
                     for _k in ['insdays_filter_tameio', 'insdays_filter_from', 'insdays_filter_to', 'ins_days_basis']:
                         if _k in st.session_state:
@@ -1883,15 +2001,15 @@ def show_results_page(df, filename):
     
     with tab6:
         # Αναφορά Κενών Διαστήματων
-        st.markdown("### 🔍 Αναφορά Κενών Διαστήματων")
-        st.info("💡 **Σκοπός**: Εντοπίζει χρονικά διαστήματα που δεν καλύπτονται από κανένα ασφαλιστικό διάστημα.")
+        st.markdown("### Αναφορά Κενών Διαστήματων")
+        st.info("Σκοπός: Εντοπίζει χρονικά διαστήματα που δεν καλύπτονται από κανένα ασφαλιστικό διάστημα.")
         
         if 'Από' in df.columns and 'Έως' in df.columns:
             # Εντοπισμός κενών διαστημάτων
             gaps_df = find_gaps_in_insurance_data(df)
             
             if not gaps_df.empty:
-                st.markdown("#### 📊 Εντοπισμένα Κενά Διαστήματα")
+                st.markdown("#### Εντοπισμένα Κενά Διαστήματα")
                 
                 # Στατιστικά
                 col1, col2, col3, col4 = st.columns(4)
@@ -1929,22 +2047,22 @@ def show_results_page(df, filename):
                 render_print_button("print_gaps", "Κενά Διαστήματα", gaps_df)
                 
                 # Συμβουλές
-                st.markdown("#### 💡 Συμβουλές")
+                st.markdown("#### Συμβουλές")
                 if len(gaps_df) > 0:
-                    st.warning("⚠️ **Σημαντικό**: Τα εντοπισμένα κενά διαστήματα μπορεί να επηρεάσουν τη θεμελίωση δικαιώματος για σύνταξη.")
+                    st.warning("Σημαντικό: Τα εντοπισμένα κενά διαστήματα μπορεί να επηρεάσουν τη θεμελίωση δικαιώματος για σύνταξη.")
                     
                     # Εμφάνιση του μεγαλύτερου κενού
                     max_gap = gaps_df.loc[gaps_df['Ημερολογιακές ημέρες'].idxmax()]
-                    st.info(f"🔍 **Μεγαλύτερο κενό**: {max_gap['Από']} - {max_gap['Έως']} ({max_gap['Ημερολογιακές ημέρες']} ημερολογιακές ημέρες)")
+                    st.info(f"Μεγαλύτερο κενό: {max_gap['Από']} - {max_gap['Έως']} ({max_gap['Ημερολογιακές ημέρες']} ημερολογιακές ημέρες)")
             else:
-                st.success("✅ **Καμία κενή περίοδος δεν εντοπίστηκε!** Όλα τα διαστήματα είναι συνεχή.")
-                st.info("💡 **Σημείωση**: Αυτό σημαίνει ότι δεν υπάρχουν κενά μεταξύ των ασφαλιστικών σας περιόδων.")
+                st.success("Καμία κενή περίοδος δεν εντοπίστηκε. Όλα τα διαστήματα είναι συνεχή.")
+                st.info("Σημείωση: Αυτό σημαίνει ότι δεν υπάρχουν κενά μεταξύ των ασφαλιστικών σας περιόδων.")
         else:
             st.warning("Οι στήλες 'Από' και 'Έως' δεν βρέθηκαν στα δεδομένα.")
     
     # Download section
     st.markdown("---")
-    st.markdown("### 💾 Κατέβασμα Αποτελεσμάτων")
+    st.markdown("### Κατέβασμα Αποτελεσμάτων")
     
     col1, col2 = st.columns(2)
     
@@ -1962,7 +2080,7 @@ def show_results_page(df, filename):
             main_filename = 'efka_κύρια_δεδομένα.xlsx'
         
         st.download_button(
-            label="📥 Κύρια Δεδομένα (Excel)",
+            label="Κύρια Δεδομένα (Excel)",
             data=main_output.getvalue(),
             file_name=main_filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2065,7 +2183,7 @@ def show_results_page(df, filename):
             all_filename = 'efka_όλα_δεδομένα.xlsx'
         
         st.download_button(
-            label="📥 Όλα τα Δεδομένα (Excel)",
+            label="Όλα τα Δεδομένα (Excel)",
             data=all_output.getvalue(),
             file_name=all_filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2074,7 +2192,7 @@ def show_results_page(df, filename):
     
     # Footer
     st.markdown("---")
-    st.markdown("### ℹ️ Πληροφορίες")
+    st.markdown("### Πληροφορίες")
     st.info("""
     **Τι περιέχει το Excel αρχείο:**
     - Όλα τα δεδομένα από όλες τις σελίδες
@@ -2168,9 +2286,9 @@ def main():
     # Εμφάνιση κουμπιού αναζήτησης
     elif not st.session_state['processing_done']:
         st.markdown('<div class="app-container upload-section">', unsafe_allow_html=True)
-        st.markdown("### ✅ Επιλεγμένο αρχείο")
-        st.success(f"📄 {st.session_state['uploaded_file'].name}")
-        st.info(f"📊 Μέγεθος: {st.session_state['uploaded_file'].size:,} bytes")
+        st.markdown("### Επιλεγμένο αρχείο")
+        st.success(f"{st.session_state['uploaded_file'].name}")
+        st.info(f"Μέγεθος: {st.session_state['uploaded_file'].size:,} bytes")
         
         if st.button("Επεξεργασία", type="primary"):
             st.session_state['processing_done'] = True
@@ -2200,15 +2318,15 @@ def main():
             # Τα δεδομένα υπάρχουν ήδη - εμφάνιση κουμπιού απευθείας
             df = st.session_state['extracted_data']
             
-            st.markdown("### ✅ Επεξεργασία Ολοκληρώθηκε!")
+            st.markdown("### Επεξεργασία Ολοκληρώθηκε")
             
             col1, col2, col3 = st.columns([1, 1, 1])
             with col2:
-                if st.button("📊 Προβολή Αποτελεσμάτων", type="primary", use_container_width=True, key="show_results_btn"):
+                if st.button("Προβολή Αποτελεσμάτων", type="primary", use_container_width=True, key="show_results_btn"):
                     st.session_state['show_results'] = True
                     st.rerun()
             
-            st.success(f"📊 Εξήχθησαν {len(df)} γραμμές δεδομένων από {df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες")
+            st.success(f"Εξήχθησαν {len(df)} γραμμές δεδομένων από {df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες")
         else:
             # Πρώτη φορά - κάνουμε επεξεργασία
             # Δημιουργία placeholders για ελεγχόμενη σειρά εμφάνισης
@@ -2219,7 +2337,7 @@ def main():
             
             # Εμφάνιση header
             with header_placeholder.container():
-                st.markdown("### 🔄 Επεξεργασία σε εξέλιξη...")
+                st.markdown("### Επεξεργασία σε εξέλιξη...")
             
             # Container για μηνύματα επεξεργασίας (θα εμφανιστούν κάτω)
             with messages_placeholder.container():
@@ -2230,26 +2348,26 @@ def main():
                 
                 # Ενημέρωση header
                 with header_placeholder.container():
-                    st.markdown("### ✅ Επεξεργασία Ολοκληρώθηκε!")
+                    st.markdown("### Επεξεργασία Ολοκληρώθηκε")
                 
                 # Εμφάνιση κουμπιού
                 with button_placeholder.container():
                     col1, col2, col3 = st.columns([1, 1, 1])
                     with col2:
-                        if st.button("📊 Προβολή Αποτελεσμάτων", type="primary", use_container_width=True, key="show_results_btn"):
+                        if st.button("Προβολή Αποτελεσμάτων", type="primary", use_container_width=True, key="show_results_btn"):
                             st.session_state['show_results'] = True
                             st.rerun()
                 
                 # Εμφάνιση summary
                 with summary_placeholder.container():
-                    st.success(f"📊 Εξήχθησαν {len(df)} γραμμές δεδομένων από {df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες")
+                    st.success(f"Εξήχθησαν {len(df)} γραμμές δεδομένων από {df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες")
             else:
                 st.error("Δεν βρέθηκαν δεδομένα για εξαγωγή")
                 
                 # Reset button
                 col1, col2, col3 = st.columns([1, 1, 1])
                 with col2:
-                    if st.button("🔄 Δοκιμάστε Ξανά", use_container_width=True):
+                    if st.button("Δοκιμάστε Ξανά", use_container_width=True):
                         # Reset session state
                         for key in ['file_uploaded', 'processing_done', 'uploaded_file', 'extracted_data', 'show_results', 'filename']:
                             if key in st.session_state:
