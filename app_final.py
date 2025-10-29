@@ -1808,8 +1808,14 @@ def show_results_page(df, filename):
             days_df = days_df.dropna(subset=['Από_DateTime', 'Έως_DateTime'])
             days_df['Έτος'] = days_df['Από_DateTime'].dt.year
 
-            # Φίλτρα και παράμετρος σε μία γραμμή: Ταμείο | Από | Έως | Επαναφορά | Συντελεστές
-            f1, f2, f3, f4, f5 = st.columns([1.6, 1.0, 1.0, 0.5, 1.6])
+            # Πρώτα προσωρινός υπολογισμός για να πάρουμε τα διαθέσιμα πακέτα κάλυψης
+            pkg_col = 'Κλάδος/Πακέτο Κάλυψης'
+            available_packages = []
+            if pkg_col in days_df.columns:
+                available_packages = sorted(days_df[pkg_col].dropna().astype(str).unique().tolist())
+            
+            # Φίλτρα σε μία γραμμή: Ταμείο | Πακέτα | Από | Έως | Επαναφορά | Συντελεστές
+            f1, f2, f3, f4, f5, f6 = st.columns([1.4, 1.8, 0.9, 0.9, 0.4, 1.4])
             with f1:
                 if 'Ταμείο' in days_df.columns:
                     tameia_opts = ['Όλα'] + sorted(days_df['Ταμείο'].dropna().astype(str).unique().tolist())
@@ -1817,18 +1823,25 @@ def show_results_page(df, filename):
                     if 'Όλα' not in sel_tameia:
                         days_df = days_df[days_df['Ταμείο'].isin(sel_tameia)]
             with f2:
-                from_str = st.text_input('Από (dd/mm/yyyy):', value='', placeholder='01/01/1980', key='insdays_filter_from')
+                # Φίλτρο για πακέτα κάλυψης
+                if available_packages:
+                    package_opts = ['Όλα'] + available_packages
+                    sel_packages = st.multiselect('Πακέτα Κάλυψης:', package_opts, default=['Όλα'], key='insdays_filter_packages')
+                else:
+                    sel_packages = ['Όλα']
             with f3:
-                to_str = st.text_input('Έως (dd/mm/yyyy):', value='', placeholder='31/12/2025', key='insdays_filter_to')
+                from_str = st.text_input('Από (dd/mm/yyyy):', value='', placeholder='01/01/1980', key='insdays_filter_from')
             with f4:
+                to_str = st.text_input('Έως (dd/mm/yyyy):', value='', placeholder='31/12/2025', key='insdays_filter_to')
+            with f5:
                 reset_label = "↻"
                 if st.button(reset_label, help='Επαναφορά', use_container_width=True, key='insdays_filter_reset'):
                     # Καθαρισμός κατάστασης widgets ώστε να επανέλθουν στις προεπιλογές
-                    for _k in ['insdays_filter_tameio', 'insdays_filter_from', 'insdays_filter_to', 'ins_days_basis']:
+                    for _k in ['insdays_filter_tameio', 'insdays_filter_packages', 'insdays_filter_from', 'insdays_filter_to', 'ins_days_basis']:
                         if _k in st.session_state:
                             del st.session_state[_k]
                     st.rerun()
-            with f5:
+            with f6:
                 # Επιλογή συντελεστών υπολογισμού ημερών από μήνες/έτη
                 basis = st.selectbox(
                     "Συντελεστές υπολογισμού:",
@@ -1867,6 +1880,9 @@ def show_results_page(df, filename):
 
             # Υπολογισμός μονάδων ανά γραμμή (πάντα άθροισμα σε ημέρες)
             days_df['Μονάδες'] = days_df['Ημέρες'] + (days_df['Μήνες'] * month_days) + (days_df['Έτη'] * year_days)
+            
+            # Αφαίρεση γραμμών με μηδενικές μονάδες (χωρίς ημέρες/μήνες/έτη)
+            days_df = days_df[days_df['Μονάδες'] > 0]
 
             # Ετικέτα διαστήματος
             days_df['Διάστημα'] = days_df['Από_DateTime'].dt.strftime('%d/%m/%Y') + ' - ' + days_df['Έως_DateTime'].dt.strftime('%d/%m/%Y')
@@ -1903,28 +1919,33 @@ def show_results_page(df, filename):
 
                 # Εισαγωγή γραμμών «Σύνολο <Έτος>» και συνολικό σύνολο όλων των ετών στην αρχή
                 package_cols = [c for c in pivot.columns if c not in ['Έτος', 'Διάστημα']]
+                
+                # Φιλτράρισμα στηλών με βάση την επιλογή πακέτων
+                if 'Όλα' not in sel_packages and sel_packages:
+                    package_cols = [col for col in package_cols if col in sel_packages]
+                
                 final_blocks = []
 
-                # Συνολικό σύνολο όλων των ετών (στην αρχή)
+                # Συνολικό σύνολο όλων των ετών (στην αρχή) - μόνο για επιλεγμένες στήλες
                 grand_totals = {col: int(round(pivot[col].sum())) for col in package_cols}
                 grand_row = {'Έτος': '', 'Διάστημα': 'Σύνολο Όλων των Ετών'}
                 grand_row.update(grand_totals)
-                # Προσθήκη συνόλου ημερών για τη γραμμή grand total
+                # Προσθήκη συνόλου ημερών για τη γραμμή grand total (μόνο επιλεγμένα πακέτα)
                 grand_row['Σύνολο Ημερών'] = sum(grand_totals.values())
                 # Προσαρμογή των στηλών για να περιλαμβάνει τη νέα στήλη
-                pivot_with_total_col = list(pivot.columns) + ['Σύνολο Ημερών']
+                pivot_with_total_col = ['Έτος', 'Διάστημα'] + package_cols + ['Σύνολο Ημερών']
                 final_blocks.append(pd.DataFrame([grand_row], columns=pivot_with_total_col))
 
                 # Κατά έτος μπλοκ και σύνολο
                 for yr in sorted(pivot['Έτος'].unique()):
-                    yr_rows = pivot[pivot['Έτος'] == yr].copy()
-                    # Προσθήκη στήλης Σύνολο Ημερών στις κανονικές γραμμές
+                    yr_rows = pivot[pivot['Έτος'] == yr][['Έτος', 'Διάστημα'] + package_cols].copy()
+                    # Προσθήκη στήλης Σύνολο Ημερών στις κανονικές γραμμές (μόνο επιλεγμένα πακέτα)
                     yr_rows['Σύνολο Ημερών'] = yr_rows[package_cols].sum(axis=1)
                     final_blocks.append(yr_rows)
                     totals = {col: int(round(yr_rows[col].sum())) for col in package_cols}
                     total_row = {'Έτος': '', 'Διάστημα': f"Σύνολο {int(yr)}"}
                     total_row.update(totals)
-                    # Προσθήκη συνόλου ημερών για τη γραμμή ετήσιου συνόλου
+                    # Προσθήκη συνόλου ημερών για τη γραμμή ετήσιου συνόλου (μόνο επιλεγμένα πακέτα)
                     total_row['Σύνολο Ημερών'] = sum(totals.values())
                     final_blocks.append(pd.DataFrame([total_row], columns=pivot_with_total_col))
 
@@ -1934,9 +1955,10 @@ def show_results_page(df, filename):
                 if 'Σύνολο Ημερών' not in display_days.columns:
                     display_days['Σύνολο Ημερών'] = display_days[package_cols].sum(axis=1)
 
-                # Μετατροπή τιμών σε ακέραιους για καθαρή εμφάνιση
+                # Μετατροπή τιμών σε ακέραιους για καθαρή εμφάνιση (μόνο επιλεγμένες στήλες)
                 for col in package_cols + ['Σύνολο Ημερών']:
-                    display_days[col] = display_days[col].fillna(0).round(0).astype(int)
+                    if col in display_days.columns:
+                        display_days[col] = display_days[col].fillna(0).round(0).astype(int)
 
                 # Καλύτερη εμφάνιση επαναλαμβανόμενου έτους
                 display_days['Έτος_Display'] = display_days['Έτος'].astype(str)
@@ -1978,13 +2000,21 @@ def show_results_page(df, filename):
                         styles[0] = 'font-weight: bold;'
                         return styles
                     
+                    # CSS styles για αριστερή στοίχιση όλων των στηλών
+                    table_styles = [
+                        {'selector': 'th', 'props': [('text-align', 'left')]},
+                        {'selector': 'td', 'props': [('text-align', 'left')]},
+                    ]
+                    
                     styled_days = (
                         display_final_days
                         .style
                         .apply(_highlight_totals_days, axis=1)
                         .apply(_bold_year_column, axis=1)
                         .format(formatter)
+                        .set_table_styles(table_styles)
                     )
+                    
                     st.dataframe(styled_days, use_container_width=True, height=600)
                 except Exception:
                     # Fallback χωρίς ειδική μορφοποίηση
