@@ -39,40 +39,18 @@ st.set_page_config(
 
 # Lookup table για την περιγραφή αποδοχών
 APODOXES_DESCRIPTIONS = {
-    '01': 'Τακτικές αποδοχές',
-    '02': 'Αποδοχές υπαλλήλων ΝΠΔΔ κλπ.',
-    '03': 'Δώρο Χριστουγέννων',
-    '04': 'Δώρο Πάσχα',
-    '05': 'Επίδομα αδείας',
-    '06': 'Επίδομα ισολογισμού',
-    '07': 'Αποδοχές αδειών εποχικά απασχ/νων Ξενοδ/λων',
-    '08': 'Αποδοχές ασθενείας',
-    '09': 'Αναδρομικές αποδοχές',
-    '10': 'Bonus',
-    '11': 'Υπερωρίες',
-    '12': 'Αμοιβή με το κομμάτι (Φασόν)',
-    '13': 'Τεκμαρτές Αποδοχές',
-    '14': 'Λοιπές Αποδοχές',
-    '15': 'Τεκμαρτές Αποδοχές για κλάδο ΕΤΕΑΜ',
-    '16': 'Αμοιβές κατ\' αποκοπήν/ΕΦΑΠΑΞ',
-    '17': 'Εισφορές χωρίς αποδοχές',
-    '18': 'Κανονικές αποδοχές πληρ/των Μεσογ τουρ πλοίων',
-    '19': 'Αποδοχές αδείας πληρωμάτων Μεσογ τουρ πλοίων',
-    '20': 'Αποδοχές Ασφαλιζομένων στο ΕΤΕΑΜ',
-    '21': 'Τακτικές αποδοχές',
-    '22': 'Δώρο Χριστουγέννων',
-    '23': 'Δώρο Πάσχα',
-    '24': 'Επίδομα Αδείας',
-    '25': 'Επίδομα Ισολογισμού',
-    '26': 'Αποδοχές Ασθενείας',
-    '27': 'Αναδρομικές αποδοχές',
-    '28': 'Bonus',
-    '29': 'Υπερωρίες',
-    '30': 'Λοιπές αποδοχές',
-    '31': 'Εισφορές χωρίς αποδοχές',
-    '32': 'Τακτικές Αποδοχές – Δ.Π.Υ.',
-    '33': 'Δώρο Πάσχα – Δ.Π.Υ.',
-    '34': 'Επίδομα Αδείας – Δ.Π.Υ.',
+    '01': 'Τακτικές αποδοχές', '02': 'Αποδοχές υπαλλήλων ΝΠΔΔ κλπ.', '03': 'Δώρο Χριστουγέννων',
+    '04': 'Δώρο Πάσχα', '05': 'Επίδομα αδείας', '06': 'Επίδομα ισολογισμού',
+    '07': 'Αποδοχές αδειών εποχικά απασχ/νων Ξενοδ/λων', '08': 'Αποδοχές ασθενείας',
+    '09': 'Αναδρομικές αποδοχές', '10': 'Bonus', '11': 'Υπερωρίες',
+    '12': 'Αμοιβή με το κομμάτι (Φασόν)', '13': 'Τεκμαρτές Αποδοχές', '14': 'Λοιπές Αποδοχές',
+    '15': 'Τεκμαρτές Αποδοχές για κλάδο ΕΤΕΑΜ', '16': 'Αμοιβές κατ\' αποκοπήν/ΕΦΑΠΑΞ',
+    '17': 'Εισφορές χωρίς αποδοχές', '18': 'Κανονικές αποδοχές πληρ/των Μεσογ τουρ πλοίων',
+    '19': 'Αποδοχές αδείας πληρωμάτων Μεσογ τουρ πλοίων', '20': 'Αποδοχές Ασφαλιζομένων στο ΕΤΕΑΜ',
+    '21': 'Τακτικές αποδοχές', '22': 'Δώρο Χριστουγέννων', '23': 'Δώρο Πάσχα', '24': 'Επίδομα Αδείας',
+    '25': 'Επίδομα Ισολογισμού', '26': 'Αποδοχές Ασθενείας', '27': 'Αναδρομικές αποδοχές',
+    '28': 'Bonus', '29': 'Υπερωρίες', '30': 'Λοιπές αποδοχές', '31': 'Εισφορές χωρίς αποδοχές',
+    '32': 'Τακτικές Αποδοχές – Δ.Π.Υ.', '33': 'Δώρο Πάσχα – Δ.Π.Υ.', '34': 'Επίδομα Αδείας – Δ.Π.Υ.',
     '35': 'Δώρο Χριστουγέννων – Δ.Π.Υ.',
     '36': 'Τακτικές αποδοχές για υπολογισμό εισφορών υπέρ Ειδικού Λογαριασμού Ξενοδοχοϋπαλλήλων',
     '37': 'Δώρο Πάσχα για υπολογισμό εισφορών υπέρ Ειδικού Λογαριασμού Ξενοδοχοϋπαλλήλων',
@@ -94,17 +72,9 @@ APODOXES_DESCRIPTIONS = {
     '53': 'Δώρο Πάσχα για υπολογισμό εισφορών ασθένειας σε είδος και σε χρήμα τ. ΤΑΞΥ',
     '54': 'Δώρο Χριστουγέννων για υπολογισμό εισφορών ασθένειας σε είδος και σε χρήμα τ. ΤΑΞΥ',
     '55': 'Επίδομα Αδείας για υπολογισμό εισφορών ασθένειας σε είδος και σε χρήμα τ. ΤΑΞΥ',
-    '56': 'Τακτικές αποδοχές',
-    '57': 'Δώρο Χριστουγέννων',
-    '58': 'Δώρο Πάσχα',
-    '59': 'Επίδομα Αδείας',
-    '60': 'Επίδομα Ισολογισμού',
-    '61': 'Αποδοχές Ασθενείας',
-    '62': 'Αναδρομικές αποδοχές',
-    '63': 'Bonus',
-    '64': 'Υπερωρίες',
-    '65': 'Λοιπές αποδοχές',
-    '66': 'Εισφορές χωρίς αποδοχές',
+    '56': 'Τακτικές αποδοχές', '57': 'Δώρο Χριστουγέννων', '58': 'Δώρο Πάσχα', '59': 'Επίδομα Αδείας',
+    '60': 'Επίδομα Ισολογισμού', '61': 'Αποδοχές Ασθενείας', '62': 'Αναδρομικές αποδοχές',
+    '63': 'Bonus', '64': 'Υπερωρίες', '65': 'Λοιπές αποδοχές', '66': 'Εισφορές χωρίς αποδοχές',
     '67': 'Τακτικές αποδοχές για υπολογισμό εισφορών υπέρ ΙΚΑ – ΕΤΕΑΜ',
     '68': 'Δώρο Χριστουγέννων για υπολογισμό εισφορών υπέρ ΙΚΑ – ΕΤΕΑΜ',
     '69': 'Δώρο Πάσχα για υπολογισμό εισφορών υπέρ ΙΚΑ – ΕΤΕΑΜ',
@@ -2258,177 +2228,128 @@ def show_results_page(df, filename):
         if 'Σελίδα' in apd_df.columns:
             apd_df = apd_df.drop('Σελίδα', axis=1)
         
-        # Φιλτράρουμε μόνο τις γραμμές που ξεκινάνε με ημερομηνία "Από"
-        if 'Από' in apd_df.columns:
-            # Κρατάμε μόνο τις γραμμές που έχουν έγκυρη ημερομηνία στο "Από"
-            apd_df = apd_df.copy()
-            apd_df['Από_DateTime'] = pd.to_datetime(apd_df['Από'], format='%d/%m/%Y', errors='coerce')
-            
-            # Φιλτράρουμε μόνο τις γραμμές με έγκυρη ημερομηνία
-            apd_df = apd_df.dropna(subset=['Από_DateTime'])
-            
-            # Χρονολογική ταξινόμηση
-            apd_df = apd_df.sort_values('Από_DateTime', na_position='last')
-            apd_df = apd_df.drop('Από_DateTime', axis=1)  # Αφαιρούμε τη βοηθητική στήλη
-        
-        # Σύστημα Φίλτρων
-        
-        # Κουμπί για άνοιγμα popup φίλτρων
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            if st.button("Άνοιγμα Φίλτρων", type="secondary", use_container_width=True, key="apd_filter_button"):
-                st.session_state['show_filters_apd'] = not st.session_state.get('show_filters_apd', False)
-        
-        # Popup φίλτρων
-        if st.session_state.get('show_filters_apd', False):
-            with st.expander("Φίλτρα Δεδομένων", expanded=True):
-                # Όλα τα φίλτρα σε μία γραμμή
-                col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([1.1, 1.1, 1.4, 1.1, 1.0, 1.0, 0.6, 0.6])
-
-                with col1:
-                    # Φίλτρο Ταμείου
-                    if 'Ταμείο' in apd_df.columns:
-                        taimeia_options = ['Όλα'] + sorted(apd_df['Ταμείο'].dropna().unique().tolist())
-                        selected_taimeia = st.multiselect(
-                            "Ταμείο:",
-                            options=taimeia_options,
-                            default=['Όλα'],
-                            key="apd_filter_taimeio"
-                        )
-                        if 'Όλα' not in selected_taimeia:
-                            apd_df = apd_df[apd_df['Ταμείο'].isin(selected_taimeia)]
-
-                with col2:
-                    # Φίλτρο Τύπου Ασφάλισης
-                    if 'Τύπος Ασφάλισης' in apd_df.columns:
-                        typos_options = ['Όλα'] + sorted(apd_df['Τύπος Ασφάλισης'].dropna().unique().tolist())
-                        selected_typos = st.multiselect(
-                            "Τύπος Ασφάλισης:",
-                            options=typos_options,
-                            default=['Όλα'],
-                            key="apd_filter_typos"
-                        )
-                        if 'Όλα' not in selected_typos:
-                            apd_df = apd_df[apd_df['Τύπος Ασφάλισης'].isin(selected_typos)]
-
-                with col3:
-                    # Φίλτρο Κλάδου/Πακέτου με περιγραφές
-                    if 'Κλάδος/Πακέτο Κάλυψης' in apd_df.columns:
-                        # Δημιουργούμε options με περιγραφές
-                        klados_codes = sorted(apd_df['Κλάδος/Πακέτο Κάλυψης'].dropna().unique().tolist())
-                        klados_options_with_desc = ['Όλα']
-                        klados_code_map = {}  # Mapping από "Κωδικός - Περιγραφή" -> Κωδικός
-                        
-                        for code in klados_codes:
-                            if code in description_map and description_map[code]:
-                                option_label = f"{code} - {description_map[code]}"
-                                klados_options_with_desc.append(option_label)
-                                klados_code_map[option_label] = code
-                            else:
-                                klados_options_with_desc.append(code)
-                                klados_code_map[code] = code
-                        
-                        selected_klados = st.multiselect(
-                            "Κλάδος/Πακέτο:",
-                            options=klados_options_with_desc,
-                            default=['Όλα'],
-                            key="apd_filter_klados"
-                        )
-                        
-                        if 'Όλα' not in selected_klados:
-                            # Μετατρέπουμε τις επιλογές σε κωδικούς
-                            selected_codes = [klados_code_map.get(opt, opt) for opt in selected_klados]
-                            apd_df = apd_df[apd_df['Κλάδος/Πακέτο Κάλυψης'].isin(selected_codes)]
-
-                with col4:
-                    # Φίλτρο Τύπου Αποδοχών
-                    earnings_col = None
-                    if 'Τύπος Αποδοχών' in apd_df.columns:
-                        earnings_col = 'Τύπος Αποδοχών'
-                    else:
-                        for c in apd_df.columns:
-                            name = str(c).strip().lower()
-                            if ('αποδοχ' in name) and ('τύπος' in name or 'τυπος' in name):
-                                earnings_col = c
-                                break
-                    if earnings_col is not None:
-                        options_raw = apd_df[earnings_col].dropna().astype(str).unique().tolist()
-                        typos_apodochon_options = ['Όλα'] + sorted(options_raw)
-                        selected_typos_apodochon = st.multiselect(
-                            "Τύπος Αποδοχών:",
-                            options=typos_apodochon_options,
-                            default=['Όλα'],
-                            key="apd_filter_apodochon"
-                        )
-                        if 'Όλα' not in selected_typos_apodochon:
-                            apd_df = apd_df[apd_df[earnings_col].isin(selected_typos_apodochon)]
-
-                with col5:
-                    # Ημερομηνία Από
-                    if 'Από' in apd_df.columns:
-                        from_date_str = st.text_input(
-                            "Από (dd/mm/yyyy):",
-                            value="",
-                            placeholder="01/01/1985",
-                            key="apd_filter_from_date"
-                        )
-
-                with col6:
-                    # Ημερομηνία Έως
-                    if 'Από' in apd_df.columns:
-                        to_date_str = st.text_input(
-                            "Έως (dd/mm/yyyy):",
-                            value="",
-                            placeholder="31/12/1990",
-                            key="apd_filter_to_date"
-                        )
-
-                with col7:
-                    # Κουμπί επαναφοράς
-                    reset_label = "↻"
-                    if st.button(reset_label, help="Επαναφορά", use_container_width=True, key="apd_filter_reset"):
-                        st.session_state['show_filters_apd'] = False
-                        st.rerun()
-
-                with col8:
-                    # Κουμπί κλεισίματος φίλτρων
-                    if st.button("❌", help="Κλείσιμο", use_container_width=True, key="apd_filter_close"):
-                        st.session_state['show_filters_apd'] = False
-                        st.rerun()
-                
-                # Εφαρμογή φίλτρων ημερομηνιών
-                if 'Από' in apd_df.columns and (from_date_str or to_date_str):
-                    apd_df['Από_DateTime'] = pd.to_datetime(apd_df['Από'], format='%d/%m/%Y', errors='coerce')
-                    
-                    if from_date_str:
-                        try:
-                            from_date_pd = pd.to_datetime(from_date_str, format='%d/%m/%Y')
-                            apd_df = apd_df[apd_df['Από_DateTime'] >= from_date_pd]
-                        except:
-                            st.error("Μη έγκυρη μορφή ημερομηνίας 'Από'")
-                    
-                    if to_date_str:
-                        try:
-                            to_date_pd = pd.to_datetime(to_date_str, format='%d/%m/%Y')
-                            apd_df = apd_df[apd_df['Από_DateTime'] <= to_date_pd]
-                        except:
-                            st.error("Μη έγκυρη μορφή ημερομηνίας 'Έως'")
-                    
-                    apd_df = apd_df.drop('Από_DateTime', axis=1)
-        
-        # Εμφάνιση αποτελεσμάτων φίλτρων (σε πραγματικό χρόνο)
-        if st.session_state.get('show_filters_apd', False):
-            st.info(f"Εμφανίζονται {len(apd_df)} γραμμές")
-        
         # Εμφάνιση του καθεστώτος ασφάλισης
         st.info(f"Καθεστώς Ασφάλισης: **{insurance_status_message}**")
 
-        # Δημιουργούμε αντίγραφο για εμφάνιση με μορφοποίηση
-        display_apd_df = apd_df.copy()
+        # --- Filters Section ---
+        with st.expander("Φίλτρα Δεδομένων", expanded=True):
+            # Γραμμή 1: Κύρια φίλτρα
+            col1, col2, col3, col4 = st.columns([1.5, 1.5, 2, 1.5])
+
+            with col1:
+                # Φίλτρο Ταμείου
+                if 'Ταμείο' in apd_df.columns:
+                    taimeia_options = ['Όλα'] + sorted(apd_df['Ταμείο'].dropna().unique().tolist())
+                    selected_taimeia = st.multiselect(
+                        "Ταμείο:",
+                        options=taimeia_options,
+                        default=['Όλα'],
+                        key="apd_filter_taimeio"
+                    )
+                    if 'Όλα' not in selected_taimeia:
+                        apd_df = apd_df[apd_df['Ταμείο'].isin(selected_taimeia)]
+
+            with col2:
+                # Φίλτρο Τύπου Ασφάλισης
+                if 'Τύπος Ασφάλισης' in apd_df.columns:
+                    typos_options = ['Όλα'] + sorted(apd_df['Τύπος Ασφάλισης'].dropna().unique().tolist())
+                    selected_typos = st.multiselect(
+                        "Τύπος Ασφάλισης:",
+                        options=typos_options,
+                        default=['Όλα'],
+                        key="apd_filter_typos"
+                    )
+                    if 'Όλα' not in selected_typos:
+                        apd_df = apd_df[apd_df['Τύπος Ασφάλισης'].isin(selected_typos)]
+
+            with col3:
+                # Φίλτρο Κλάδου/Πακέτου με περιγραφές
+                if 'Κλάδος/Πακέτο Κάλυψης' in apd_df.columns:
+                    klados_codes = sorted(apd_df['Κλάδος/Πακέτο Κάλυψης'].dropna().unique().tolist())
+                    klados_options_with_desc = ['Όλα']
+                    klados_code_map = {}
+                    for code in klados_codes:
+                        if code in description_map and description_map[code]:
+                            option_label = f"{code} - {description_map[code]}"
+                            klados_options_with_desc.append(option_label)
+                            klados_code_map[option_label] = code
+                        else:
+                            klados_options_with_desc.append(code)
+                            klados_code_map[code] = code
+                    selected_klados = st.multiselect(
+                        "Κλάδος/Πακέτο:",
+                        options=klados_options_with_desc,
+                        default=['Όλα'],
+                        key="apd_filter_klados"
+                    )
+                    if 'Όλα' not in selected_klados:
+                        selected_codes = [klados_code_map.get(opt, opt) for opt in selected_klados]
+                        apd_df = apd_df[apd_df['Κλάδος/Πακέτο Κάλυψης'].isin(selected_codes)]
+
+            with col4:
+                # Φίλτρο Τύπου Αποδοχών
+                earnings_col = next((c for c in apd_df.columns if 'Τύπος Αποδοχών' in c), None)
+                if earnings_col:
+                    options_raw = apd_df[earnings_col].dropna().astype(str).unique().tolist()
+                    typos_apodochon_options = ['Όλα'] + sorted(options_raw)
+                    selected_typos_apodochon = st.multiselect(
+                        "Τύπος Αποδοχών:",
+                        options=typos_apodochon_options,
+                        default=['Όλα'],
+                        key="apd_filter_apodochon"
+                    )
+                    if 'Όλα' not in selected_typos_apodochon:
+                        apd_df = apd_df[apd_df[earnings_col].isin(selected_typos_apodochon)]
+
+            # Γραμμή 2: Φίλτρα ημερομηνιών και ποσοστού
+            col5, col6, col7, col8 = st.columns([1.5, 1.5, 1.5, 1])
+            with col5:
+                from_date_str = st.text_input("Από (dd/mm/yyyy):", value="", placeholder="01/01/1985", key="apd_filter_from_date")
+            with col6:
+                to_date_str = st.text_input("Έως (dd/mm/yyyy):", value="", placeholder="31/12/1990", key="apd_filter_to_date")
+            with col7:
+                retention_filter = st.number_input("Επισήμανση % κράτησης <", min_value=0.0, max_value=100.0, value=30.0, step=0.1, format="%.1f")
+            with col8:
+                if st.button("↻ Επαναφορά", help="Επαναφορά όλων των φίλτρων", use_container_width=True, key="apd_filter_reset"):
+                    # Reset all filter session states
+                    st.session_state.apd_filter_taimeio = ['Όλα']
+                    st.session_state.apd_filter_typos = ['Όλα']
+                    st.session_state.apd_filter_klados = ['Όλα']
+                    st.session_state.apd_filter_apodochon = ['Όλα']
+                    st.session_state.apd_filter_from_date = ""
+                    st.session_state.apd_filter_to_date = ""
+                    st.rerun()
+
+            # Εφαρμογή φίλτρων ημερομηνιών
+            if 'Από' in apd_df.columns and (from_date_str or to_date_str):
+                apd_df['Από_DateTime'] = pd.to_datetime(apd_df['Από'], format='%d/%m/%Y', errors='coerce')
+                
+                if from_date_str:
+                    try:
+                        from_date_pd = pd.to_datetime(from_date_str, format='%d/%m/%Y')
+                        apd_df = apd_df[apd_df['Από_DateTime'] >= from_date_pd]
+                    except:
+                        st.error("Μη έγκυρη μορφή ημερομηνίας 'Από'")
+                
+                if to_date_str:
+                    try:
+                        to_date_pd = pd.to_datetime(to_date_str, format='%d/%m/%Y')
+                        apd_df = apd_df[apd_df['Από_DateTime'] <= to_date_pd]
+                    except:
+                        st.error("Μη έγκυρη μορφή ημερομηνίας 'Έως'")
+                
+                apd_df = apd_df.drop('Από_DateTime', axis=1)
+
+        # Εμφάνιση αποτελεσμάτων φίλτρων (σε πραγματικό χρόνο)
+        st.info(f"Εμφανίζονται {len(apd_df)} γραμμές")
         
+        # --- Data Display and Processing ---
+        
+        # Δημιουργούμε αντίγραφο για εμφάνιση με μορφοποίηση και styling
+        display_apd_df = apd_df.copy()
+
         # Προσθήκη περιγραφής κλάδου/πακέτου
         if 'Κλάδος/Πακέτο Κάλυψης' in display_apd_df.columns and isinstance(description_map, dict) and len(description_map) > 0:
-            # Χρησιμοποιούμε apply για να αποφύγουμε προβλήματα με το map
             display_apd_df['Περιγραφή Κλάδου'] = display_apd_df['Κλάδος/Πακέτο Κάλυψης'].apply(
                 lambda x: description_map.get(str(x).strip(), '') if pd.notna(x) else ''
             )
@@ -2498,12 +2419,49 @@ def show_results_page(df, filename):
                     cols.insert(plaf_idx + 1, 'Συντ. Αποδοχές')
                     display_apd_df = display_apd_df[cols]
 
+            # Νέα στήλη: % κράτησης
+            if 'Συνολικές εισφορές' in display_apd_df.columns and 'Συντ. Αποδοχές' in display_apd_df.columns:
+                def calculate_retention_percentage(row):
+                    total_contributions = clean_numeric_value(row.get('Συνολικές εισφορές', 0), exclude_drx=True)
+                    adjusted_earnings = row.get('Συντ. Αποδοχές', 0)
+                    if adjusted_earnings is None or adjusted_earnings == 0:
+                        return 0.0
+                    return total_contributions / adjusted_earnings
+
+                display_apd_df['% κράτησης'] = display_apd_df.apply(calculate_retention_percentage, axis=1)
+                
+                # Τοποθέτηση δίπλα στις Συνολικές εισφορές
+                cols = list(display_apd_df.columns)
+                if 'Συνολικές εισφορές' in cols and '% κράτησης' in cols:
+                    contributions_idx = cols.index('Συνολικές εισφορές')
+                    cols.remove('% κράτησης')
+                    cols.insert(contributions_idx + 1, '% κράτησης')
+                    display_apd_df = display_apd_df[cols]
+
         # Εφαρμόζουμε μορφοποίηση νομισμάτων μόνο για εμφάνιση
         currency_columns = ['Μικτές αποδοχές', 'Συνολικές εισφορές', 'Εισφ. πλαφόν', 'Συντ. Αποδοχές']
         for col in currency_columns:
             if col in display_apd_df.columns:
                 display_apd_df[col] = display_apd_df[col].apply(format_currency)
         
+        # Μορφοποίηση ποσοστού
+        if '% κράτησης' in display_apd_df.columns:
+            display_apd_df['% κράτησης'] = display_apd_df['% κράτησης'].apply(lambda x: f"{x:.1%}".replace('.', ',') if pd.notna(x) and x != 0 else "0,0%")
+
+        # Function for conditional formatting
+        def highlight_low_retention(row):
+            retention_str = row.get('% κράτησης', '0,0%').replace('%', '').replace(',', '.')
+            try:
+                retention_val = float(retention_str)
+                if retention_val < retention_filter:
+                    return ['background-color: #fff8e1'] * len(row)
+            except (ValueError, TypeError):
+                pass
+            return [''] * len(row)
+
+        # Apply styling
+        styled_df = display_apd_df.style.apply(highlight_low_retention, axis=1)
+
         # Εφαρμόζουμε ελληνική μορφοποίηση για αριθμητικές στήλες
         numeric_columns = ['Ημερολογιακές ημέρες', 'Μήνες', 'Έτη']
         for col in numeric_columns:
@@ -2514,7 +2472,7 @@ def show_results_page(df, filename):
         
         st.markdown("### Ανάλυση ΑΠΔ (Με χρονολογική σειρά)")
         st.dataframe(
-            display_apd_df,
+            styled_df,
             use_container_width=True,
             height=600,
             hide_index=True
