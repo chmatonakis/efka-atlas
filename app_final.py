@@ -2231,6 +2231,8 @@ def show_results_page(df, filename):
         # Εμφάνιση του καθεστώτος ασφάλισης
         st.info(f"Καθεστώς Ασφάλισης: **{insurance_status_message}**")
 
+        retention_filter_mode = st.session_state.get('apd_filter_retention_mode', 'Όλα')
+
         # --- Filters Section ---
         with st.expander("Φίλτρα Δεδομένων", expanded=True):
             # Γραμμή 1: Κύρια φίλτρα
@@ -2302,7 +2304,7 @@ def show_results_page(df, filename):
                         apd_df = apd_df[apd_df[earnings_col].isin(selected_typos_apodochon)]
 
             # Γραμμή 2: Φίλτρα ημερομηνιών και ποσοστού
-            col5, col6, col7, col8 = st.columns([1.5, 1.5, 1.5, 1])
+            col5, col6, col7, col8, col9 = st.columns([1.4, 1.4, 1.2, 1.6, 1])
             with col5:
                 from_date_str = st.text_input("Από (dd/mm/yyyy):", value="", placeholder="01/01/1985", key="apd_filter_from_date")
             with col6:
@@ -2310,6 +2312,13 @@ def show_results_page(df, filename):
             with col7:
                 retention_filter = st.number_input("Επισήμανση % κράτησης <", min_value=0.0, max_value=100.0, value=30.0, step=0.1, format="%.1f")
             with col8:
+                retention_filter_mode = st.selectbox(
+                    "Φίλτρο % κράτησης",
+                    options=["Όλα", "Μεγαλύτερο ή ίσο", "Μικρότερο από"],
+                    index=0,
+                    key="apd_filter_retention_mode"
+                )
+            with col9:
                 if st.button("↻ Επαναφορά", help="Επαναφορά όλων των φίλτρων", use_container_width=True, key="apd_filter_reset"):
                     # Reset all filter session states
                     st.session_state.apd_filter_taimeio = ['Όλα']
@@ -2318,6 +2327,7 @@ def show_results_page(df, filename):
                     st.session_state.apd_filter_apodochon = ['Όλα']
                     st.session_state.apd_filter_from_date = ""
                     st.session_state.apd_filter_to_date = ""
+                    st.session_state.apd_filter_retention_mode = "Όλα"
                     st.rerun()
 
             # Εφαρμογή φίλτρων ημερομηνιών
@@ -2341,7 +2351,7 @@ def show_results_page(df, filename):
                 apd_df = apd_df.drop('Από_DateTime', axis=1)
 
         # Εμφάνιση αποτελεσμάτων φίλτρων (σε πραγματικό χρόνο)
-        st.info(f"Εμφανίζονται {len(apd_df)} γραμμές")
+        row_info_placeholder = st.empty()
         
         # --- Data Display and Processing ---
         
@@ -2437,6 +2447,21 @@ def show_results_page(df, filename):
                     cols.remove('% κράτησης')
                     cols.insert(contributions_idx + 1, '% κράτησης')
                     display_apd_df = display_apd_df[cols]
+
+        # Εφαρμογή φίλτρου % κράτησης βάσει επιλογής
+        if '% κράτησης' in display_apd_df.columns:
+            retention_threshold_decimal = (retention_filter or 0.0) / 100.0
+            retention_numeric = pd.to_numeric(display_apd_df['% κράτησης'], errors='coerce')
+
+            if retention_filter_mode == "Μεγαλύτερο ή ίσο":
+                mask = retention_numeric >= retention_threshold_decimal
+                display_apd_df = display_apd_df[mask].copy()
+            elif retention_filter_mode == "Μικρότερο από":
+                mask = retention_numeric < retention_threshold_decimal
+                display_apd_df = display_apd_df[mask].copy()
+
+        # Ενημέρωση πληροφοριακού μηνύματος για το πλήθος γραμμών
+        row_info_placeholder.info(f"Εμφανίζονται {len(display_apd_df)} γραμμές")
 
         # Εφαρμόζουμε μορφοποίηση νομισμάτων μόνο για εμφάνιση
         currency_columns = ['Μικτές αποδοχές', 'Συνολικές εισφορές', 'Εισφ. πλαφόν', 'Συντ. Αποδοχές']
