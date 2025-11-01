@@ -2460,8 +2460,83 @@ def show_results_page(df, filename):
                 mask = retention_numeric < retention_threshold_decimal
                 display_apd_df = display_apd_df[mask].copy()
 
+        data_rows_count = len(display_apd_df)
+
+        # Προσθήκη γραμμών συνόλων ανά έτος (από 2002 και μετά)
+        if data_rows_count > 0 and 'Από' in display_apd_df.columns:
+            working_df = display_apd_df.copy()
+            working_df['_Από_dt'] = pd.to_datetime(working_df['Από'], format='%d/%m/%Y', errors='coerce')
+            working_df['_Έτος'] = working_df['_Από_dt'].dt.year
+            working_df = working_df.sort_values('_Από_dt', na_position='last')
+
+            all_columns = [col for col in working_df.columns if col not in ['_Από_dt', '_Έτος']]
+            final_frames = []
+
+            def _sum_column(df_slice, column, exclude_drx=False):
+                if column not in df_slice.columns:
+                    return None
+                total = 0.0
+                has_value = False
+                for value in df_slice[column]:
+                    if isinstance(value, (int, float)) and not pd.isna(value):
+                        numeric_val = float(value)
+                    else:
+                        numeric_val = clean_numeric_value(value, exclude_drx=exclude_drx)
+                    if numeric_val is None:
+                        continue
+                    total += numeric_val
+                    has_value = True
+                return total if has_value else None
+
+            valid_years = sorted(working_df['_Έτος'].dropna().unique())
+
+            for year in valid_years:
+                year_slice = working_df[working_df['_Έτος'] == year]
+                final_frames.append(year_slice[all_columns])
+
+                year_int = int(year)
+                if year_int >= 2002:
+                    totals_row = {col: '' for col in all_columns}
+                    if 'Από' in totals_row:
+                        totals_row['Από'] = ''
+                    if 'Έως' in totals_row:
+                        totals_row['Έως'] = f"Σύνολο {year_int}"
+                    elif 'Από' in totals_row:
+                        totals_row['Από'] = f"Σύνολο {year_int}"
+
+                    years_sum = _sum_column(year_slice, 'Έτη')
+                    months_sum = _sum_column(year_slice, 'Μήνες')
+                    days_sum = _sum_column(year_slice, 'Ημέρες')
+                    gross_sum = _sum_column(year_slice, 'Μικτές αποδοχές', exclude_drx=True)
+                    adjusted_sum = _sum_column(year_slice, 'Συντ. Αποδοχές', exclude_drx=True)
+
+                    if years_sum is not None:
+                        totals_row['Έτη'] = years_sum
+                    if months_sum is not None:
+                        totals_row['Μήνες'] = months_sum
+                    if days_sum is not None:
+                        totals_row['Ημέρες'] = days_sum
+                    if gross_sum is not None:
+                        totals_row['Μικτές αποδοχές'] = gross_sum
+                    if adjusted_sum is not None:
+                        totals_row['Συντ. Αποδοχές'] = adjusted_sum
+
+                    if '% κράτησης' in totals_row:
+                        totals_row['% κράτησης'] = ''
+
+                    final_frames.append(pd.DataFrame([totals_row], columns=all_columns))
+
+            remainder = working_df[working_df['_Έτος'].isna()]
+            if not remainder.empty:
+                final_frames.append(remainder[all_columns])
+
+            if final_frames:
+                display_apd_df = pd.concat(final_frames, ignore_index=True)
+            else:
+                display_apd_df = working_df[all_columns].reset_index(drop=True)
+
         # Ενημέρωση πληροφοριακού μηνύματος για το πλήθος γραμμών
-        row_info_placeholder.info(f"Εμφανίζονται {len(display_apd_df)} γραμμές")
+        row_info_placeholder.info(f"Εμφανίζονται {data_rows_count} γραμμές")
 
         # Εφαρμόζουμε μορφοποίηση νομισμάτων μόνο για εμφάνιση
         currency_columns = ['Μικτές αποδοχές', 'Συνολικές εισφορές', 'Εισφ. πλαφόν', 'Συντ. Αποδοχές']
@@ -2471,10 +2546,31 @@ def show_results_page(df, filename):
         
         # Μορφοποίηση ποσοστού
         if '% κράτησης' in display_apd_df.columns:
-            display_apd_df['% κράτησης'] = display_apd_df['% κράτησης'].apply(lambda x: f"{x:.1%}".replace('.', ',') if pd.notna(x) and x != 0 else "0,0%")
+            def format_retention_value(val):
+                if isinstance(val, (int, float)) and not pd.isna(val):
+                    return f"{val:.1%}".replace('.', ',')
+                if pd.isna(val) or val is None:
+                    return ''
+                if isinstance(val, str):
+                    stripped = val.strip()
+                    if stripped == '':
+                        return ''
+                    try:
+                        num_val = float(stripped)
+                        return f"{num_val:.1%}".replace('.', ',')
+                    except ValueError:
+                        return stripped
+                return "0,0%"
+
+            display_apd_df['% κράτησης'] = display_apd_df['% κράτησης'].apply(format_retention_value)
 
         # Function for conditional formatting
         def highlight_low_retention(row):
+            for label_col in ['Έως', 'Από']:
+                label_value = row.get(label_col)
+                if isinstance(label_value, str) and label_value.startswith('Σύνολο'):
+                    return ['background-color: #e6f2ff; color: #000000; font-weight: 700;'] * len(row)
+
             retention_str = row.get('% κράτησης', '0,0%').replace('%', '').replace(',', '.')
             try:
                 retention_val = float(retention_str)
