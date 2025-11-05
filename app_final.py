@@ -369,6 +369,32 @@ st.markdown("""
         z-index: 1000 !important;
         position: relative !important;
     }
+    
+    /* Απόκρυψη μενού Streamlit (Fork, Settings, κτλ) */
+    [data-testid="stHeader"] button[kind="header"],
+    [data-testid="stHeader"] [data-testid="stDeployButton"],
+    [data-testid="stHeader"] button[title="Fork this app"],
+    [data-testid="stHeader"] button[title="Settings"],
+    [data-testid="stHeader"] button[title="Menu"],
+    [data-testid="stHeader"] button[aria-label*="Settings"],
+    [data-testid="stHeader"] button[aria-label*="Menu"],
+    [data-testid="stHeader"] button[aria-label*="Fork"],
+    button[kind="header"],
+    .stDeployButton,
+    header[data-testid="stHeader"] button,
+    header[data-testid="stHeader"] [data-testid="stToolbar"],
+    header[data-testid="stHeader"] [data-testid="stHeaderViewButton"],
+    header[data-testid="stHeader"] [data-testid="stHeaderActionElements"],
+    header[data-testid="stHeader"] > div:last-child,
+    header[data-testid="stHeader"] > div:nth-child(2) {
+        display: none !important;
+        visibility: hidden !important;
+    }
+    
+    /* Απόκρυψη ολόκληρου του header αν είναι απαραίτητο */
+    /* [data-testid="stHeader"] {
+        display: none !important;
+    } */
 </style>
 """, unsafe_allow_html=True)
 
@@ -1664,6 +1690,9 @@ def show_results_page(df, filename):
                             del st.session_state[_k]
                     st.rerun()
 
+            # Διακόπτης εμφάνισης μόνο ετήσιων γραμμών συνόλου (default: πλήρης εικόνα)
+            show_yearly_totals_only = st.toggle("Μόνο ετήσιες γραμμές συνόλου", value=False, key="yearly_totals_only")
+
             # Εφαρμογή φίλτρων ημερομηνιών
             if from_y_str or to_y_str:
                 try:
@@ -1894,6 +1923,13 @@ def show_results_page(df, filename):
                 return styles
 
             try:
+                # Φίλτρο εμφάνισης μόνο γραμμών «Σύνολο <Έτος>» αν είναι ενεργός ο διακόπτης
+                if st.session_state.get('yearly_totals_only', False):
+                    try:
+                        display_final = display_final[display_final['Έως'].astype(str).str.startswith('Σύνολο')]
+                    except Exception:
+                        pass
+
                 styled = display_final.style.apply(_highlight_totals, axis=1).apply(_bold_year_column, axis=1)
                 st.dataframe(
                     styled,
@@ -1952,12 +1988,25 @@ def show_results_page(df, filename):
                     if 'Όλα' not in sel_tameia:
                         days_df = days_df[days_df['Ταμείο'].isin(sel_tameia)]
             with f2:
-                # Φίλτρο για πακέτα κάλυψης
+                # Φίλτρο για πακέτα κάλυψης (με περιγραφές από description_map)
+                selected_package_codes = []
                 if available_packages:
-                    package_opts = ['Όλα'] + available_packages
-                    sel_packages = st.multiselect('Πακέτα Κάλυψης:', package_opts, default=['Όλα'], key='insdays_filter_packages')
+                    package_opts_with_desc = ['Όλα']
+                    package_label_to_code = {}
+                    for code in available_packages:
+                        if code in description_map and description_map[code]:
+                            label = f"{code} - {description_map[code]}"
+                            package_opts_with_desc.append(label)
+                            package_label_to_code[label] = code
+                        else:
+                            package_opts_with_desc.append(code)
+                            package_label_to_code[code] = code
+                    sel_packages = st.multiselect('Πακέτα Κάλυψης:', package_opts_with_desc, default=['Όλα'], key='insdays_filter_packages')
+                    if 'Όλα' not in sel_packages:
+                        selected_package_codes = [package_label_to_code.get(opt, opt) for opt in sel_packages]
                 else:
                     sel_packages = ['Όλα']
+                    selected_package_codes = []
             with f3:
                 from_str = st.text_input('Από (dd/mm/yyyy):', value='', placeholder='01/01/1980', key='insdays_filter_from')
             with f4:
@@ -2049,9 +2098,9 @@ def show_results_page(df, filename):
                 # Εισαγωγή γραμμών «Σύνολο <Έτος>» και συνολικό σύνολο όλων των ετών στην αρχή
                 package_cols = [c for c in pivot.columns if c not in ['Έτος', 'Διάστημα']]
                 
-                # Φιλτράρισμα στηλών με βάση την επιλογή πακέτων
-                if 'Όλα' not in sel_packages and sel_packages:
-                    package_cols = [col for col in package_cols if col in sel_packages]
+                # Φιλτράρισμα στηλών με βάση την επιλογή πακέτων (με χρήση κωδικών)
+                if selected_package_codes:
+                    package_cols = [col for col in package_cols if col in selected_package_codes]
                 
                 final_blocks = []
 
@@ -2228,13 +2277,12 @@ def show_results_page(df, filename):
         if 'Σελίδα' in apd_df.columns:
             apd_df = apd_df.drop('Σελίδα', axis=1)
         
-        # Εμφάνιση του καθεστώτος ασφάλισης
-        st.info(f"Καθεστώς Ασφάλισης: **{insurance_status_message}**")
+        # Το καθεστώς ασφάλισης θα εμφανιστεί κάτω από τα φίλτρα
 
         retention_filter_mode = st.session_state.get('apd_filter_retention_mode', 'Όλα')
 
         # --- Filters Section ---
-        with st.expander("Φίλτρα Δεδομένων", expanded=True):
+        with st.container():
             # Γραμμή 1: Κύρια φίλτρα
             col1, col2, col3, col4 = st.columns([1.5, 1.5, 2, 1.5])
 
@@ -2306,7 +2354,7 @@ def show_results_page(df, filename):
             # Γραμμή 2: Φίλτρα ημερομηνιών και ποσοστού
             col5, col6, col7, col8, col9 = st.columns([1.4, 1.4, 1.2, 1.6, 1])
             with col5:
-                from_date_str = st.text_input("Από (dd/mm/yyyy):", value="", placeholder="01/01/1985", key="apd_filter_from_date")
+                from_date_str = st.text_input("Από (dd/mm/yyyy):", value="01/01/2002", placeholder="01/01/2002", key="apd_filter_from_date")
             with col6:
                 to_date_str = st.text_input("Έως (dd/mm/yyyy):", value="", placeholder="31/12/1990", key="apd_filter_to_date")
             with col7:
@@ -2350,8 +2398,14 @@ def show_results_page(df, filename):
                 
                 apd_df = apd_df.drop('Από_DateTime', axis=1)
 
-        # Εμφάνιση αποτελεσμάτων φίλτρων (σε πραγματικό χρόνο)
-        row_info_placeholder = st.empty()
+        # Γραμμή ενημέρωσης κάτω από τα φίλτρα: Καθεστώς | Πλήθος γραμμών | Διακόπτης
+        info_col, count_col, toggle_col = st.columns([2, 1, 1])
+        with info_col:
+            st.info(f"Καθεστώς Ασφάλισης: **{insurance_status_message}**")
+        with count_col:
+            row_info_placeholder = st.empty()
+        with toggle_col:
+            st.toggle("Μόνο ετήσιες γραμμές συνόλου", value=False, key="apd_year_totals_only")
         
         # --- Data Display and Processing ---
         
@@ -2535,6 +2589,19 @@ def show_results_page(df, filename):
             else:
                 display_apd_df = working_df[all_columns].reset_index(drop=True)
 
+        # Αν ο διακόπτης είναι ενεργός, κρατάμε μόνο τις γραμμές «Σύνολο <Έτος>»
+        if st.session_state.get('apd_year_totals_only', False):
+            try:
+                total_mask = False
+                if 'Έως' in display_apd_df.columns:
+                    total_mask = display_apd_df['Έως'].astype(str).str.startswith('Σύνολο')
+                if 'Από' in display_apd_df.columns:
+                    total_mask = total_mask | display_apd_df['Από'].astype(str).str.startswith('Σύνολο')
+                display_apd_df = display_apd_df[total_mask]
+                data_rows_count = len(display_apd_df)
+            except Exception:
+                pass
+
         # Ενημέρωση πληροφοριακού μηνύματος για το πλήθος γραμμών
         row_info_placeholder.info(f"Εμφανίζονται {data_rows_count} γραμμές")
 
@@ -2584,7 +2651,7 @@ def show_results_page(df, filename):
         styled_df = display_apd_df.style.apply(highlight_low_retention, axis=1)
 
         # Εφαρμόζουμε ελληνική μορφοποίηση για αριθμητικές στήλες
-        numeric_columns = ['Ημερολογιακές ημέρες', 'Μήνες', 'Έτη']
+        numeric_columns = ['Ημερολογιακές ημέρες', 'Ημέρες', 'Μήνες', 'Έτη']
         for col in numeric_columns:
             if col in display_apd_df.columns:
                 # Μήνες και Έτη με 1 δεκαδικό, ημέρες χωρίς δεκαδικά
