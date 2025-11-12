@@ -15,6 +15,8 @@ import tempfile
 import os
 import re
 from pathlib import Path
+import subprocess
+import datetime
 
 # Προσπάθεια εισαγωγής διαφορετικών PDF readers
 try:
@@ -28,6 +30,21 @@ try:
     PYMUPDF_AVAILABLE = True
 except ImportError:
     PYMUPDF_AVAILABLE = False
+
+def get_last_update_date():
+    """Παίρνει την ημερομηνία του τελευταίου git commit."""
+    try:
+        # The path to the repository directory
+        repo_path = Path(__file__).parent.resolve()
+        date_str = subprocess.check_output(
+            ['git', 'log', '-1', "--format=%cd", "--date=format:'%d/%m/%Y'"],
+            cwd=repo_path,
+            stderr=subprocess.STDOUT
+        ).decode('utf-8').strip().replace("'", "")
+        return f"Τελευταία ενημέρωση: {date_str}"
+    except Exception:
+        # Fallback to current date if git command fails
+        return ""
 
 # Ρύθμιση σελίδας
 st.set_page_config(
@@ -418,8 +435,8 @@ def render_print_button(button_key: str, title: str, dataframe: pd.DataFrame) ->
             headers_html = ''.join(f"<th>{h}</th>" for h in dataframe.columns)
             rows_html = []
             for _, row in dataframe.iterrows():
-                first_val = str(row.iloc[0]) if len(row) > 0 else ''
-                is_total = first_val.strip().startswith('Σύνολο')
+                # Ανθεκτικός έλεγχος για γραμμή συνόλου: ελέγχει όλες τις τιμές στη γραμμή
+                is_total = any(str(v).strip().startswith('Σύνολο') for v in row.values)
                 tr_class = ' class="total-row"' if is_total else ''
                 tds = ''.join(f"<td>{'' if pd.isna(v) else v}</td>" for v in row.values)
                 rows_html.append(f"<tr{tr_class}>{tds}</tr>")
@@ -443,7 +460,7 @@ function openPrintWindow() {{
     table.print-table thead th {{ background: #f2f4f7; border-bottom: 1px solid #d0d7de; padding: 8px; text-align: left; }}
     table.print-table tbody td {{ border-bottom: 1px solid #eee; padding: 6px 8px; }}
     table.print-table tbody td:first-child {{ font-weight: 700; }}
-    table.print-table tbody tr.total-row td {{ background: #e6f2ff; color: #000; font-weight: 700; }}
+    table.print-table tbody tr.total-row td {{ background: #e6f2ff !important; color: #000; font-weight: 700 !important; }}
   </style>
 </head>
 <body onload="window.print()">
@@ -2358,7 +2375,7 @@ def show_results_page(df, filename):
             with col6:
                 to_date_str = st.text_input("Έως (dd/mm/yyyy):", value="", placeholder="31/12/1990", key="apd_filter_to_date")
             with col7:
-                retention_filter = st.number_input("Επισήμανση % κράτησης <", min_value=0.0, max_value=100.0, value=30.0, step=0.1, format="%.1f")
+                retention_filter = st.number_input("Επισήμανση % κράτησης <", min_value=0.0, max_value=100.0, value=20.0, step=0.1, format="%.1f")
             with col8:
                 retention_filter_mode = st.selectbox(
                     "Φίλτρο % κράτησης",
@@ -2854,6 +2871,9 @@ def main():
             Ασφαλιστικό βιογραφικό ΑΤΛΑΣ
         </div>
     ''', unsafe_allow_html=True)
+
+    # Προσθήκη ημερομηνίας τελευταίας ενημέρωσης
+    st.markdown(f"<div style='text-align: center; color: grey; margin-top: -2.5rem; margin-bottom: 2rem;'>{get_last_update_date()}</div>", unsafe_allow_html=True)
     
     # Εμφάνιση ανεβάσματος αρχείου
     if not st.session_state['file_uploaded']:
