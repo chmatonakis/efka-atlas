@@ -1135,6 +1135,20 @@ def show_results_page(df, filename):
     Εμφανίζει τη σελίδα αποτελεσμάτων
     """
 
+    # Συλλογή προβολών για εξαγωγή "Ό,τι βλέπεις"
+    view_exports = {}
+
+    def register_view(label: str, data: pd.DataFrame):
+        """Αποθηκεύει το τρέχον DataFrame για χρήση στο κουμπί 'Ό,τι βλέπεις'."""
+        if data is None:
+            return
+        if isinstance(data, pd.DataFrame):
+            try:
+                view_exports[label] = data.copy()
+            except Exception:
+                # Σε σπάνιες περιπτώσεις (π.χ. styler με pandas>=2) fallback χωρίς copy
+                view_exports[label] = pd.DataFrame(data)
+
     # --- Step 1: Determine insurance type (Παλιός/Νέος) ---
     # This check is done once on the original unfiltered dataframe
     is_palios = False
@@ -1249,37 +1263,52 @@ def show_results_page(df, filename):
         <script>
           const translateUploader = () => {
             const root = document.querySelector('div[data-testid="stFileUploader"]');
-            if (!root) return;
-            // Κείμενα drag & drop
-            const hints = root.querySelectorAll('span, div');
-            hints.forEach((el) => {
-              if (el.textContent && el.textContent.includes('Drag and drop')) {
-                el.textContent = 'Σύρετε και αφήστε το αρχείο εδώ';
-              }
-              if (el.textContent && el.textContent.includes('Drag and drop files here')) {
-                el.textContent = 'Σύρετε και αφήστε τα αρχεία εδώ';
-              }
-              if (el.textContent && el.textContent.includes('Limit')) {
-                el.textContent = el.textContent
-                  .replace('Limit', 'Όριο')
-                  .replace('per file', 'ανά αρχείο');
-              }
-            });
-            // Κουμπί Browse
-            const btns = root.querySelectorAll('button, span, label');
-            btns.forEach((b) => {
-              if (b.textContent && b.textContent.trim() === 'Επιλογή αρχείου') {
-                b.textContent = 'Επιλογή αρχείου';
-              }
-              if (b.textContent && b.textContent.trim() === 'Browse file') {
-                b.textContent = 'Επιλογή αρχείου';
+            if (root) {
+              const hints = root.querySelectorAll('span, div');
+              hints.forEach((el) => {
+                if (el.textContent && el.textContent.includes('Drag and drop')) {
+                  el.textContent = 'Σύρετε και αφήστε το αρχείο εδώ';
+                }
+                if (el.textContent && el.textContent.includes('Drag and drop files here')) {
+                  el.textContent = 'Σύρετε και αφήστε τα αρχεία εδώ';
+                }
+                if (el.textContent && el.textContent.includes('Limit')) {
+                  el.textContent = el.textContent
+                    .replace('Limit', 'Όριο')
+                    .replace('per file', 'ανά αρχείο');
+                }
+              });
+              const btns = root.querySelectorAll('button, span, label');
+              btns.forEach((b) => {
+                if (b.textContent && b.textContent.trim() === 'Browse file') {
+                  b.textContent = 'Επιλογή αρχείου';
+                }
+              });
+            }
+          };
+
+          const hideManageButton = () => {
+            const candidates = document.querySelectorAll('button, a, div');
+            candidates.forEach((el) => {
+              if (el.textContent && el.textContent.trim().includes('Manage app')) {
+                el.style.display = 'none';
+                el.style.visibility = 'hidden';
+                if (el.parentElement) {
+                  el.parentElement.style.display = 'none';
+                }
               }
             });
           };
-          const obs = new MutationObserver(() => translateUploader());
+
+          const applyUiTweaks = () => {
+            translateUploader();
+            hideManageButton();
+          };
+
+          const obs = new MutationObserver(() => applyUiTweaks());
           obs.observe(document.body, { childList: true, subtree: true });
-          window.addEventListener('load', translateUploader);
-          setTimeout(translateUploader, 800);
+          window.addEventListener('load', applyUiTweaks);
+          setTimeout(applyUiTweaks, 800);
         </script>
         """,
         height=0
@@ -1479,6 +1508,7 @@ def show_results_page(df, filename):
             use_container_width=True,
             height=600
         )
+        register_view("Κύρια Δεδομένα", display_df)
         # Κουμπί εκτύπωσης για Κύρια Δεδομένα
         render_print_button("print_main", "Κύρια Δεδομένα e-EFKA", display_df)
     
@@ -1500,6 +1530,7 @@ def show_results_page(df, filename):
                     use_container_width=True,
                     height=600
                 )
+                register_view("Επιπλέον Πίνακες", extra_df)
                 render_print_button("print_extra", "Επιπλέον Πίνακες", extra_df)
             else:
                 st.info("Δεν βρέθηκαν δεδομένα στα επιπλέον πίνακες.")
@@ -1679,6 +1710,7 @@ def show_results_page(df, filename):
                 use_container_width=True,
                 height=600
             )
+            register_view("Συνοπτική Αναφορά", display_summary)
             render_print_button("print_summary", "Συνοπτική Αναφορά", display_summary)
         else:
             st.warning("Η στήλη 'Κλάδος/Πακέτο Κάλυψης' δεν βρέθηκε στα δεδομένα.")
@@ -2008,6 +2040,7 @@ def show_results_page(df, filename):
                     except Exception:
                         pass
 
+                register_view("Ετήσια Αναφορά", display_final)
                 styled = display_final.style.apply(_highlight_totals, axis=1).apply(_bold_year_column, axis=1)
                 st.dataframe(
                     styled,
@@ -2227,6 +2260,8 @@ def show_results_page(df, filename):
                 display_final_days = display_days[disp_cols].copy()
                 display_final_days.columns = ['Έτος', 'Διάστημα', 'Σύνολο Ημερών'] + package_cols
 
+                register_view("Ημέρες Ασφάλισης", display_final_days)
+
                 # Στυλ για γραμμές «Σύνολο <Έτος>»
                 def _highlight_totals_days(row):
                     value = str(row.get('Διάστημα', ''))
@@ -2328,6 +2363,7 @@ def show_results_page(df, filename):
                     use_container_width=True,
                     height=600
                 )
+                register_view("Κενά Διαστήματα", display_gaps)
                 
                 # Κουμπί εκτύπωσης
                 render_print_button("print_gaps", "Κενά Διαστήματα", gaps_df)
@@ -2431,6 +2467,7 @@ def show_results_page(df, filename):
                     use_container_width=True,
                     height=400
                 )
+                register_view("Διαστήματα χωρίς ημέρες", zero_display_df)
                 render_print_button("print_zero_duration", "Διαστήματα χωρίς δηλωμένη διάρκεια", zero_display_df)
         else:
             st.warning("Οι στήλες 'Από' και 'Έως' δεν βρέθηκαν στα δεδομένα.")
@@ -2772,6 +2809,9 @@ def show_results_page(df, filename):
         # Ενημέρωση πληροφοριακού μηνύματος για το πλήθος γραμμών
         row_info_placeholder.info(f"Εμφανίζονται {data_rows_count} γραμμές")
 
+        # Κρατάμε αντίγραφο πριν τη μορφοποίηση για τις εξαγωγές Excel
+        apd_export_df = display_apd_df.copy()
+
         # Εφαρμόζουμε μορφοποίηση νομισμάτων μόνο για εμφάνιση
         currency_columns = ['Μικτές αποδοχές', 'Συνολικές εισφορές', 'Εισφ. πλαφόν', 'Συντ. Αποδοχές']
         for col in currency_columns:
@@ -2815,6 +2855,7 @@ def show_results_page(df, filename):
             return [''] * len(row)
 
         # Apply styling
+        register_view("Ανάλυση ΑΠΔ", display_apd_df)
         styled_df = display_apd_df.style.apply(highlight_low_retention, axis=1)
 
         # Εφαρμόζουμε ελληνική μορφοποίηση για αριθμητικές στήλες
@@ -2837,9 +2878,9 @@ def show_results_page(df, filename):
     
     # Download section
     st.markdown("---")
-    st.markdown("### Κατέβασμα Αποτελεσμάτων")
+    st.markdown("### Επιλογές εξαγωγής")
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3, col4 = st.columns([1, 1, 1.2, 1])
     
     with col1:
         # Download για κύρια δεδομένα (μόνο με ημερομηνίες, ταξινομημένα χρονολογικά)
@@ -2949,6 +2990,13 @@ def show_results_page(df, filename):
                 gaps_df = find_gaps_in_insurance_data(df)
                 if not gaps_df.empty:
                     gaps_df.to_excel(writer, sheet_name='Κενά_Διαστήματα', index=False)
+
+            # Προσθήκη Ανάλυσης ΑΠΔ (με τα τρέχοντα φίλτρα)
+            if 'apd_export_df' in locals():
+                try:
+                    apd_export_df.to_excel(writer, sheet_name='Ανάλυση_ΑΠΔ', index=False)
+                except Exception:
+                    pass
         
         all_output.seek(0)
         
@@ -2964,16 +3012,51 @@ def show_results_page(df, filename):
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
+
+    with col3:
+        if view_exports:
+            view_options = list(view_exports.keys())
+            label_col, dropdown_col = st.columns([0.8, 2])
+            with label_col:
+                st.markdown('<div style="font-size:0.9rem; color:#4b5563; padding-top:0.45rem;">Πίνακας "Ό,τι βλέπεις":</div>', unsafe_allow_html=True)
+            with dropdown_col:
+                selected_view = st.selectbox(
+                    "",
+                    options=view_options,
+                    key="view_export_selection",
+                    label_visibility="collapsed"
+                )
+            view_df = view_exports[selected_view]
+            view_buffer = io.BytesIO()
+            with pd.ExcelWriter(view_buffer, engine='openpyxl') as writer:
+                sheet_label = re.sub(r'[\\/*?:\\[\\]]', '_', selected_view)[:31]
+                view_df.to_excel(writer, sheet_name=sheet_label or "Προβολή", index=False)
+            view_buffer.seek(0)
+            base_name = filename[:-4] if filename.endswith('.pdf') else 'efka'
+            sanitized_label = re.sub(r'[\\/*?:<>|"]', '_', selected_view)
+            view_filename = f"{base_name}_{sanitized_label}_προβολή.xlsx"
+        else:
+            st.info("Δεν υπάρχει διαθέσιμος πίνακας για εξαγωγή.")
+
+    with col4:
+        if view_exports:
+            st.download_button(
+                label="Ό,τι βλέπεις (Excel)",
+                data=view_buffer.getvalue() if 'view_buffer' in locals() else b'',
+                file_name=view_filename if 'view_filename' in locals() else 'view.xlsx',
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                disabled='view_buffer' not in locals()
+            )
     
     # Footer
     st.markdown("---")
     st.markdown("### Πληροφορίες")
     st.info("""
-    **Τι περιέχει το Excel αρχείο:**
-    - Όλα τα δεδομένα από όλες τις σελίδες
-    - Στήλη 'Σελίδα' που δείχνει από ποια σελίδα προέρχεται κάθε γραμμή
-    - Στήλη 'Πίνακας' (αν υπάρχει) που δείχνει τον αριθμό πίνακα
-    - Τα δεδομένα παραμένουν ακατέργαστα όπως εξήχθησαν από το PDF
+    **Σύντομος οδηγός:**
+    - *Κύρια Δεδομένα*: Κατεβάζει τα φιλτραρισμένα κύρια δεδομένα που εμφανίζονται στο Tab 1.
+    - *Όλα τα Δεδομένα*: Πλήρες Excel με κάθε πίνακα, τις επιπλέον αναφορές (Συνοπτική, Ετήσια, Κενά, Ανάλυση ΑΠΔ) και ακατέργαστες γραμμές όπως προήλθαν από το PDF.
+    - *Ό,τι βλέπεις*: Επιλέγεις τον πίνακα που έχεις μπροστά σου (με φίλτρα, ταξινομήσεις κ.λπ.) και τον εξάγεις όπως ακριβώς εμφανίζεται.
     """)
     
     # JavaScript για τα menu links
