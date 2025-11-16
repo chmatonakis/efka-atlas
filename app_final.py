@@ -1254,6 +1254,14 @@ def show_results_page(df, filename):
         z-index: 1 !important;
         position: relative !important;
     }
+    /* Απόκρυψη badges/κουμπιών Streamlit Cloud (Manage app) */
+    div[class*="viewerBadge"],
+    a[class*="viewerBadge"],
+    button[class*="viewerBadge"],
+    div[data-testid="stToolbarActionButton"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -1288,8 +1296,26 @@ def show_results_page(df, filename):
           };
 
           const hideManageButton = () => {
-            const candidates = document.querySelectorAll('button, a, div');
-            candidates.forEach((el) => {
+            const selectors = [
+              'button[title*="Manage"]',
+              'button[aria-label*="Manage"]',
+              'a[title*="Manage"]',
+              'a[aria-label*="Manage"]',
+              'div[class*="viewerBadge"]',
+              'button[class*="viewerBadge"]',
+              'a[class*="viewerBadge"]'
+            ];
+            selectors.forEach((selector) => {
+              document.querySelectorAll(selector).forEach((el) => {
+                el.style.display = 'none';
+                el.style.visibility = 'hidden';
+                if (el.parentElement) {
+                  el.parentElement.style.display = 'none';
+                }
+              });
+            });
+            const textCandidates = document.querySelectorAll('button, a, div');
+            textCandidates.forEach((el) => {
               if (el.textContent && el.textContent.trim().includes('Manage app')) {
                 el.style.display = 'none';
                 el.style.visibility = 'hidden';
@@ -1449,17 +1475,9 @@ def show_results_page(df, filename):
                         )
 
                 with col7:
-                    # Κουμπί επαναφοράς
-                    reset_label = "↻"
-                    if st.button(reset_label, help="Επαναφορά", use_container_width=True):
-                        st.session_state['show_filters'] = False
-                        st.rerun()
-
+                    st.write("")
                 with col8:
-                    # Κουμπί κλεισίματος φίλτρων
-                    if st.button("❌", help="Κλείσιμο", use_container_width=True):
-                        st.session_state['show_filters'] = False
-                        st.rerun()
+                    st.write("")
                 
                 # Εφαρμογή φίλτρων ημερομηνιών
                 if 'Από' in main_df.columns and (from_date_str or to_date_str):
@@ -1588,12 +1606,7 @@ def show_results_page(df, filename):
                 )
 
             with filter_cols[3]:
-                reset_label = "↻"
-                if st.button(reset_label, help="Επαναφορά", use_container_width=True, key="summary_filter_reset"):
-                    for _k in ['summary_filter_tameio', 'summary_filter_from', 'summary_filter_to']:
-                        if _k in st.session_state:
-                            del st.session_state[_k]
-                    st.rerun()
+                st.write("")
 
             # Εφαρμογή φίλτρων Ταμείου
             if 'Ταμείο' in summary_df.columns and 'Όλα' not in selected_tameia:
@@ -1791,14 +1804,7 @@ def show_results_page(df, filename):
             with y6:
                 to_y_str = st.text_input("Έως (dd/mm/yyyy):", value="", placeholder="31/12/2025", key="y_filter_to_date")
             with y7:
-                reset_label = "↻"
-                if st.button(reset_label, help="Επαναφορά", use_container_width=True, key="y_filter_reset"):
-                    for _k in [
-                        'y_filter_tameio', 'y_filter_typos_asfal', 'y_filter_klados',
-                        'y_filter_apodochon', 'y_filter_from_date', 'y_filter_to_date']:
-                        if _k in st.session_state:
-                            del st.session_state[_k]
-                    st.rerun()
+                st.write("")
 
             # Διακόπτης εμφάνισης μόνο ετήσιων γραμμών συνόλου (default: πλήρης εικόνα)
             show_yearly_totals_only = st.toggle("Μόνο ετήσιες γραμμές συνόλου", value=False, key="yearly_totals_only")
@@ -2090,8 +2096,8 @@ def show_results_page(df, filename):
             if pkg_col in days_df.columns:
                 available_packages = sorted(days_df[pkg_col].dropna().astype(str).unique().tolist())
             
-            # Φίλτρα σε μία γραμμή: Ταμείο | Πακέτα | Από | Έως | Επαναφορά | Συντελεστές
-            f1, f2, f3, f4, f5, f6 = st.columns([1.4, 1.8, 0.9, 0.9, 0.4, 1.4])
+            # Φίλτρα σε μία γραμμή: Ταμείο | Πακέτα | Από | Έως | Συντελεστές
+            f1, f2, f3, f4, f6 = st.columns([1.4, 1.8, 0.9, 0.9, 1.4])
             with f1:
                 if 'Ταμείο' in days_df.columns:
                     tameia_opts = ['Όλα'] + sorted(days_df['Ταμείο'].dropna().astype(str).unique().tolist())
@@ -2122,14 +2128,6 @@ def show_results_page(df, filename):
                 from_str = st.text_input('Από (dd/mm/yyyy):', value='', placeholder='01/01/1980', key='insdays_filter_from')
             with f4:
                 to_str = st.text_input('Έως (dd/mm/yyyy):', value='', placeholder='31/12/2025', key='insdays_filter_to')
-            with f5:
-                reset_label = "↻"
-                if st.button(reset_label, help='Επαναφορά', use_container_width=True, key='insdays_filter_reset'):
-                    # Καθαρισμός κατάστασης widgets ώστε να επανέλθουν στις προεπιλογές
-                    for _k in ['insdays_filter_tameio', 'insdays_filter_packages', 'insdays_filter_from', 'insdays_filter_to', 'ins_days_basis']:
-                        if _k in st.session_state:
-                            del st.session_state[_k]
-                    st.rerun()
             with f6:
                 # Επιλογή συντελεστών υπολογισμού ημερών από μήνες/έτη
                 basis = st.selectbox(
@@ -2556,7 +2554,7 @@ def show_results_page(df, filename):
                         apd_df = apd_df[apd_df[earnings_col].isin(selected_typos_apodochon)]
 
             # Γραμμή 2: Φίλτρα ημερομηνιών και ποσοστού
-            col5, col6, col7, col8, col9 = st.columns([1.4, 1.4, 1.2, 1.6, 1])
+            col5, col6, col7, col8 = st.columns([1.4, 1.4, 1.2, 1.6])
             with col5:
                 from_date_str = st.text_input("Από (dd/mm/yyyy):", value="01/01/2002", placeholder="01/01/2002", key="apd_filter_from_date")
             with col6:
@@ -2570,17 +2568,6 @@ def show_results_page(df, filename):
                     index=0,
                     key="apd_filter_retention_mode"
                 )
-            with col9:
-                if st.button("↻ Επαναφορά", help="Επαναφορά όλων των φίλτρων", use_container_width=True, key="apd_filter_reset"):
-                    # Reset all filter session states
-                    st.session_state.apd_filter_taimeio = ['Όλα']
-                    st.session_state.apd_filter_typos = ['Όλα']
-                    st.session_state.apd_filter_klados = ['Όλα']
-                    st.session_state.apd_filter_apodochon = ['Όλα']
-                    st.session_state.apd_filter_from_date = ""
-                    st.session_state.apd_filter_to_date = ""
-                    st.session_state.apd_filter_retention_mode = "Όλα"
-                    st.rerun()
 
             # Εφαρμογή φίλτρων ημερομηνιών
             if 'Από' in apd_df.columns and (from_date_str or to_date_str):
@@ -2667,6 +2654,25 @@ def show_results_page(df, filename):
                 cols.remove('Εισφ. πλαφόν')
                 cols.insert(gross_idx + 1, 'Εισφ. πλαφόν')
                 display_apd_df = display_apd_df[cols]
+
+            # Νέα στήλη: Περικοπή = Μικτές αποδοχές - Εισφ. πλαφόν (μόνο θετικές τιμές)
+            if 'Μικτές αποδοχές' in display_apd_df.columns:
+                def calc_cut_amount(row):
+                    gross = clean_numeric_value(row.get('Μικτές αποδοχές', 0), exclude_drx=True)
+                    plaf = row.get('Εισφ. πλαφόν')
+                    plaf_num = plaf if isinstance(plaf, (int, float)) else clean_numeric_value(plaf)
+                    if gross is None or plaf_num is None:
+                        return None
+                    diff = gross - plaf_num
+                    return diff if diff > 0 else None
+
+                display_apd_df['Περικοπή'] = display_apd_df.apply(calc_cut_amount, axis=1)
+                cols = list(display_apd_df.columns)
+                if 'Περικοπή' in cols and 'Εισφ. πλαφόν' in cols:
+                    cols.remove('Περικοπή')
+                    plaf_idx = cols.index('Εισφ. πλαφόν')
+                    cols.insert(plaf_idx + 1, 'Περικοπή')
+                    display_apd_df = display_apd_df[cols]
 
             # Νέα στήλη: Συντ. Αποδοχές = min(Μικτές αποδοχές, Εισφ. πλαφόν)
             if 'Μικτές αποδοχές' in display_apd_df.columns:
@@ -2767,6 +2773,7 @@ def show_results_page(df, filename):
                     days_sum = _sum_column(year_slice, 'Ημέρες')
                     gross_sum = _sum_column(year_slice, 'Μικτές αποδοχές', exclude_drx=True)
                     adjusted_sum = _sum_column(year_slice, 'Συντ. Αποδοχές', exclude_drx=True)
+                    cut_sum = _sum_column(year_slice, 'Περικοπή', exclude_drx=True)
 
                     if years_sum is not None:
                         totals_row['Έτη'] = years_sum
@@ -2778,6 +2785,8 @@ def show_results_page(df, filename):
                         totals_row['Μικτές αποδοχές'] = gross_sum
                     if adjusted_sum is not None:
                         totals_row['Συντ. Αποδοχές'] = adjusted_sum
+                    if cut_sum is not None:
+                        totals_row['Περικοπή'] = cut_sum
 
                     if '% κράτησης' in totals_row:
                         totals_row['% κράτησης'] = ''
@@ -2813,7 +2822,7 @@ def show_results_page(df, filename):
         apd_export_df = display_apd_df.copy()
 
         # Εφαρμόζουμε μορφοποίηση νομισμάτων μόνο για εμφάνιση
-        currency_columns = ['Μικτές αποδοχές', 'Συνολικές εισφορές', 'Εισφ. πλαφόν', 'Συντ. Αποδοχές']
+        currency_columns = ['Μικτές αποδοχές', 'Συνολικές εισφορές', 'Εισφ. πλαφόν', 'Περικοπή', 'Συντ. Αποδοχές']
         for col in currency_columns:
             if col in display_apd_df.columns:
                 display_apd_df[col] = display_apd_df[col].apply(format_currency)
