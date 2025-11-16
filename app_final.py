@@ -1518,9 +1518,70 @@ def show_results_page(df, filename):
             summary_df['Κλάδος/Πακέτο Κάλυψης'] = (
                 summary_df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
             )
-            # Μετατροπή ημερομηνιών σε datetime για ορθή min/max
+            # Μετατροπή ημερομηνιών σε datetime για φίλτρα και ομαδοποίηση
             summary_df['Από_dt'] = pd.to_datetime(summary_df.get('Από'), format='%d/%m/%Y', errors='coerce')
             summary_df['Έως_dt'] = pd.to_datetime(summary_df.get('Έως'), format='%d/%m/%Y', errors='coerce')
+
+            # Φίλτρα: Ταμείο και ημερομηνίες (όπως στην αναφορά Ημερών)
+            filter_cols = st.columns([1.4, 0.9, 0.9, 0.4])
+            selected_tameia = ['Όλα']
+            from_summary_str = ''
+            to_summary_str = ''
+
+            with filter_cols[0]:
+                if 'Ταμείο' in summary_df.columns:
+                    tameia_options = ['Όλα'] + sorted(summary_df['Ταμείο'].dropna().astype(str).unique().tolist())
+                    selected_tameia = st.multiselect(
+                        "Ταμείο:",
+                        options=tameia_options,
+                        default=['Όλα'],
+                        key="summary_filter_tameio"
+                    )
+                else:
+                    st.write("")
+
+            with filter_cols[1]:
+                from_summary_str = st.text_input(
+                    "Από (dd/mm/yyyy):",
+                    value="",
+                    placeholder="01/01/1980",
+                    key="summary_filter_from"
+                )
+
+            with filter_cols[2]:
+                to_summary_str = st.text_input(
+                    "Έως (dd/mm/yyyy):",
+                    value="",
+                    placeholder="31/12/2025",
+                    key="summary_filter_to"
+                )
+
+            with filter_cols[3]:
+                reset_label = "↻"
+                if st.button(reset_label, help="Επαναφορά", use_container_width=True, key="summary_filter_reset"):
+                    for _k in ['summary_filter_tameio', 'summary_filter_from', 'summary_filter_to']:
+                        if _k in st.session_state:
+                            del st.session_state[_k]
+                    st.rerun()
+
+            # Εφαρμογή φίλτρων Ταμείου
+            if 'Ταμείο' in summary_df.columns and 'Όλα' not in selected_tameia:
+                summary_df = summary_df[summary_df['Ταμείο'].isin(selected_tameia)]
+
+            # Εφαρμογή φίλτρων ημερομηνιών
+            if from_summary_str:
+                try:
+                    from_dt = pd.to_datetime(from_summary_str, format='%d/%m/%Y')
+                    summary_df = summary_df[summary_df['Από_dt'] >= from_dt]
+                except Exception:
+                    st.warning("Μη έγκυρη ημερομηνία στο πεδίο Από για τη Συνοπτική Αναφορά.")
+            if to_summary_str:
+                try:
+                    to_dt = pd.to_datetime(to_summary_str, format='%d/%m/%Y')
+                    summary_df = summary_df[summary_df['Από_dt'] <= to_dt]
+                except Exception:
+                    st.warning("Μη έγκυρη ημερομηνία στο πεδίο Έως για τη Συνοπτική Αναφορά.")
+
             # Κρατάμε γραμμές με τουλάχιστον έγκυρη μία ημερομηνία έναρξης
             summary_df = summary_df.dropna(subset=['Από_dt'])
             
