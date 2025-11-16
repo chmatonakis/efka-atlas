@@ -17,6 +17,7 @@ import re
 from pathlib import Path
 import subprocess
 import datetime
+import html
 
 # Προσπάθεια εισαγωγής διαφορετικών PDF readers
 try:
@@ -415,13 +416,21 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def render_print_button(button_key: str, title: str, dataframe: pd.DataFrame) -> None:
+def render_print_button(
+    button_key: str,
+    title: str,
+    dataframe: pd.DataFrame,
+    description: str | None = None,
+    filters: list[str] | None = None,
+) -> None:
     """Εμφανίζει κουμπί εκτύπωσης που ανοίγει νέο παράθυρο με καλαίσθητη εκτύπωση του πίνακα.
 
     Args:
         button_key: Μοναδικό key για το κουμπί
         title: Τίτλος που θα εμφανιστεί στην εκτύπωση
         dataframe: Τα δεδομένα προς εκτύπωση (όπως εμφανίζονται)
+        description: Προαιρετική περιγραφή που θα εμφανιστεί κάτω από τον τίτλο
+        filters: Προαιρετική λίστα με περιγραφές φίλτρων που εφαρμόστηκαν
     """
     col_spacer, col_btn = st.columns([1, 0.12])
     with col_btn:
@@ -442,6 +451,34 @@ def render_print_button(button_key: str, title: str, dataframe: pd.DataFrame) ->
                 rows_html.append(f"<tr{tr_class}>{tds}</tr>")
             table_html = f"<table class=\"print-table\"><thead><tr>{headers_html}</tr></thead><tbody>{''.join(rows_html)}</tbody></table>"
 
+            client_name = st.session_state.get('print_client_name', '').strip()
+            client_amka = st.session_state.get('print_client_amka', '').strip()
+            name_html = f"<div class='print-client-name'>{html.escape(client_name)}</div>" if client_name else ''
+            amka_html = f"<div class='print-client-amka'>ΑΜΚΑ: {html.escape(client_amka)}</div>" if client_amka else ''
+            description_html = (
+                f"<p class='print-description'>{html.escape(description)}</p>"
+                if description else ''
+            )
+            filters_html = ''
+            if filters:
+                cleaned = [html.escape(f) for f in filters if isinstance(f, str) and f.strip()]
+                if cleaned:
+                    items = ''.join(f"<li>{item}</li>" for item in cleaned)
+                    filters_html = (
+                        "<div class='print-filters'>"
+                        "<div class='print-filters-label'>Ενεργά φίλτρα</div>"
+                        f"<ul>{items}</ul>"
+                        "</div>"
+                    )
+
+            disclaimer_html = (
+                "<div class='print-disclaimer'>"
+                "ΣΗΜΑΝΤΙΚΉ ΣΗΜΕΙΩΣΗ: Η παρούσα αναφορά βασίζεται αποκλειστικά στα δεδομένα που εμφανίζονται στο αρχείο ΑΤΛΑΣ/e-ΕΦΚΑ και αποτελεί απλή επεξεργασία των καταγεγραμμένων εγγραφών. "
+                "Η πλατφόρμα ΑΤΛΑΣ μπορεί να περιέχει κενά ή σφάλματα και η αναφορά αυτή δεν υποκαθιστά νομική ή οικονομική συμβουλή σε καμία περίπτωση. "
+                "Για θέματα συνταξιοδότησης και οριστικές απαντήσεις αρμόδιος παραμένει αποκλειστικά ο e-ΕΦΚΑ."
+                "</div>"
+            )
+
             # Δημιουργία JavaScript που θα ανοίξει νέο παράθυρο
             js_code = f"""
 <script>
@@ -455,7 +492,15 @@ function openPrintWindow() {{
   <style>
     @media print {{ @page {{ size: A4 landscape; margin: 12mm; }} }}
     body {{ font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #222; }}
-    h1 {{ font-size: 20px; margin: 0 0 12px 0; }}
+    h1 {{ font-size: 20px; margin: 12px 0 10px 0; text-align: center; }}
+    .print-client-name {{ font-size: 28px; font-weight: 700; text-align: center; margin: 0; color: #111827; }}
+    .print-client-amka {{ font-size: 15px; text-align: center; margin: 2px 0 10px 0; color: #4b5563; }}
+    .print-description {{ font-size: 15px; text-align: center; color: #4b5563; margin: 0 0 8px 0; }}
+    .print-filters {{ font-size: 12px; margin: 0 0 10px 0; color: #374151; }}
+    .print-filters-label {{ font-weight: 600; margin-bottom: 2px; }}
+    .print-filters ul {{ margin: 4px 0 0 18px; padding: 0; }}
+    .print-disclaimer {{ font-size: 13px; color: #374151; margin-top: 35px; line-height: 1.4; }}
+    .print-disclaimer strong {{ font-weight: 700; }}
     table.print-table {{ border-collapse: collapse; width: 100%; font-size: 12px; }}
     table.print-table thead th {{ background: #f2f4f7; border-bottom: 1px solid #d0d7de; padding: 8px; text-align: left; }}
     table.print-table tbody td {{ border-bottom: 1px solid #eee; padding: 6px 8px; }}
@@ -464,8 +509,17 @@ function openPrintWindow() {{
   </style>
 </head>
 <body onload="window.print()">
-  <h1>{title}</h1>
+  {name_html}
+  {amka_html}
+  <h1>{html.escape(title)}</h1>
+  {description_html}
+  {filters_html}
   {table_html}
+  <div class='print-disclaimer'>
+    <strong>ΣΗΜΑΝΤΙΚΉ ΣΗΜΕΙΩΣΗ:</strong> Η παρούσα αναφορά βασίζεται αποκλειστικά στα δεδομένα που εμφανίζονται στο αρχείο ΑΤΛΑΣ/e-ΕΦΚΑ και αποτελεί απλή επεξεργασία των καταγεγραμμένων εγγραφών.
+    Η πλατφόρμα ΑΤΛΑΣ μπορεί να περιέχει κενά ή σφάλματα και η αναφορά αυτή δεν υποκαθιστά νομική ή οικονομική συμβουλή σε καμία περίπτωση.
+    Για θέματα συνταξιοδότησης και οριστικές απαντήσεις αρμόδιος παραμένει αποκλειστικά ο e-ΕΦΚΑ.
+  </div>
 </body>
 </html>`;
     
@@ -1528,7 +1582,12 @@ def show_results_page(df, filename):
         )
         register_view("Κύρια Δεδομένα", display_df)
         # Κουμπί εκτύπωσης για Κύρια Δεδομένα
-        render_print_button("print_main", "Κύρια Δεδομένα e-EFKA", display_df)
+        render_print_button(
+            "print_main",
+            "Κύρια Δεδομένα e-EFKA",
+            display_df,
+            description="Αναλυτική χρονολογική κατάσταση ασφαλιστικών εγγραφών όπως εξήχθησαν από τον e-ΕΦΚΑ και το ασφ. βιογραφικό ΑΤΛΑΣ."
+        )
     
     with tab2:
         # Επιπλέον πίνακες (στήλες από τελευταίες σελίδες)
@@ -1549,7 +1608,12 @@ def show_results_page(df, filename):
                     height=600
                 )
                 register_view("Επιπλέον Πίνακες", extra_df)
-                render_print_button("print_extra", "Επιπλέον Πίνακες", extra_df)
+                render_print_button(
+                    "print_extra",
+                    "Παράρτημα - Επιπλέον Πίνακες",
+                    extra_df,
+                    description="Επεξηγηματικοί πίνακες καλύψεων και αποδοχών."
+                )
             else:
                 st.info("Δεν βρέθηκαν δεδομένα στα επιπλέον πίνακες.")
         else:
@@ -1724,7 +1788,12 @@ def show_results_page(df, filename):
                 height=600
             )
             register_view("Συνοπτική Αναφορά", display_summary)
-            render_print_button("print_summary", "Συνοπτική Αναφορά", display_summary)
+            render_print_button(
+                "print_summary",
+                "Συνοπτική Αναφορά",
+                display_summary,
+                description="Συνοπτική απεικόνιση ανά Κλάδο/Πακέτο Κάλυψης για τις περιόδους που εμφανίζονται, καθώς και άθροισμα αποδοχών και εισφορών (μόνο των εγγραφών σε €)."
+            )
         else:
             st.warning("Η στήλη 'Κλάδος/Πακέτο Κάλυψης' δεν βρέθηκε στα δεδομένα.")
     
@@ -1980,13 +2049,25 @@ def show_results_page(df, filename):
             if totals_rows:
                 display_yearly_detailed = pd.concat(totals_rows, ignore_index=True)
 
+            # Συνένωση «Έως» και «Τύπος Αποδοχών» για καλύτερη εμφάνιση
+            if 'Τύπος Αποδοχών' in display_yearly_detailed.columns:
+                def _combine_period_and_type(row):
+                    end_val = str(row.get('Έως', '') or '').strip()
+                    earnings_val = str(row.get('Τύπος Αποδοχών', '') or '').strip()
+                    if earnings_val and earnings_val.lower() != 'nan':
+                        if end_val:
+                            return f"{end_val} – {earnings_val}"
+                        return earnings_val
+                    return end_val
+
+                display_yearly_detailed['Έως'] = display_yearly_detailed.apply(_combine_period_and_type, axis=1)
+                display_yearly_detailed = display_yearly_detailed.drop(columns=['Τύπος Αποδοχών'])
+
             # Αναδιατάσσουμε τις στήλες για εμφάνιση
             display_columns = ['Έτος_Display', 'Ταμείο_Display']
             if 'Τύπος_Ασφάλισης_Display' in display_yearly_detailed.columns:
                 display_columns.append('Τύπος_Ασφάλισης_Display')
             display_columns += ['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως']
-            if 'Τύπος Αποδοχών' in display_yearly_detailed.columns:
-                display_columns.append('Τύπος Αποδοχών')
             display_columns += ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
             
             # Δημιουργούμε τον τελικό πίνακα για εμφάνιση
@@ -1996,11 +2077,10 @@ def show_results_page(df, filename):
             final_headers = ['Έτος', 'Ταμείο']
             if 'Τύπος_Ασφάλισης_Display' in display_yearly_detailed.columns:
                 final_headers.append('Τύπος Ασφάλισης')
-            final_headers += ['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως']
-            if 'Τύπος Αποδοχών' in display_yearly_detailed.columns:
-                final_headers.append('Τύπος Αποδοχών')
+            final_headers += ['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Περίοδος / Τύπος Αποδοχών']
             final_headers += ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές Αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
             display_final.columns = final_headers
+            period_column_name = 'Περίοδος / Τύπος Αποδοχών'
             
             # Εφαρμόζουμε ελληνική μορφοποίηση για αριθμητικές στήλες
             numeric_cols_yearly = ['Έτη', 'Μήνες', 'Ημέρες', 'Αριθμός Εγγραφών']
@@ -2012,11 +2092,11 @@ def show_results_page(df, filename):
             
             # Στυλ για γραμμές "Σύνολο <Έτος>" και σκούρα γραμματοσειρά στη στήλη Έτος
             def _highlight_totals(row):
-                value = str(row.get('Έως', ''))
+                value = str(row.get(period_column_name, ''))
                 styles = []
                 
                 # Βρίσκουμε τη θέση της στήλης "Έως"
-                eos_index = list(row.index).index('Έως') if 'Έως' in row.index else -1
+                eos_index = list(row.index).index(period_column_name) if period_column_name in row.index else -1
                 
                 if value.startswith('Σύνολο'):
                     # Για κάθε στήλη
@@ -2042,7 +2122,7 @@ def show_results_page(df, filename):
                 # Φίλτρο εμφάνισης μόνο γραμμών «Σύνολο <Έτος>» αν είναι ενεργός ο διακόπτης
                 if st.session_state.get('yearly_totals_only', False):
                     try:
-                        display_final = display_final[display_final['Έως'].astype(str).str.startswith('Σύνολο')]
+                        display_final = display_final[display_final[period_column_name].astype(str).str.startswith('Σύνολο')]
                     except Exception:
                         pass
 
@@ -2060,22 +2140,13 @@ def show_results_page(df, filename):
                     use_container_width=True,
                     height=600
                 )
-            render_print_button("print_yearly", "Ετήσια Αναφορά", display_final)
+            render_print_button(
+                "print_yearly",
+                "Ετήσια Αναφορά",
+                display_final,
+                description="Ετήσια αναφορά ανά Ταμείο, Κλάδο/Πακέτο Κάλυψης και τύπο αποδοχών με συγκεντρωτικά στοιχεία."
+            )
             
-            # Στατιστικά
-            st.markdown("#### Στατιστικά Ετήσιας Αναφοράς")
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Συνολικά Έτη", yearly_final['Έτος'].nunique())
-            with col2:
-                st.metric("Συνολικά Ταμεία", yearly_final['Ταμείο'].nunique())
-            with col3:
-                total_records = yearly_final['Αριθμός Εγγραφών'].sum()
-                st.metric("Συνολικές Εγγραφές", total_records)
-            with col4:
-                total_years = yearly_final['Έτη'].sum()
-                st.metric("Συνολικά Έτη Ασφάλισης", total_years)
-                
         else:
             st.warning("Οι στήλες 'Από' ή 'Ταμείο' δεν βρέθηκαν στα δεδομένα.")
     
@@ -2314,7 +2385,12 @@ def show_results_page(df, filename):
                 # Εφαρμογή κενών για μηδενικές τιμές σε όλες τις αριθμητικές στήλες
                 for col in ['Σύνολο Ημερών'] + package_cols:
                     print_days[col] = print_days[col].apply(lambda v: '' if pd.isna(v) or float(v) == 0 else int(round(float(v))))
-                render_print_button("print_ins_days", "Αναφορά Ημερών Ασφάλισης", print_days)
+                render_print_button(
+                    "print_ins_days",
+                    "Αναφορά Ημερών Ασφάλισης",
+                    print_days,
+                    description="Κατανομή ημερών ασφάλισης ανά έτος, διάστημα και πακέτο κάλυψης."
+                )
         else:
             st.warning("Οι στήλες 'Από' και 'Έως' δεν βρέθηκαν στα δεδομένα.")
     
@@ -2364,7 +2440,12 @@ def show_results_page(df, filename):
                 register_view("Κενά Διαστήματα", display_gaps)
                 
                 # Κουμπί εκτύπωσης
-                render_print_button("print_gaps", "Κενά Διαστήματα", gaps_df)
+                render_print_button(
+                    "print_gaps",
+                    "Κενά Διαστήματα",
+                    gaps_df,
+                    description="Χρονικές περίοδοι όπου δεν βρέθηκε ασφαλιστική κάλυψη μεταξύ των δηλωμένων εγγραφών."
+                )
                 
                 # Συμβουλές
                 st.markdown("#### Συμβουλές")
@@ -2466,7 +2547,12 @@ def show_results_page(df, filename):
                     height=400
                 )
                 register_view("Διαστήματα χωρίς ημέρες", zero_display_df)
-                render_print_button("print_zero_duration", "Διαστήματα χωρίς δηλωμένη διάρκεια", zero_display_df)
+                render_print_button(
+                    "print_zero_duration",
+                    "Διαστήματα χωρίς ημέρες ασφάλισης",
+                    zero_display_df,
+                    description="Εγγραφές που εμφανίζονται στον ΑΤΛΑΣ αλλά χωρίς να συνδέονται με ημέρες ασφάλισης."
+                )
         else:
             st.warning("Οι στήλες 'Από' και 'Έως' δεν βρέθηκαν στα δεδομένα.")
     
@@ -2883,10 +2969,30 @@ def show_results_page(df, filename):
             hide_index=True
         )
         # Κουμπί εκτύπωσης για Ανάλυση ΑΠΔ
-        render_print_button("print_apd", "Ανάλυση ΑΠΔ", display_apd_df)
+        render_print_button(
+            "print_apd",
+            "Ανάλυση ΑΠΔ",
+            display_apd_df,
+            description="Ανάλυση εγγραφών ΑΠΔ με υπολογισμό εισφ. πλαφόν ΙΚΑ, περικοπής λόγω πλαφόν και ποσοστού κράτησης για τον εντοπισμό των πραγματικών εισφορίσιμων αποδοχών."
+        )
     
     # Download section
     st.markdown("---")
+    st.markdown("### Επιλογές εκτύπωσης")
+    name_col, amka_col = st.columns([1, 1])
+    with name_col:
+        st.session_state['print_client_name'] = st.text_input(
+            "Ονοματεπώνυμο ασφαλισμένου:",
+            value=st.session_state.get('print_client_name', ''),
+            placeholder="Π.χ. Ιωάννης Παπαδόπουλος"
+        )
+    with amka_col:
+        st.session_state['print_client_amka'] = st.text_input(
+            "ΑΜΚΑ:",
+            value=st.session_state.get('print_client_amka', ''),
+            placeholder="Π.χ. 01017012345"
+        )
+
     st.markdown("### Επιλογές εξαγωγής")
     
     col1, col2, col3, col4 = st.columns([1, 1, 1.2, 1])
