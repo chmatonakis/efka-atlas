@@ -2226,8 +2226,8 @@ def show_results_page(df, filename):
     
     with tab6:
         # Αναφορά Κενών Διαστήματων
-        st.markdown("### Αναφορά Κενών Διαστήματων")
-        st.info("Σκοπός: Εντοπίζει χρονικά διαστήματα που δεν καλύπτονται από κανένα ασφαλιστικό διάστημα.")
+        st.markdown("### Αναφορά Κενών Διαστήματων και διαστημάτων χωρίς ημέρες ασφάλισης")
+        st.info("Σκοπός: Εντοπίζει χρονικά διαστήματα που δεν εμφανίζονται καθόλου στο ΑΤΛΑΣ από την έναρξη της ασφάλισης έως σήμερα.")
         
         if 'Από' in df.columns and 'Έως' in df.columns:
             # Εντοπισμός κενών διαστημάτων
@@ -2274,7 +2274,7 @@ def show_results_page(df, filename):
                 # Συμβουλές
                 st.markdown("#### Συμβουλές")
                 if len(gaps_df) > 0:
-                    st.warning("Σημαντικό: Τα εντοπισμένα κενά διαστήματα μπορεί να επηρεάσουν τη θεμελίωση δικαιώματος για σύνταξη.")
+                    st.warning("Σημαντικό: Τα εντοπισμένα κενά διαστήματα μπορεί να επηρεάσουν τη θεμελίωση δικαιώματος για σύνταξη (εξαγορά, ασφαλιστικός δεσμός για μειωμένη σύνταξη).")
                     
                     # Εμφάνιση του μεγαλύτερου κενού
                     max_gap = gaps_df.loc[gaps_df['Ημερολογιακές ημέρες'].idxmax()]
@@ -2282,6 +2282,95 @@ def show_results_page(df, filename):
             else:
                 st.success("Καμία κενή περίοδος δεν εντοπίστηκε. Όλα τα διαστήματα είναι συνεχή.")
                 st.info("Σημείωση: Αυτό σημαίνει ότι δεν υπάρχουν κενά μεταξύ των ασφαλιστικών σας περιόδων.")
+
+            # Δεύτερος πίνακας: Δηλωμένα διαστήματα χωρίς Έτη/Μήνες/Ημέρες
+            st.markdown("#### Διαστήματα χωρίς ημέρες ασφάλισης")
+            zero_duration_df = df.copy()
+
+            # Κρατάμε μόνο γραμμές με έγκυρες ημερομηνίες
+            zero_duration_df['Από_DateTime'] = pd.to_datetime(zero_duration_df['Από'], format='%d/%m/%Y', errors='coerce')
+            zero_duration_df['Έως_DateTime'] = pd.to_datetime(zero_duration_df['Έως'], format='%d/%m/%Y', errors='coerce')
+            zero_duration_df = zero_duration_df.dropna(subset=['Από_DateTime', 'Έως_DateTime'])
+
+            # Δημιουργία αριθμητικών τιμών για Έτη/Μήνες/Ημέρες (αν δεν υπάρχουν, θεωρούμε 0)
+            duration_columns = ['Έτη', 'Μήνες', 'Ημέρες']
+            for col in duration_columns:
+                if col not in zero_duration_df.columns:
+                    zero_duration_df[col] = 0
+                numeric_col = f"__{col}_numeric"
+                zero_duration_df[numeric_col] = zero_duration_df[col].apply(clean_numeric_value)
+
+            # Υπολογίζουμε συνολική διάρκεια ανά γραμμή
+            zero_duration_df['__duration_sum'] = (
+                zero_duration_df['__Έτη_numeric'] +
+                zero_duration_df['__Μήνες_numeric'] +
+                zero_duration_df['__Ημέρες_numeric']
+            )
+
+            # Προσδιορίζουμε αν για το ίδιο διάστημα (Από/Έως) υπάρχει κάπου αλλού μη μηδενική διάρκεια
+            if not zero_duration_df.empty:
+                zero_duration_df['__duration_sum_group'] = zero_duration_df.groupby(
+                    ['Από_DateTime', 'Έως_DateTime']
+                )['__duration_sum'].transform('sum')
+
+            # Επιλογή μόνο διαστημάτων όπου τόσο η τρέχουσα γραμμή όσο και το σύνολο του διαστήματος είναι μηδενικά
+            zero_duration_df = zero_duration_df[
+                (zero_duration_df['__duration_sum'] == 0) &
+                (zero_duration_df['__duration_sum_group'] == 0)
+            ]
+
+            if zero_duration_df.empty:
+                st.success("Δεν βρέθηκαν διαστήματα χωρίς δηλωμένη διάρκεια.")
+            else:
+                columns_to_show = ['Από', 'Έως']
+                optional_columns = [
+                    'Ταμείο',
+                    'Τύπος Ασφάλισης',
+                    'Κλάδος/Πακέτο Κάλυψης',
+                    'Τύπος Αποδοχών',
+                    'Περιγραφή Τύπου Αποδοχών',
+                    'Α-Μ εργοδότη'
+                ]
+                for col in optional_columns + duration_columns:
+                    if col in zero_duration_df.columns and col not in columns_to_show:
+                        columns_to_show.append(col)
+
+                # Μετακινούμε τις στήλες Τύπος Αποδοχών ώστε να εμφανίζονται μετά το Κλάδος/Πακέτο
+                earnings_columns = [
+                    c for c in ['Τύπος Αποδοχών', 'Περιγραφή Τύπου Αποδοχών']
+                    if c in columns_to_show
+                ]
+                if earnings_columns and 'Κλάδος/Πακέτο Κάλυψης' in columns_to_show:
+                    insert_pos = columns_to_show.index('Κλάδος/Πακέτο Κάλυψης') + 1
+                    for col in earnings_columns:
+                        columns_to_show.remove(col)
+                    for offset, col in enumerate(earnings_columns):
+                        columns_to_show.insert(insert_pos + offset, col)
+
+                zero_display_df = zero_duration_df[columns_to_show].copy()
+
+                # Αφαιρούμε τα βοηθητικά πεδία
+                drop_helpers = [c for c in zero_display_df.columns if c.startswith('__')]
+                zero_display_df = zero_display_df.drop(columns=drop_helpers, errors='ignore')
+
+                # Μορφοποίηση αριθμών
+                if 'Έτη' in zero_display_df.columns:
+                    zero_display_df['Έτη'] = zero_display_df['Έτη'].apply(lambda x: format_number_greek(x, decimals=1) if str(x).strip() not in ['', '-'] else '')
+                if 'Μήνες' in zero_display_df.columns:
+                    zero_display_df['Μήνες'] = zero_display_df['Μήνες'].apply(lambda x: format_number_greek(x, decimals=1) if str(x).strip() not in ['', '-'] else '')
+                if 'Ημέρες' in zero_display_df.columns:
+                    zero_display_df['Ημέρες'] = zero_display_df['Ημέρες'].apply(lambda x: format_number_greek(x, decimals=0) if str(x).strip() not in ['', '-'] else '')
+
+                st.warning(
+                    "Οι παρακάτω εγγραφές έχουν βρεθεί στο ΑΤΛΑΣ αλλά δεν περιλαμβάνουν καμία τιμή σε Έτη/Μήνες/Ημέρες. "
+                    "Ενδέχεται να χρειαστεί επαλήθευση με τα πρωτογενή στοιχεία."
+                )
+                st.dataframe(
+                    zero_display_df,
+                    use_container_width=True,
+                    height=400
+                )
+                render_print_button("print_zero_duration", "Διαστήματα χωρίς δηλωμένη διάρκεια", zero_display_df)
         else:
             st.warning("Οι στήλες 'Από' και 'Έως' δεν βρέθηκαν στα δεδομένα.")
     
