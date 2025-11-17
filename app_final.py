@@ -1189,11 +1189,11 @@ def show_results_page(df, filename):
     Εμφανίζει τη σελίδα αποτελεσμάτων
     """
 
-    # Συλλογή προβολών για εξαγωγή "Ό,τι βλέπεις"
+    # Συλλογή προβολών για εξαγωγή μεμονωμένων πινάκων
     view_exports = {}
 
     def register_view(label: str, data: pd.DataFrame):
-        """Αποθηκεύει το τρέχον DataFrame για χρήση στο κουμπί 'Ό,τι βλέπεις'."""
+        """Αποθηκεύει το τρέχον DataFrame για χρήση στο κουμπί 'Εξαγωγή πίνακα'."""
         if data is None:
             return
         if isinstance(data, pd.DataFrame):
@@ -3119,7 +3119,7 @@ def show_results_page(df, filename):
             view_options = list(view_exports.keys())
             label_col, dropdown_col = st.columns([0.8, 2])
             with label_col:
-                st.markdown('<div style="font-size:0.9rem; color:#4b5563; padding-top:0.45rem;">Πίνακας "Ό,τι βλέπεις":</div>', unsafe_allow_html=True)
+                st.markdown('<div style="font-size:0.9rem; color:#4b5563; padding-top:0.45rem;">Επιλέξτε μεμονωμένο πίνακα:</div>', unsafe_allow_html=True)
             with dropdown_col:
                 selected_view = st.selectbox(
                     "",
@@ -3142,7 +3142,7 @@ def show_results_page(df, filename):
     with col4:
         if view_exports:
             st.download_button(
-                label="Ό,τι βλέπεις (Excel)",
+                label="Εξαγωγή πίνακα",
                 data=view_buffer.getvalue() if 'view_buffer' in locals() else b'',
                 file_name=view_filename if 'view_filename' in locals() else 'view.xlsx',
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -3157,7 +3157,7 @@ def show_results_page(df, filename):
     **Σύντομος οδηγός:**
     - *Κύρια Δεδομένα*: Κατεβάζει τα φιλτραρισμένα κύρια δεδομένα που εμφανίζονται στο Tab 1.
     - *Όλα τα Δεδομένα*: Πλήρες Excel με κάθε πίνακα, τις επιπλέον αναφορές (Συνοπτική, Ετήσια, Κενά, Ανάλυση ΑΠΔ) και ακατέργαστες γραμμές όπως προήλθαν από το PDF.
-    - *Ό,τι βλέπεις*: Επιλέγεις τον πίνακα που έχεις μπροστά σου (με φίλτρα, ταξινομήσεις κ.λπ.) και τον εξάγεις όπως ακριβώς εμφανίζεται.
+    - *Εξαγωγή πίνακα*: Επιλέγεις ένα συγκεκριμένο πίνακα (μαζί με φίλτρα, ταξινομήσεις κ.λπ.) και τον εξάγεις όπως ακριβώς εμφανίζεται.
     """)
     
     # JavaScript για τα menu links
