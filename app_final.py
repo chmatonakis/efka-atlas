@@ -2049,25 +2049,11 @@ def show_results_page(df, filename):
             if totals_rows:
                 display_yearly_detailed = pd.concat(totals_rows, ignore_index=True)
 
-            # Συνένωση «Έως» και «Τύπος Αποδοχών» για καλύτερη εμφάνιση
-            if 'Τύπος Αποδοχών' in display_yearly_detailed.columns:
-                def _combine_period_and_type(row):
-                    end_val = str(row.get('Έως', '') or '').strip()
-                    earnings_val = str(row.get('Τύπος Αποδοχών', '') or '').strip()
-                    if earnings_val and earnings_val.lower() != 'nan':
-                        if end_val:
-                            return f"{end_val} – {earnings_val}"
-                        return earnings_val
-                    return end_val
-
-                display_yearly_detailed['Έως'] = display_yearly_detailed.apply(_combine_period_and_type, axis=1)
-                display_yearly_detailed = display_yearly_detailed.drop(columns=['Τύπος Αποδοχών'])
-
             # Αναδιατάσσουμε τις στήλες για εμφάνιση
             display_columns = ['Έτος_Display', 'Ταμείο_Display']
             if 'Τύπος_Ασφάλισης_Display' in display_yearly_detailed.columns:
                 display_columns.append('Τύπος_Ασφάλισης_Display')
-            display_columns += ['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως']
+            display_columns += ['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως', 'Τύπος Αποδοχών']
             display_columns += ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
             
             # Δημιουργούμε τον τελικό πίνακα για εμφάνιση
@@ -2077,10 +2063,10 @@ def show_results_page(df, filename):
             final_headers = ['Έτος', 'Ταμείο']
             if 'Τύπος_Ασφάλισης_Display' in display_yearly_detailed.columns:
                 final_headers.append('Τύπος Ασφάλισης')
-            final_headers += ['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Περίοδος / Τύπος Αποδοχών']
+            final_headers += ['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως', 'Τύπος Αποδοχών']
             final_headers += ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές Αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
             display_final.columns = final_headers
-            period_column_name = 'Περίοδος / Τύπος Αποδοχών'
+            period_column_name = 'Έως'
             
             # Εφαρμόζουμε ελληνική μορφοποίηση για αριθμητικές στήλες
             numeric_cols_yearly = ['Έτη', 'Μήνες', 'Ημέρες', 'Αριθμός Εγγραφών']
