@@ -1326,26 +1326,26 @@ def show_results_page(df, filename):
           const translateUploader = () => {
             const root = document.querySelector('div[data-testid="stFileUploader"]');
             if (root) {
-              const hints = root.querySelectorAll('span, div');
-              hints.forEach((el) => {
-                if (el.textContent && el.textContent.includes('Drag and drop')) {
-                  el.textContent = 'Σύρετε και αφήστε το αρχείο εδώ';
-                }
-                if (el.textContent && el.textContent.includes('Drag and drop files here')) {
-                  el.textContent = 'Σύρετε και αφήστε τα αρχεία εδώ';
-                }
-                if (el.textContent && el.textContent.includes('Limit')) {
-                  el.textContent = el.textContent
-                    .replace('Limit', 'Όριο')
-                    .replace('per file', 'ανά αρχείο');
-                }
-              });
-              const btns = root.querySelectorAll('button, span, label');
-              btns.forEach((b) => {
-                if (b.textContent && b.textContent.trim() === 'Browse file') {
-                  b.textContent = 'Επιλογή αρχείου';
-                }
-              });
+            const hints = root.querySelectorAll('span, div');
+            hints.forEach((el) => {
+              if (el.textContent && el.textContent.includes('Drag and drop')) {
+                el.textContent = 'Σύρετε και αφήστε το αρχείο εδώ';
+              }
+              if (el.textContent && el.textContent.includes('Drag and drop files here')) {
+                el.textContent = 'Σύρετε και αφήστε τα αρχεία εδώ';
+              }
+              if (el.textContent && el.textContent.includes('Limit')) {
+                el.textContent = el.textContent
+                  .replace('Limit', 'Όριο')
+                  .replace('per file', 'ανά αρχείο');
+              }
+            });
+            const btns = root.querySelectorAll('button, span, label');
+            btns.forEach((b) => {
+              if (b.textContent && b.textContent.trim() === 'Browse file') {
+                b.textContent = 'Επιλογή αρχείου';
+              }
+            });
             }
           };
 
@@ -1428,7 +1428,7 @@ def show_results_page(df, filename):
         if st.session_state.get('show_filters', False):
             with st.expander("Φίλτρα Δεδομένων", expanded=True):
                 # Όλα τα φίλτρα σε μία γραμμή
-                col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([1.1, 1.1, 1.4, 1.1, 1.0, 1.0, 0.6, 0.6])
+                col1, col2, col3, col4, col5, col6, col7 = st.columns([1.1, 1.1, 1.4, 1.1, 1.0, 1.0, 1.2])
 
                 with col1:
                     # Φίλτρο Ταμείου
@@ -1529,9 +1529,17 @@ def show_results_page(df, filename):
                         )
 
                 with col7:
-                    st.write("")
-                with col8:
-                    st.write("")
+                    # Φίλτρο Α-Μ Εργοδότη
+                    if 'Α-Μ εργοδότη' in main_df.columns:
+                        ame_options = ['Όλα'] + sorted(main_df['Α-Μ εργοδότη'].dropna().astype(str).unique().tolist())
+                        selected_ame = st.multiselect(
+                            "Α-Μ Εργοδότη:",
+                            options=ame_options,
+                            default=['Όλα'],
+                            key="filter_ame"
+                        )
+                        if 'Όλα' not in selected_ame:
+                            main_df = main_df[main_df['Α-Μ εργοδότη'].astype(str).isin(selected_ame)]
                 
                 # Εφαρμογή φίλτρων ημερομηνιών
                 if 'Από' in main_df.columns and (from_date_str or to_date_str):
@@ -2132,7 +2140,7 @@ def show_results_page(df, filename):
                 display_final,
                 description="Ετήσια αναφορά ανά Ταμείο, Κλάδο/Πακέτο Κάλυψης και τύπο αποδοχών με συγκεντρωτικά στοιχεία."
             )
-            
+                
         else:
             st.warning("Οι στήλες 'Από' ή 'Ταμείο' δεν βρέθηκαν στα δεδομένα.")
     
@@ -2744,7 +2752,7 @@ def show_results_page(df, filename):
                     cols.remove('Περικοπή')
                     plaf_idx = cols.index('Εισφ. πλαφόν')
                     cols.insert(plaf_idx + 1, 'Περικοπή')
-                    display_apd_df = display_apd_df[cols]
+                display_apd_df = display_apd_df[cols]
 
             # Νέα στήλη: Συντ. Αποδοχές = min(Μικτές αποδοχές, Εισφ. πλαφόν)
             if 'Μικτές αποδοχές' in display_apd_df.columns:
@@ -3148,7 +3156,7 @@ def show_results_page(df, filename):
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 disabled='view_buffer' not in locals()
-            )
+        )
     
     # Footer
     st.markdown("---")
