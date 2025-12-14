@@ -1736,8 +1736,12 @@ def show_results_page(df, filename):
                 if col in summary_df.columns:
                     summary_df[col] = summary_df[col].apply(lambda x: clean_numeric_value(x, exclude_drx=True))
             
-            # Ομαδοποίηση με βάση Κλάδος/Πακέτο και υπολογισμός min/max σε datetime
-            grouped = summary_df.groupby('Κλάδος/Πακέτο Κάλυψης').agg({
+            # Ομαδοποίηση με βάση Κλάδος/Πακέτο και (αν υπάρχει) Ταμείο
+            group_keys = ['Κλάδος/Πακέτο Κάλυψης']
+            if 'Ταμείο' in summary_df.columns:
+                group_keys.append('Ταμείο')
+
+            grouped = summary_df.groupby(group_keys).agg({
                 'Από_dt': 'min',
                 'Έως_dt': 'max',
                 'Έτη': 'sum',
@@ -1763,12 +1767,11 @@ def show_results_page(df, filename):
                 grouped['Έτη'].fillna(0) * year_days
             ).round(0).astype(int)
             
-            # Μετράμε τις εγγραφές για κάθε κλάδο
-            record_counts = summary_df['Κλάδος/Πακέτο Κάλυψης'].value_counts().reset_index()
-            record_counts.columns = ['Κλάδος/Πακέτο Κάλυψης', 'Αριθμός Εγγραφών']
+            # Μετράμε τις εγγραφές για κάθε συνδυασμό (Κλάδος, Ταμείο)
+            record_counts = summary_df.groupby(group_keys).size().reset_index(name='Αριθμός Εγγραφών')
             
             # Συνδυάζουμε τα δεδομένα
-            summary_final = grouped.merge(record_counts, on='Κλάδος/Πακέτο Κάλυψης', how='left')
+            summary_final = grouped.merge(record_counts, on=group_keys, how='left')
             
             # Προσθήκη περιγραφής από το Παράρτημα
             if 'Κωδικός Κλάδων / Πακέτων Κάλυψης' in df.columns and 'Περιγραφή' in df.columns:
@@ -1789,6 +1792,8 @@ def show_results_page(df, filename):
             
             # Αναδιατάσσουμε τις στήλες - Περιγραφή δεξιά από Κλάδος/Πακέτο
             columns_order = ['Κλάδος/Πακέτο Κάλυψης']
+            if 'Ταμείο' in summary_final.columns:
+                columns_order.append('Ταμείο')
             if 'Περιγραφή' in summary_final.columns:
                 columns_order.append('Περιγραφή')
             columns_order += ['Από', 'Έως', 'Συνολικές ημέρες', 'Έτη', 'Μήνες', 'Ημέρες', 
