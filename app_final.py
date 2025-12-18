@@ -3660,8 +3660,8 @@ def show_results_page(df, filename):
                     is_ika_tameio = 'IKA' in t or 'ΙΚΑ' in t
                     is_misthoti = 'ΜΙΣΘΩΤΗ' in i_type and 'ΜΗ' not in i_type
                     
-                    # Check earnings type: δεχόμαστε 01 ή 16 (και παραλλαγές)
-                    is_et_ika = et in ['01', '1', '16']
+                    # Check earnings type: δεχόμαστε 01, 16 ή 99 (και παραλλαγές)
+                    is_et_ika = et in ['01', '1', '16', '99']
                     
                     return (is_ika_tameio or is_misthoti) and is_et_ika
 
@@ -3706,12 +3706,27 @@ def show_results_page(df, filename):
                         if year <= 2016:
                             valid_months.append((year, month))
 
+                # Υπολογισμός συνολικών παράλληλων ημερών με τύπο (IKA + OAEE - 25), με ανώτατο όριο 25 ανά πλευρά
+                parallel_days_total = 0
+                for (year, month) in valid_months:
+                    try:
+                        g = month_groups.get_group((year, month))
+                    except KeyError:
+                        continue
+                    ika_days = g.loc[g['is_ika'], 'Ημέρες'].sum()
+                    oaee_days = g.loc[g['is_oaee'], 'Ημέρες'].sum()
+                    ika_cap = min(ika_days, 25)
+                    oaee_cap = min(oaee_days, 25)
+                    month_parallel = max(ika_cap + oaee_cap - 25, 0)
+                    parallel_days_total += month_parallel
+                parallel_days_total = int(round(parallel_days_total))
+
                 # Μηνύματα ενημέρωσης σε μία γραμμή (όπως στην Καταμέτρηση)
                 info_col1, info_col2, info_col3 = st.columns([3, 3, 2])
                 with info_col1:
-                    st.info("Εμφάνιση διαστημάτων όπου συνυπάρχουν στον ίδιο μήνα: ΙΚΑ (Τύπος Αποδοχών 01) και ΟΑΕΕ (Κλάδος/Πακέτο Κ).")
+                    st.info("Εμφάνιση διαστημάτων όπου συνυπάρχουν στον ίδιο μήνα: ΙΚΑ (Τύπος Αποδοχών 01, 16 ή 99) και ΟΑΕΕ (Κλάδος/Πακέτο Κ).")
                 with info_col2:
-                    st.success(f"Βρέθηκαν {len(valid_months)} μήνες παράλληλης ασφάλισης (ΙΚΑ & ΟΑΕΕ Κλάδος Κ) έως 31/12/2016.")
+                    st.success(f"Βρέθηκαν {len(valid_months)} μήνες παράλληλης ασφάλισης (ΙΚΑ 01/16/99 & ΟΑΕΕ Κλάδος Κ) έως 31/12/2016. Σύνολο παράλληλων ημερών: {parallel_days_total}.")
                 with info_col3:
                     st.warning("Διαστήματα που καλύπτουν πολλαπλούς μήνες επιμερίζονται και επισημαίνονται με κίτρινο χρώμα.")
 
