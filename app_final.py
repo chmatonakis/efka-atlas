@@ -1819,10 +1819,23 @@ def show_results_page(df, filename):
                         unpaid = t_df[(t_df['K'].isin(['K', 'Κ'])) & (t_df['C'] == 0)]
                         
                         if not unpaid.empty:
+                            months = []
+                            for _, r in unpaid.iterrows():
+                                try:
+                                    d = pd.to_datetime(r['Από'], format='%d/%m/%Y', errors='coerce')
+                                    if pd.notna(d):
+                                        months.append(d.strftime('%m/%Y'))
+                                except: pass
+                            
+                            months_str = ", ".join(months) if months else ""
+                            details_msg = f"{len(unpaid)} μήνες ΟΑΕΕ (Κ) με μηδενική εισφορά."
+                            if months_str:
+                                details_msg += f"<br><span style='font-size: 0.85rem; color: #666;'>({months_str})</span>"
+
                             audit_rows.append({
                                 'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 
                                 'Εύρημα': 'Εντοπίστηκαν', 
-                                'Λεπτομέρειες': f"{len(unpaid)} μήνες ΟΑΕΕ (Κ) με μηδενική εισφορά.",
+                                'Λεπτομέρειες': details_msg,
                                 'Ενέργειες': 'Ελέγξτε για τυχόν οφειλές στον ΟΑΕΕ'
                             })
                         else:
