@@ -247,8 +247,24 @@ st.markdown("""
         color: #ffffff !important;
     }
     .header-right { display: flex; gap: 1.5rem; }
-    .nav-link { color: #ffffff !important; text-decoration: none; font-weight: 600; padding: 0; }
-    .nav-link:hover { text-decoration: underline; color: #ffffff !important; }
+    .nav-link { 
+        color: #ffffff !important; 
+        text-decoration: none; 
+        font-weight: 600; 
+        padding: 0.5rem 1.2rem; 
+        border: 1px solid rgba(255,255,255,0.5);
+        border-radius: 6px;
+        transition: all 0.2s ease;
+        display: inline-block;
+    }
+    .nav-link:hover { 
+        background-color: rgba(255,255,255,0.15); 
+        border-color: #ffffff;
+        text-decoration: none !important; 
+        color: #ffffff !important;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
     .upload-section {
         background-color: transparent;
         padding: 1.5rem 1rem;
@@ -257,90 +273,124 @@ st.markdown("""
         text-align: center;
         margin: 1rem 0 2rem 0;
     }
-    /* Σκιές και περίγραμμα για το πλαίσιο μεταφοράς/απόθεσης */
+    /* Upload Container - Modern Card Style - Εφαρμογή απευθείας στο widget */
     [data-testid="stFileUploader"] {
-        background: #ffffff;
-        border: 1px solid #d0d7de;
-        border-radius: 12px;
-        padding: 1.25rem;
-        box-shadow: 0 6px 16px rgba(0,0,0,0.06);
+        background-color: #f8fbff;
+        padding: 3rem;
+        border-radius: 16px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+        border: 2px dashed #3b82f6;
     }
-    /* Έλεγχος πλάτους του ίδιου του file uploader (χωρίς wrapper) */
+
+    /* Κεντράρισμα του uploader */
     div[data-testid="stFileUploader"] {
-        max-width: 45% !important;
         margin-left: auto !important;
         margin-right: auto !important;
+        max-width: 600px !important;
     }
-    @media (max-width: 1200px) {
-        div[data-testid="stFileUploader"] { max-width: 65% !important; }
-    }
-    @media (max-width: 768px) {
-        div[data-testid="stFileUploader"] { max-width: 85% !important; }
+
+    /* Βοηθητικό class για το κείμενο προτροπής */
+    .upload-prompt-text {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: #1a1a1a;
+        margin-bottom: 1rem;
+        text-align: center !important;
+        width: 100%;
+        display: block;
     }
     .app-container { max-width: 680px; margin: 0 auto; }
     .main-header { margin-top: 0.5rem; }
     
-    /* Μωβ Header - Full Width - Compact Version */
+    /* Μωβ Header - Full Width - Modern */
     .purple-header {
         background: linear-gradient(135deg, #7b2cbf 0%, #5a189a 100%);
         color: white;
         text-align: center;
-        padding: 1.5rem 1rem;
-        margin: -4rem -5rem 0.5rem -5rem;
-        font-size: 1.8rem;
+        padding: 2rem 1rem;
+        margin: -4rem -5rem 2rem -5rem;
+        font-size: 2rem;
         font-weight: 700;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
     
-    /* Upload Container - Κεντρικό 45% */
-    .upload-container {
-        max-width: 45%;
-        margin: 0 auto 2rem auto;
+    
+    /* EFKA Button Style - Secondary Action */
+    .efka-btn-wrapper {
         text-align: center;
+        margin: 2rem 0;
     }
-    @media (max-width: 1200px) {
-        .upload-container { max-width: 65%; }
+    .efka-btn {
+        display: inline-block;
+        background-color: transparent;
+        color: #0056b3 !important;
+        border: 2px solid #0056b3;
+        padding: 0.6rem 1.5rem;
+        border-radius: 50px;
+        text-decoration: none !important;
+        font-weight: 600;
+        font-size: 0.95rem;
+        transition: all 0.2s ease;
     }
-    @media (max-width: 768px) {
-        .upload-container { max-width: 85%; }
+    .efka-btn:hover {
+        background-color: #eef6fc;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(0, 86, 179, 0.1);
     }
     
-    .upload-prompt {
-        font-size: 1.25rem;
-        font-weight: 700;
-        color: #000000;
-        margin-bottom: 1.5rem;
-        text-align: center;
-    }
-    
-    /* Οδηγίες Box - Κεντρικό 40% */
+    /* Οδηγίες Box - Modern Style */
     .instructions-box {
-        max-width: 40%;
-        margin: 3rem auto 2rem auto;
-        background: white;
-        border: 2px solid #cbd5e1;
-        border-radius: 8px;
-        padding: 2rem;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        max-width: 800px;
+        margin: 0 auto 4rem auto;
+        background: #ffffff;
+        border: 1px solid #e1e4e8;
+        border-radius: 12px;
+        padding: 3rem;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.05);
     }
-    @media (max-width: 1200px) {
-        .instructions-box { max-width: 60%; }
-    }
-    @media (max-width: 768px) {
-        .instructions-box { max-width: 90%; }
-    }
+    
     .instructions-title {
-        font-size: 1.6rem;
+        font-size: 1.5rem;
         font-weight: 700;
-        color: #000000;
-        margin-bottom: 1rem;
-        text-align: left;
+        color: #2c3e50;
+        margin-bottom: 2rem;
+        text-align: center;
+        border-bottom: 2px solid #f0f2f5;
+        padding-bottom: 1rem;
     }
+    
     .instructions-list {
         text-align: left;
-        color: #333333;
+        color: #4a5568;
         font-size: 1.1rem;
-        line-height: 1.9;
+        line-height: 1.8;
+    }
+
+    /* Footer Styles */
+    .main-footer {
+        margin-top: 5rem;
+        padding: 3rem 1rem;
+        background-color: #f8f9fa;
+        border-top: 1px solid #e1e4e8;
+        text-align: center;
+        color: #6c757d;
+        margin-left: -5rem;
+        margin-right: -5rem;
+        margin-bottom: -5rem;
+    }
+    .footer-disclaimer {
+        font-size: 0.85rem;
+        color: #6c757d;
+        margin-bottom: 1.5rem;
+        line-height: 1.6;
+        max-width: 800px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+    .footer-copyright {
+        font-weight: 600;
+        color: #2c3e50;
+        font-size: 0.95rem;
     }
     .success-box {
         padding: 1rem;
@@ -1277,7 +1327,7 @@ def show_results_page(df, filename):
                 </div>
             </div>
             <div class="header-right">
-                <a href="#" class="nav-link" onclick="resetToHome()">Αρχική</a>
+                <a href="." target="_self" class="nav-link">Αρχική</a>
             </div>
         </div>
     </div>
@@ -1416,17 +1466,17 @@ def show_results_page(df, filename):
     )
     
     # Δημιουργία tabs για διαφορετικούς τύπους δεδομένων
-    tab_main, tab_annex, tab_summary, tab_count, tab_gaps, tab_apd, tab_parallel, tab_multi, tab_yearly, tab_days = st.tabs([
-        "Κύρια Δεδομένα",
-        "Παράρτημα",
-        "Συνοπτική Αναφορά",
+    tab_summary, tab_count, tab_gaps, tab_apd, tab_parallel, tab_multi, tab_yearly, tab_days, tab_main, tab_annex = st.tabs([
+        "Σύνοψη",
         "Καταμέτρηση",
-        "Κενά Διαστήματα",
+        "Κενά",
         "Ανάλυση ΑΠΔ",
-        "Παράλληλη Ασφάλιση",
+        "Παράλληλη",
         "Πολλαπλή",
         "Ετήσια Αναφορά",
-        "Ημέρες Ασφάλισης"
+        "Ημέρες Ασφάλισης",
+        "Κύρια Δεδομένα",
+        "Παράρτημα"
     ])
     
     with tab_main:
@@ -1658,11 +1708,389 @@ def show_results_page(df, filename):
             st.info("Δεν βρέθηκαν επιπλέον πίνακες από τις τελευταίες σελίδες.")
     
     with tab_summary:
-        # Συνοπτική Αναφορά - Ομαδοποίηση με βάση Κλάδος/Πακέτο Κάλυψης
-        st.markdown("### Συνοπτική Αναφορά - Ομαδοποίηση κατά Κλάδο/Πακέτο Κάλυψης")
-        st.info("Σημείωση: Στα αθροίσματα συμπεριλαμβάνονται μόνο τα ποσά σε €. Τα ποσά σε ΔΡΧ (πριν το 2002) εμφανίζονται αλλά δεν υπολογίζονται στα συνολικά.")
+        
+        # --- Audit Report Integration ---
+        if not df.empty and 'Από' in df.columns:
+            def generate_audit_report(data_df, extra_data_df=None):
+                audit_rows = []
+                
+                # Check 1: Old/New Insured
+                try:
+                    dates = pd.to_datetime(data_df['Από'], format='%d/%m/%Y', errors='coerce')
+                    min_date = dates.min()
+                    if pd.notna(min_date):
+                        cutoff = pd.Timestamp('1993-01-01')
+                        is_palios = min_date < cutoff
+                        status_str = "Παλιός" if is_palios else "Νέος"
+                        details = f"Πρώτη εγγραφή: {min_date.strftime('%d/%m/%Y')}"
+                        audit_rows.append({
+                            'A/A': 1, 'Έλεγχος': 'Παλιός ή νέος ασφαλισμένος', 
+                            'Εύρημα': status_str, 'Λεπτομέρειες': details, 'Ενέργειες': '-'
+                        })
+                except Exception: pass
+
+                # Check 2: Insurance Funds History (ανά Ταμείο & Τύπο Ασφάλισης: πρώτη/τελευταία ημερομηνία)
+                try:
+                    if 'Ταμείο' in data_df.columns:
+                        temp_df = data_df.copy()
+                        temp_df['Start'] = pd.to_datetime(temp_df['Από'], format='%d/%m/%Y', errors='coerce')
+                        temp_df['End'] = pd.to_datetime(temp_df['Έως'], format='%d/%m/%Y', errors='coerce')
+                        temp_df['End'] = temp_df['End'].fillna(temp_df['Start'])
+                        temp_df = temp_df.dropna(subset=['Start'])
+                        
+                        # Ομαδοποίηση ανά Ταμείο και Τύπο Ασφάλισης (αν υπάρχει)
+                        group_cols = ['Ταμείο']
+                        if 'Τύπος Ασφάλισης' in temp_df.columns:
+                            group_cols.append('Τύπος Ασφάλισης')
+                        
+                        grouped = temp_df.groupby(group_cols).agg({
+                            'Start': 'min',
+                            'End': 'max'
+                        }).reset_index()
+                        grouped = grouped.sort_values('Start')
+                        
+                        rows_html = []
+                        for _, row2 in grouped.iterrows():
+                            fund = str(row2['Ταμείο']).strip()
+                            typ = str(row2['Τύπος Ασφάλισης']).strip() if 'Τύπος Ασφάλισης' in grouped.columns else ""
+                            label = fund if typ in [None, '', 'nan'] else f"{fund} - {typ}"
+                            s_date = row2['Start'].strftime('%d/%m/%Y')
+                            e_date = row2['End'].strftime('%d/%m/%Y')
+                            rows_html.append(
+                                f"<div style='font-weight: 600; color: #2c3e50;'>{label}</div>"
+                                f"<div style='color: #555;'>{s_date} - {e_date}</div>"
+                            )
+                        history_html = (
+                            "<div style='display: grid; grid-template-columns: 1fr auto; column-gap: 12px; row-gap: 4px;'>"
+                            + "".join(rows_html) +
+                            "</div>"
+                        )
+                        
+                        count_funds = temp_df['Ταμείο'].dropna().nunique()
+                        audit_rows.append({
+                            'A/A': 2, 'Έλεγχος': 'Ασφαλιστικά ταμεία', 
+                            'Εύρημα': f"{count_funds} Ταμεία", 
+                            'Λεπτομέρειες': history_html, 'Ενέργειες': '-'
+                        })
+                except Exception: pass
+
+                # Check 3: Gaps
+                try:
+                    gaps = find_gaps_in_insurance_data(data_df)
+                    if not gaps.empty:
+                        # Format first few gaps
+                        gap_details = []
+                        for _, g in gaps.head(3).iterrows():
+                            # Fix column name access
+                            duration = g.get('Ημερολογιακές ημέρες', '')
+                            gap_details.append(f"Από {g['Από']} έως {g['Έως']} ({duration} ημέρες)")
+                        if len(gaps) > 3:
+                            gap_details.append("...")
+                        
+                        audit_rows.append({
+                            'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης', 
+                            'Εύρημα': f"{len(gaps)} Διάστημα(τα)", 
+                            'Λεπτομέρειες': "<br>".join(gap_details),
+                            'Ενέργειες': 'Ελέγξτε την καρτέλα "Κενά Διαστήματα"'
+                        })
+                    else:
+                        audit_rows.append({
+                            'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης', 
+                            'Εύρημα': 'Κανένα', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'
+                        })
+                except Exception as e:
+                     audit_rows.append({
+                        'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης', 
+                        'Εύρημα': 'Σφάλμα ελέγχου', 'Λεπτομέρειες': str(e), 'Ενέργειες': '-'
+                    })
+
+                # Check 4: Unpaid OAEE
+                try:
+                    if 'Κλάδος/Πακέτο Κάλυψης' in data_df.columns and 'Συνολικές εισφορές' in data_df.columns:
+                        def clean_money_chk(x):
+                            if isinstance(x, str):
+                                if 'DRX' in x or 'ΔΡΧ' in x: return 0.0
+                                return clean_numeric_value(x, exclude_drx=True)
+                            return x
+                        
+                        t_df = data_df.copy()
+                        t_df['C'] = t_df['Συνολικές εισφορές'].apply(clean_money_chk)
+                        t_df['K'] = t_df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip().str.upper()
+                        unpaid = t_df[(t_df['K'].isin(['K', 'Κ'])) & (t_df['C'] == 0)]
+                        
+                        if not unpaid.empty:
+                            audit_rows.append({
+                                'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 
+                                'Εύρημα': 'Εντοπίστηκαν', 
+                                'Λεπτομέρειες': f"{len(unpaid)} μήνες ΟΑΕΕ (Κ) με μηδενική εισφορά.",
+                                'Ενέργειες': 'Ελέγξτε για τυχόν οφειλές στον ΟΑΕΕ'
+                            })
+                        else:
+                            audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': 'Καμία', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                except Exception: pass
+
+                # Check 5: Parallel Insurance (Month-based Logic)
+                try:
+                    p_found = False
+                    
+                    p_df = data_df.copy()
+                    p_df['Start'] = pd.to_datetime(p_df['Από'], format='%d/%m/%Y', errors='coerce')
+                    p_df['End'] = pd.to_datetime(p_df['Έως'], format='%d/%m/%Y', errors='coerce')
+                    p_df = p_df.dropna(subset=['Start', 'End'])
+                    
+                    def is_ika_simple(row):
+                        et = str(row.get('Τύπος Αποδοχών', '')).strip()
+                        t = str(row.get('Ταμείο', '')).upper()
+                        return ('IKA' in t or 'ΙΚΑ' in t) and et in ['01', '1', '16', '99']
+
+                    def is_oaee_simple(row):
+                        kl = str(row.get('Κλάδος/Πακέτο Κάλυψης', '')).strip().upper()
+                        t = str(row.get('Ταμείο', '')).upper()
+                        return ('OAEE' in t or 'ΟΑΕΕ' in t or 'TEBE' in t or 'ΤΕΒΕ' in t) and kl in ['K', 'Κ']
+
+                    p_df['is_ika'] = p_df.apply(is_ika_simple, axis=1)
+                    p_df['is_oaee'] = p_df.apply(is_oaee_simple, axis=1)
+                    
+                    ika_set = p_df[p_df['is_ika']]
+                    oaee_set = p_df[p_df['is_oaee']]
+                    
+                    if not ika_set.empty and not oaee_set.empty:
+                        for _, i_row in ika_set.iterrows():
+                            ov = oaee_set[(oaee_set['Start'] <= i_row['End']) & (oaee_set['End'] >= i_row['Start'])]
+                            if not ov.empty:
+                                p_found = True
+                                break
+                    
+                    if p_found:
+                         audit_rows.append({
+                            'A/A': 5, 'Έλεγχος': 'Παράλληλη ασφάλιση', 
+                            'Εύρημα': 'Πιθανή', 
+                            'Λεπτομέρειες': 'Βρέθηκαν χρονικά επικαλυπτόμενα διαστήματα ΙΚΑ (01/16/99) και ΟΑΕΕ (Κ).',
+                            'Ενέργειες': 'Ελέγξτε την καρτέλα "Παράλληλη Ασφάλιση"'
+                        })
+                    else:
+                        audit_rows.append({'A/A': 5, 'Έλεγχος': 'Παράλληλη ασφάλιση', 'Εύρημα': 'Όχι', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                except Exception: pass
+
+                # Check 6: Multiple Employers (Month-based Logic)
+                try:
+                    m_found = False
+                    
+                    if 'Α-Μ εργοδότη' in data_df.columns:
+                        m_df = data_df.copy()
+                        m_df['Start'] = pd.to_datetime(m_df['Από'], format='%d/%m/%Y', errors='coerce')
+                        m_df['End'] = pd.to_datetime(m_df['Έως'], format='%d/%m/%Y', errors='coerce')
+                        m_df = m_df.dropna(subset=['Start', 'End'])
+                        
+                        def is_ika_multi(row):
+                            et = str(row.get('Τύπος Αποδοχών', '')).strip()
+                            t = str(row.get('Ταμείο', '')).upper()
+                            return ('IKA' in t or 'ΙΚΑ' in t) and et in ['01', '1', '16', '99']
+                        
+                        m_df['is_ika'] = m_df.apply(is_ika_multi, axis=1)
+                        m_df = m_df[m_df['is_ika']]
+                        
+                        m_df['Emp'] = m_df['Α-Μ εργοδότη'].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], pd.NA)
+                        m_df = m_df.dropna(subset=['Emp'])
+                        
+                        if m_df['Emp'].nunique() > 1:
+                            m_df = m_df.sort_values('Start')
+                            seen_months = {}
+                            
+                            for _, row in m_df.iterrows():
+                                s = row['Start']
+                                e = row['End']
+                                emp = row['Emp']
+                                curr = s.replace(day=1)
+                                end_m = e.replace(day=1)
+                                while curr <= end_m:
+                                    k = (curr.year, curr.month)
+                                    if k not in seen_months: seen_months[k] = set()
+                                    seen_months[k].add(emp)
+                                    if len(seen_months[k]) > 1:
+                                        m_found = True
+                                        break
+                                    if curr.month == 12: curr = curr.replace(year=curr.year+1, month=1)
+                                    else: curr = curr.replace(month=curr.month+1)
+                                if m_found: break
+
+                    if m_found:
+                        audit_rows.append({
+                            'A/A': 6, 'Έλεγχος': 'Πολλαπλή απασχόληση', 
+                            'Εύρημα': 'Πιθανή', 
+                            'Λεπτομέρειες': f"Βρέθηκαν μήνες με > 1 εργοδότες για ΙΚΑ (01/16/99).",
+                            'Ενέργειες': 'Ελέγξτε την καρτέλα "Πολλαπλή"'
+                        })
+                    else:
+                        audit_rows.append({'A/A': 6, 'Έλεγχος': 'Πολλαπλή απασχόληση', 'Εύρημα': '-', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                except Exception: pass
+
+                # Check 7: Low APD
+                try:
+                    if 'Μικτές αποδοχές' in data_df.columns and 'Συνολικές εισφορές' in data_df.columns:
+                        def get_val_chk(x):
+                            if isinstance(x, str):
+                                if 'DRX' in x or 'ΔΡΧ' in x: return 0.0
+                                return clean_numeric_value(x, exclude_drx=True) or 0.0
+                            return x if pd.notna(x) else 0.0
+                        t_df = data_df.copy()
+                        t_df['G'] = t_df['Μικτές αποδοχές'].apply(get_val_chk)
+                        t_df['C'] = t_df['Συνολικές εισφορές'].apply(get_val_chk)
+                        t_df = t_df[t_df['G'] > 0]
+                        if not t_df.empty:
+                            t_df['Ratio'] = t_df['C'] / t_df['G']
+                            # Check < 0.30 (30%)
+                            cnt = len(t_df[t_df['Ratio'] < 0.30])
+                            if cnt > 0:
+                                audit_rows.append({
+                                    'A/A': 7, 'Έλεγχος': 'ΑΠΔ με χαμηλές κρατήσεις', 
+                                    'Εύρημα': 'Εντοπίστηκαν', 
+                                    'Λεπτομέρειες': f"{cnt} εγγραφές με εισφορές < 30% των αποδοχών.",
+                                    'Ενέργειες': 'Ελέγξτε για πιθανά σφάλματα ή ειδικές περιπτώσεις'
+                                })
+                            else:
+                                audit_rows.append({'A/A': 7, 'Έλεγχος': 'ΑΠΔ με χαμηλές κρατήσεις', 'Εύρημα': 'Καμία', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                        else:
+                            audit_rows.append({'A/A': 7, 'Έλεγχος': 'ΑΠΔ με χαμηλές κρατήσεις', 'Εύρημα': '-', 'Λεπτομέρειες': 'Δεν βρέθηκαν αποδοχές', 'Ενέργειες': '-'})
+                except Exception: pass
+
+                # Check 8: Plafond
+                try:
+                    if 'Από' in data_df.columns and 'Μικτές αποδοχές' in data_df.columns and 'Μήνες' in data_df.columns:
+                        t_df = data_df.copy()
+                        t_df['Dt'] = pd.to_datetime(t_df['Από'], format='%d/%m/%Y', errors='coerce')
+                        t_df['Y'] = t_df['Dt'].dt.year
+                        
+                        def get_val_chk(x):
+                            if isinstance(x, str):
+                                if 'DRX' in x or 'ΔΡΧ' in x: return 0.0
+                                return clean_numeric_value(x, exclude_drx=True) or 0.0
+                            return x if pd.notna(x) else 0.0
+                        
+                        t_df['G'] = t_df['Μικτές αποδοχές'].apply(get_val_chk)
+                        t_df['M'] = t_df['Μήνες'].apply(lambda x: clean_numeric_value(x) or 1)
+                        
+                        min_dt = t_df['Dt'].min()
+                        is_p = False
+                        if pd.notna(min_dt) and min_dt < pd.Timestamp('1993-01-01'): is_p = True
+                        curr_pl = PLAFOND_PALIOS if is_p else PLAFOND_NEOS
+                        
+                        exc = 0
+                        for _, r in t_df.iterrows():
+                            ys = str(int(r['Y'])) if pd.notna(r['Y']) else ""
+                            if ys in curr_pl:
+                                m_g = r['G'] / r['M'] if r['M'] > 0 else 0
+                                if m_g > curr_pl[ys]: exc += 1
+                        
+                        if exc > 0:
+                            audit_rows.append({
+                                'A/A': 8, 'Έλεγχος': 'Ανώτατο εισφορίσιμο πλαφόν', 
+                                'Εύρημα': 'Υπέρβαση', 
+                                'Λεπτομέρειες': f"{exc} εγγραφές ξεπερνούν το μηνιαίο πλαφόν.",
+                                'Ενέργειες': 'Ελέγξτε τα ποσά'
+                            })
+                        else:
+                            audit_rows.append({'A/A': 8, 'Έλεγχος': 'Ανώτατο εισφορίσιμο πλαφόν', 'Εύρημα': 'Εντός ορίων', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                except Exception: pass
+
+                # Check 9: Aggregated Intervals (Enhanced)
+                try:
+                    if 'Από' in data_df.columns and 'Έως' in data_df.columns:
+                        t_df = data_df.copy()
+                        t_df['D_From'] = pd.to_datetime(t_df['Από'], format='%d/%m/%Y', errors='coerce')
+                        t_df['D_To'] = pd.to_datetime(t_df['Έως'], format='%d/%m/%Y', errors='coerce')
+                        t_df['Duration'] = (t_df['D_To'] - t_df['D_From']).dt.days + 1
+                        agg_recs = t_df[t_df['Duration'] > 31]
+                        
+                        if not agg_recs.empty:
+                            count_total = len(agg_recs)
+                            count_year = len(agg_recs[agg_recs['Duration'] > 366])
+                            details_list = []
+                            agg_recs = agg_recs.sort_values('D_From')
+                            for _, r in agg_recs.iterrows():
+                                tam = str(r.get('Ταμείο', '')).strip()
+                                d_str = f"{r['Από']}-{r['Έως']}"
+                                details_list.append(f"{tam} ({d_str})")
+                            details_str = "<br>".join(details_list)
+                            finding_msg = f"{count_total} > 1 μήνα"
+                            if count_year > 0: finding_msg += f", {count_year} > 1 έτος"
+                            
+                            audit_rows.append({
+                                'A/A': 9, 'Έλεγχος': 'Ενοποιημένα διαστήματα', 
+                                'Εύρημα': finding_msg, 
+                                'Λεπτομέρειες': details_str,
+                                'Ενέργειες': '-'
+                            })
+                        else:
+                            audit_rows.append({'A/A': 9, 'Έλεγχος': 'Ενοποιημένα διαστήματα', 'Εύρημα': 'Κανένα', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                except Exception: pass
+
+                return pd.DataFrame(audit_rows)
+
+            st.markdown("### Βασικοί έλεγχοι δεδομένων")
+            audit_df = generate_audit_report(df, extra_df)
+            
+            # Custom 3-Column Layout
+            ac1, ac2, ac3 = st.columns(3)
+            
+            # Helper to render a specific check by A/A
+            def render_check(row):
+                actions_html = ""
+                if row['Ενέργειες'] != '-' and row['Ενέργειες']:
+                    actions_html = f"""
+                    <div style="margin-top: 4px; font-weight: bold; color: #d9534f; font-size: 0.9rem;">
+                        Ενέργειες: <span style="font-weight: normal; color: #333;">{row['Ενέργειες']}</span>
+                    </div>
+                    """
+                
+                details_val = row['Λεπτομέρειες'] if row['Λεπτομέρειες'] != '-' else ""
+                if details_val:
+                    if row['A/A'] == 9:
+                        details_html = f'<div style="margin-top: 4px; color: #555; font-size: 0.95rem; columns: 2; -webkit-columns: 2; column-gap: 16px;">{details_val}</div>'
+                    else:
+                        details_html = f'<div style="margin-top: 4px; color: #555; font-size: 0.95rem;">{details_val}</div>'
+                else:
+                    details_html = ""
+
+                st.markdown(
+                    f"""
+                    <div style="margin-bottom: 20px; padding: 12px; background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="font-size: 1.3rem; color: #111; margin-bottom: 6px;">
+                            <span style="font-weight: 700; color: #2c3e50;">{row['Έλεγχος']}</span>
+                            <br>
+                            <span style="font-weight: 600; color: #2980b9;">{row['Εύρημα']}</span>
+                        </div>
+                        {details_html}
+                        {actions_html}
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+            # Column 1: 1, 2, 5, 6
+            with ac1:
+                for aa in [1, 2, 5, 6]:
+                    r = audit_df[audit_df['A/A'] == aa]
+                    if not r.empty: render_check(r.iloc[0])
+
+            # Column 2: 3, 4, 7, 8 (Gaps first)
+            with ac2:
+                for aa in [3, 4, 7, 8]:
+                    r = audit_df[audit_df['A/A'] == aa]
+                    if not r.empty: render_check(r.iloc[0])
+
+            # Column 3: 9
+            with ac3:
+                for aa in [9]:
+                    r = audit_df[audit_df['A/A'] == aa]
+                    if not r.empty: render_check(r.iloc[0])
+            
+            register_view("Διαγνωστικός_Έλεγχος", audit_df)
+            st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
         
         if 'Κλάδος/Πακέτο Κάλυψης' in df.columns:
+            st.markdown("### Συνοπτική Αναφορά - Ομαδοποίηση κατά Κλάδο/Πακέτο (και Ταμείο)")
+            st.info("Σημείωση: Στα αθροίσματα συμπεριλαμβάνονται μόνο τα ποσά σε €. Τα ποσά σε ΔΡΧ (πριν το 2002) εμφανίζονται αλλά δεν υπολογίζονται στα συνολικά.")
             # Προετοιμασία δεδομένων
             summary_df = df.copy()
             # Κανονικοποίηση τιμών κλάδου/πακέτου
@@ -2610,10 +3038,30 @@ def show_results_page(df, filename):
                 # Φίλτρο Τύπου Ασφάλισης
                 if 'Τύπος Ασφάλισης' in apd_df.columns:
                     typos_options = ['Όλα'] + sorted(apd_df['Τύπος Ασφάλισης'].dropna().unique().tolist())
+                    
+                    # Προεπιλογή "ΜΙΣΘΩΤΗ ΑΣΦΑΛΙΣΗ" (και ΟΧΙ ΜΗ ΜΙΣΘΩΤΗ)
+                    default_typos = ['Όλα']
+                    found_misthoti = False
+                    
+                    # Πρώτα ψάχνουμε για καθαρή μισθωτή (αποκλείοντας το "ΜΗ ΜΙΣΘΩΤΗ")
+                    for opt in typos_options:
+                        opt_u = str(opt).upper()
+                        if "ΜΙΣΘΩΤΗ ΑΣΦΑΛΙΣΗ" in opt_u and "ΜΗ ΜΙΣΘΩΤΗ" not in opt_u:
+                            default_typos = [opt]
+                            found_misthoti = True
+                            break
+                    
+                    if not found_misthoti:
+                        # Fallback αν δεν βρεθεί ακριβής αντιστοιχία
+                        for opt in typos_options:
+                            if "ΜΙΣΘΩΤΗ ΑΣΦΑΛΙΣΗ" in str(opt).upper():
+                                default_typos = [opt]
+                                break
+                            
                     selected_typos = st.multiselect(
                         "Τύπος Ασφάλισης:",
                         options=typos_options,
-                        default=['Όλα'],
+                        default=default_typos,
                         key="apd_filter_typos"
                     )
                     if 'Όλα' not in selected_typos:
@@ -2665,7 +3113,7 @@ def show_results_page(df, filename):
             with col6:
                 to_date_str = st.text_input("Έως (dd/mm/yyyy):", value="", placeholder="31/12/1990", key="apd_filter_to_date")
             with col7:
-                retention_filter = st.number_input("Επισήμανση % κράτησης <", min_value=0.0, max_value=100.0, value=20.0, step=0.1, format="%.1f")
+                retention_filter = st.number_input("Επισήμανση % κράτησης <", min_value=0.0, max_value=100.0, value=30.0, step=0.1, format="%.1f")
             with col8:
                 retention_filter_mode = st.selectbox(
                     "Φίλτρο % κράτησης",
@@ -3966,20 +4414,6 @@ def show_results_page(df, filename):
                     # Register for Export
                     register_view("Παράλληλη_Ασφάλιση", display_final_df)
                     
-                    st.markdown("---")
-                    st.write("### Επιλογές Εκτύπωσης")
-                    
-                    col_p1, col_p2 = st.columns(2)
-                    with col_p1:
-                        client_name = st.text_input("Ονοματεπώνυμο ασφαλισμένου:", key="par_name", value=st.session_state.get('print_client_name', ''))
-                    with col_p2:
-                        client_amka = st.text_input("ΑΜΚΑ:", key="par_amka", value=st.session_state.get('print_client_amka', ''))
-                    
-                    # Sync with global state
-                    if client_name: st.session_state['print_client_name'] = client_name
-                    if client_amka: st.session_state['print_client_amka'] = client_amka
-                    
-                    st.write("")
                     render_print_button(
                         "print_parallel",
                         "Παράλληλη Ασφάλιση",
@@ -4326,21 +4760,6 @@ def show_results_page(df, filename):
                     
                     st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
                     
-                    register_view("Πολλαπλή_Απασχόληση", display_final_df)
-                    
-                    st.markdown("---")
-                    st.write("### Επιλογές Εκτύπωσης")
-                    
-                    col_p1, col_p2 = st.columns(2)
-                    with col_p1:
-                        client_name = st.text_input("Ονοματεπώνυμο ασφαλισμένου:", key="multi_name", value=st.session_state.get('print_client_name', ''))
-                    with col_p2:
-                        client_amka = st.text_input("ΑΜΚΑ:", key="multi_amka", value=st.session_state.get('print_client_amka', ''))
-                    
-                    if client_name: st.session_state['print_client_name'] = client_name
-                    if client_amka: st.session_state['print_client_amka'] = client_amka
-                    
-                    st.write("")
                     render_print_button(
                         "print_multi",
                         "Πολλαπλή Απασχόληση",
@@ -4353,7 +4772,7 @@ def show_results_page(df, filename):
                  st.warning("Δεν βρέθηκαν δεδομένα.")
         else:
             st.warning("Λείπουν απαραίτητες στήλες.")
-
+    
     # Download section
     st.markdown("---")
     st.markdown("### Επιλογές εκτύπωσης")
@@ -4603,9 +5022,17 @@ def main():
     
     # Εμφάνιση ανεβάσματος αρχείου
     if not st.session_state['file_uploaded']:
-        # Προτροπή και Upload Button - Κεντρικό 30%
-        st.markdown('<div class="upload-container">', unsafe_allow_html=True)
-        st.markdown('<p class="upload-prompt">Ανεβάστε το pdf αρχείο από τον ΕΦΚΑ</p>', unsafe_allow_html=True)
+        # Κουμπί για κατέβασμα αρχείου από ΕΦΚΑ
+        st.markdown('''
+            <div class="efka-btn-wrapper">
+                <a href="https://www.e-efka.gov.gr/el/elektronikes-yperesies/synoptiko-kai-analytiko-istoriko-asphalises" target="_blank" class="efka-btn">
+                    Κατεβάστε το αρχείο ΑΤΛΑΣ
+                </a>
+            </div>
+        ''', unsafe_allow_html=True)
+
+        # Προτροπή και Upload Button - Card Style
+        st.markdown('<div class="upload-prompt-text">Στη συνέχεια ανεβάστε το αρχείο εδώ για ανάλυση</div>', unsafe_allow_html=True)
         
         uploaded_file = st.file_uploader(
             "Επιλέξτε PDF αρχείο",
@@ -4620,19 +5047,34 @@ def main():
             st.session_state['file_uploaded'] = True
             st.rerun()
         
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Οδηγίες σε πλαίσιο - Κεντρικό 30%
+        # Οδηγίες σε πλαίσιο
         st.markdown('''
             <div class="instructions-box">
-                <div class="instructions-title">Οδηγίες</div>
+                <div class="instructions-title">Γενικές Οδηγίες Χρήσης</div>
                 <div class="instructions-list">
-                    • Κατεβάστε το PDF του Ασφαλιστικού βιογραφικού από τον e‑EFKA<br>
-                    • Προτείνεται Chrome/Edge για καλύτερη συμβατότητα<br>
-                    • Ανεβάστε το αρχείο από τη φόρμα παραπάνω<br>
-                    • Πατήστε το κουμπί "Επεξεργασία" για ανάλυση των δεδομένων<br>
-                    • Μετά την επεξεργασία θα εμφανιστούν αναλυτικά αποτελέσματα<br>
-                    • Τα δεδομένα επεξεργάζονται τοπικά και δεν αποθηκεύονται
+                    1. Μεταβείτε στην υπηρεσία του e-ΕΦΚΑ πατώντας το μπλε κουμπί παραπάνω.<br>
+                    2. Συνδεθείτε με τους κωδικούς Taxisnet.<br>
+                    3. Επιλέξτε "Συνοπτικό και Αναλυτικό Ιστορικό Ασφάλισης".<br>
+                    4. Κατεβάστε το αρχείο σε μορφή PDF στον υπολογιστή σας.<br>
+                    5. Ανεβάστε το αρχείο που κατεβάσατε στην παραπάνω φόρμα.<br>
+                    6. Η εφαρμογή θα αναλύσει αυτόματα τα δεδομένα και θα σας παρουσιάσει αναλυτικούς πίνακες και διαγράμματα.<br>
+                    <br>
+                    <strong>Σημείωση:</strong> Τα δεδομένα επεξεργάζονται αποκλειστικά στον browser σας (client-side) και δεν αποθηκεύονται σε κανέναν server.
+                </div>
+            </div>
+        ''', unsafe_allow_html=True)
+
+        # Footer
+        st.markdown('''
+            <div class="main-footer">
+                <div class="footer-disclaimer">
+                    <strong>ΑΠΟΠΟΙΗΣΗ ΕΥΘΥΝΗΣ:</strong> Η παρούσα εφαρμογή αποτελεί εργαλείο ιδιωτικής πρωτοβουλίας για την διευκόλυνση ανάγνωσης του ασφαλιστικού βιογραφικού. 
+                    Δεν συνδέεται με τον e-ΕΦΚΑ ή άλλο δημόσιο φορέα. 
+                    Τα αποτελέσματα παράγονται βάσει των δεδομένων του αρχείου PDF που εισάγετε και ενδέχεται να περιέχουν ανακρίβειες. 
+                    Για επίσημη πληροφόρηση και θέματα συνταξιοδότησης, απευθυνθείτε αποκλειστικά στον e-ΕΦΚΑ.
+                </div>
+                <div class="footer-copyright">
+                    © 2025 Χαράλαμπος Ματωνάκης - myadvisor 
                 </div>
             </div>
         ''', unsafe_allow_html=True)
