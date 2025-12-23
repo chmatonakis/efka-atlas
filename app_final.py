@@ -1258,416 +1258,6 @@ def extract_efka_data(uploaded_file):
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
-def generate_audit_report(data_df, extra_data_df=None):
-    audit_rows = []
-    
-    # Check 1: Old/New Insured
-    try:
-        dates = pd.to_datetime(data_df['Από'], format='%d/%m/%Y', errors='coerce')
-        min_date = dates.min()
-        if pd.notna(min_date):
-            cutoff = pd.Timestamp('1993-01-01')
-            is_palios = min_date < cutoff
-            status_str = "Παλιός" if is_palios else "Νέος"
-            details = f"Πρώτη εγγραφή: {min_date.strftime('%d/%m/%Y')}"
-            audit_rows.append({
-                'A/A': 1, 'Έλεγχος': 'Παλιός ή νέος ασφαλισμένος', 
-                'Εύρημα': status_str, 'Λεπτομέρειες': details, 'Ενέργειες': '-'
-            })
-    except Exception: pass
-
-    # Check 2: Insurance Funds History
-    try:
-        if 'Ταμείο' in data_df.columns:
-            temp_df = data_df.copy()
-            temp_df['Start'] = pd.to_datetime(temp_df['Από'], format='%d/%m/%Y', errors='coerce')
-            temp_df['End'] = pd.to_datetime(temp_df['Έως'], format='%d/%m/%Y', errors='coerce')
-            temp_df['End'] = temp_df['End'].fillna(temp_df['Start'])
-            temp_df = temp_df.dropna(subset=['Start'])
-            
-            group_cols = ['Ταμείο']
-            if 'Τύπος Ασφάλισης' in temp_df.columns:
-                group_cols.append('Τύπος Ασφάλισης')
-            
-            grouped = temp_df.groupby(group_cols).agg({
-                'Start': 'min',
-                'End': 'max'
-            }).reset_index()
-            grouped = grouped.sort_values('Start')
-            
-            rows_html = []
-            for _, row2 in grouped.iterrows():
-                fund = str(row2['Ταμείο']).strip()
-                typ = str(row2['Τύπος Ασφάλισης']).strip() if 'Τύπος Ασφάλισης' in grouped.columns else ""
-                label = fund if typ in [None, '', 'nan'] else f"{fund} - {typ}"
-                s_date = row2['Start'].strftime('%d/%m/%Y')
-                e_date = row2['End'].strftime('%d/%m/%Y')
-                rows_html.append(
-                    f"<div style='font-weight: 600; color: #2c3e50;'>{label}</div>"
-                    f"<div style='color: #555;'>{s_date} - {e_date}</div>"
-                )
-            history_html = (
-                "<div style='display: grid; grid-template-columns: 1fr auto; column-gap: 12px; row-gap: 4px;'>"
-                + "".join(rows_html) +
-                "</div>"
-            )
-            
-            count_funds = temp_df['Ταμείο'].dropna().nunique()
-            audit_rows.append({
-                'A/A': 2, 'Έλεγχος': 'Ασφαλιστικά ταμεία', 
-                'Εύρημα': f"{count_funds} Ταμεία", 
-                'Λεπτομέρειες': history_html, 'Ενέργειες': '-'
-            })
-    except Exception: pass
-
-    # Check 3: Gaps
-    try:
-        gaps = find_gaps_in_insurance_data(data_df)
-        if not gaps.empty:
-            gap_details = []
-            for _, g in gaps.head(3).iterrows():
-                duration = g.get('Ημερολογιακές ημέρες', '')
-                gap_details.append(f"Από {g['Από']} έως {g['Έως']} ({duration} ημέρες)")
-            if len(gaps) > 3:
-                gap_details.append("...")
-            
-            audit_rows.append({
-                'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης', 
-                'Εύρημα': f"{len(gaps)} Διάστημα(τα)", 
-                'Λεπτομέρειες': "<br>".join(gap_details),
-                'Ενέργειες': 'Ελέγξτε την καρτέλα \"Κενά\"'
-            })
-        else:
-            audit_rows.append({
-                'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης', 
-                'Εύρημα': 'Κανένα', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'
-            })
-    except Exception as e:
-            audit_rows.append({
-            'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης', 
-            'Εύρημα': 'Σφάλμα ελέγχου', 'Λεπτομέρειες': str(e), 'Ενέργειες': '-'
-        })
-
-    # Check 4: Unpaid OAEE
-    try:
-        if 'Κλάδος/Πακέτο Κάλυψης' in data_df.columns and 'Συνολικές εισφορές' in data_df.columns:
-            def clean_money_chk(x):
-                if isinstance(x, str):
-                    if 'DRX' in x or 'ΔΡΧ' in x: return 0.0
-                    return clean_numeric_value(x, exclude_drx=True)
-                return x
-            
-            t_df = data_df.copy()
-            t_df['C'] = t_df['Συνολικές εισφορές'].apply(clean_money_chk)
-            t_df['K'] = t_df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip().str.upper()
-            unpaid = t_df[(t_df['K'].isin(['K', 'Κ'])) & (t_df['C'] == 0)]
-            
-            if not unpaid.empty:
-                months = []
-                for _, r in unpaid.iterrows():
-                    try:
-                        d = pd.to_datetime(r['Από'], format='%d/%m/%Y', errors='coerce')
-                        if pd.notna(d):
-                            months.append(d.strftime('%m/%Y'))
-                    except: pass
-                
-                months_str = ", ".join(months) if months else ""
-                details_msg = f"{len(unpaid)} μήνες ΟΑΕΕ (Κ) με μηδενική εισφορά."
-                if months_str:
-                    details_msg += f"<br><span style='font-size: 0.85rem; color: #666;'>({months_str})</span>"
-
-                audit_rows.append({
-                    'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 
-                    'Εύρημα': 'Εντοπίστηκαν', 
-                    'Λεπτομέρειες': details_msg,
-                    'Ενέργειες': 'Ελέγξτε για τυχόν οφειλές στον ΟΑΕΕ'
-                })
-            else:
-                audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': 'Καμία', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
-    except Exception: pass
-
-    # Check 5: Parallel Insurance
-    try:
-        p_found = False
-        p_df = data_df.copy()
-        p_df['Start'] = pd.to_datetime(p_df['Από'], format='%d/%m/%Y', errors='coerce')
-        p_df['End'] = pd.to_datetime(p_df['Έως'], format='%d/%m/%Y', errors='coerce')
-        p_df = p_df.dropna(subset=['Start', 'End'])
-        
-        def is_ika_simple(row):
-            et = str(row.get('Τύπος Αποδοχών', '')).strip()
-            t = str(row.get('Ταμείο', '')).upper()
-            return ('IKA' in t or 'ΙΚΑ' in t) and et in ['01', '1', '16', '99']
-
-        def is_oaee_simple(row):
-            kl = str(row.get('Κλάδος/Πακέτο Κάλυψης', '')).strip().upper()
-            t = str(row.get('Ταμείο', '')).upper()
-            return ('OAEE' in t or 'ΟΑΕΕ' in t or 'TEBE' in t or 'ΤΕΒΕ' in t) and kl in ['K', 'Κ']
-
-        p_df['is_ika'] = p_df.apply(is_ika_simple, axis=1)
-        p_df['is_oaee'] = p_df.apply(is_oaee_simple, axis=1)
-        
-        ika_set = p_df[p_df['is_ika']]
-        oaee_set = p_df[p_df['is_oaee']]
-        
-        if not ika_set.empty and not oaee_set.empty:
-            for _, i_row in ika_set.iterrows():
-                ov = oaee_set[(oaee_set['Start'] <= i_row['End']) & (oaee_set['End'] >= i_row['Start'])]
-                if not ov.empty:
-                    p_found = True
-                    break
-        
-        if p_found:
-                audit_rows.append({
-                'A/A': 5, 'Έλεγχος': 'Παράλληλη ασφάλιση', 
-                'Εύρημα': 'Πιθανή', 
-                'Λεπτομέρειες': 'Βρέθηκαν χρονικά επικαλυπτόμενα διαστήματα ΙΚΑ (01/16/99) και ΟΑΕΕ (Κ).',
-                'Ενέργειες': 'Ελέγξτε την καρτέλα \"Παράλληλη\"'
-            })
-        else:
-            audit_rows.append({'A/A': 5, 'Έλεγχος': 'Παράλληλη ασφάλιση', 'Εύρημα': 'Όχι', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
-    except Exception: pass
-
-    # Check 6: Multiple Employers
-    try:
-        m_found = False
-        if 'Α-Μ εργοδότη' in data_df.columns:
-            m_df = data_df.copy()
-            m_df['Start'] = pd.to_datetime(m_df['Από'], format='%d/%m/%Y', errors='coerce')
-            m_df['End'] = pd.to_datetime(m_df['Έως'], format='%d/%m/%Y', errors='coerce')
-            m_df = m_df.dropna(subset=['Start', 'End'])
-            
-            def is_ika_multi(row):
-                et = str(row.get('Τύπος Αποδοχών', '')).strip()
-                t = str(row.get('Ταμείο', '')).upper()
-                return ('IKA' in t or 'ΙΚΑ' in t) and et in ['01', '1', '16', '99']
-            
-            m_df['is_ika'] = m_df.apply(is_ika_multi, axis=1)
-            m_df = m_df[m_df['is_ika']]
-            m_df['Emp'] = m_df['Α-Μ εργοδότη'].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], pd.NA)
-            m_df = m_df.dropna(subset=['Emp'])
-            
-            if m_df['Emp'].nunique() > 1:
-                m_df = m_df.sort_values('Start')
-                seen_months = {}
-                for _, row in m_df.iterrows():
-                    s = row['Start']
-                    e = row['End']
-                    emp = row['Emp']
-                    curr = s.replace(day=1)
-                    end_m = e.replace(day=1)
-                    while curr <= end_m:
-                        k = (curr.year, curr.month)
-                        if k not in seen_months: seen_months[k] = set()
-                        seen_months[k].add(emp)
-                        if len(seen_months[k]) > 1:
-                            m_found = True
-                            break
-                        if curr.month == 12: curr = curr.replace(year=curr.year+1, month=1)
-                        else: curr = curr.replace(month=curr.month+1)
-                    if m_found: break
-
-        if m_found:
-            audit_rows.append({
-                'A/A': 6, 'Έλεγχος': 'Πολλαπλή απασχόληση', 
-                'Εύρημα': 'Πιθανή', 
-                'Λεπτομέρειες': f"Βρέθηκαν μήνες με > 1 εργοδότες για ΙΚΑ (01/16/99).",
-                'Ενέργειες': 'Ελέγξτε την καρτέλα \"Πολλαπλή\"'
-            })
-        else:
-            audit_rows.append({'A/A': 6, 'Έλεγχος': 'Πολλαπλή απασχόληση', 'Εύρημα': '-', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
-    except Exception: pass
-
-    # Check 7: Low APD
-    try:
-        if 'Μικτές αποδοχές' in data_df.columns and 'Συνολικές εισφορές' in data_df.columns:
-            def get_val_chk(x):
-                if isinstance(x, str):
-                    if 'DRX' in x or 'ΔΡΧ' in x: return 0.0
-                    return clean_numeric_value(x, exclude_drx=True) or 0.0
-                return x if pd.notna(x) else 0.0
-            t_df = data_df.copy()
-            t_df['G'] = t_df['Μικτές αποδοχές'].apply(get_val_chk)
-            t_df['C'] = t_df['Συνολικές εισφορές'].apply(get_val_chk)
-            t_df = t_df[t_df['G'] > 0]
-            if not t_df.empty:
-                t_df['Ratio'] = t_df['C'] / t_df['G']
-                cnt = len(t_df[t_df['Ratio'] < 0.30])
-                if cnt > 0:
-                    audit_rows.append({
-                        'A/A': 7, 'Έλεγχος': 'ΑΠΔ με χαμηλές κρατήσεις', 
-                        'Εύρημα': 'Εντοπίστηκαν', 
-                        'Λεπτομέρειες': f"{cnt} εγγραφές με εισφορές < 30% των αποδοχών.",
-                        'Ενέργειες': 'Ελέγξτε για πιθανά σφάλματα ή ειδικές περιπτώσεις'
-                    })
-                else:
-                    audit_rows.append({'A/A': 7, 'Έλεγχος': 'ΑΠΔ με χαμηλές κρατήσεις', 'Εύρημα': 'Καμία', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
-            else:
-                audit_rows.append({'A/A': 7, 'Έλεγχος': 'ΑΠΔ με χαμηλές κρατήσεις', 'Εύρημα': '-', 'Λεπτομέρειες': 'Δεν βρέθηκαν αποδοχές', 'Ενέργειες': '-'})
-    except Exception: pass
-
-    # Check 8: Plafond
-    try:
-        if 'Από' in data_df.columns and 'Μικτές αποδοχές' in data_df.columns and 'Μήνες' in data_df.columns:
-            t_df = data_df.copy()
-            t_df['Dt'] = pd.to_datetime(t_df['Από'], format='%d/%m/%Y', errors='coerce')
-            t_df['Y'] = t_df['Dt'].dt.year
-            
-            def get_val_chk(x):
-                if isinstance(x, str):
-                    if 'DRX' in x or 'ΔΡΧ' in x: return 0.0
-                    return clean_numeric_value(x, exclude_drx=True) or 0.0
-                return x if pd.notna(x) else 0.0
-            
-            t_df['G'] = t_df['Μικτές αποδοχές'].apply(get_val_chk)
-            t_df['M'] = t_df['Μήνες'].apply(lambda x: clean_numeric_value(x) or 1)
-            
-            min_dt = t_df['Dt'].min()
-            is_p = False
-            if pd.notna(min_dt) and min_dt < pd.Timestamp('1993-01-01'): is_p = True
-            curr_pl = PLAFOND_PALIOS if is_p else PLAFOND_NEOS
-            
-            exc = 0
-            for _, r in t_df.iterrows():
-                ys = str(int(r['Y'])) if pd.notna(r['Y']) else ""
-                if ys in curr_pl:
-                    m_g = r['G'] / r['M'] if r['M'] > 0 else 0
-                    if m_g > curr_pl[ys]: exc += 1
-            
-            if exc > 0:
-                audit_rows.append({
-                    'A/A': 8, 'Έλεγχος': 'Ανώτατο εισφορίσιμο πλαφόν', 
-                    'Εύρημα': 'Υπέρβαση', 
-                    'Λεπτομέρειες': f"{exc} εγγραφές ξεπερνούν το μηνιαίο πλαφόν.",
-                    'Ενέργειες': 'Ελέγξτε τα ποσά'
-                })
-            else:
-                audit_rows.append({'A/A': 8, 'Έλεγχος': 'Ανώτατο εισφορίσιμο πλαφόν', 'Εύρημα': 'Εντός ορίων', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
-    except Exception: pass
-
-    # Check 9: Aggregated Intervals
-    try:
-        if 'Από' in data_df.columns and 'Έως' in data_df.columns:
-            t_df = data_df.copy()
-            t_df['D_From'] = pd.to_datetime(t_df['Από'], format='%d/%m/%Y', errors='coerce')
-            t_df['D_To'] = pd.to_datetime(t_df['Έως'], format='%d/%m/%Y', errors='coerce')
-            t_df['Duration'] = (t_df['D_To'] - t_df['D_From']).dt.days + 1
-            agg_recs = t_df[t_df['Duration'] > 31]
-            
-            if not agg_recs.empty:
-                count_total = len(agg_recs)
-                count_year = len(agg_recs[agg_recs['Duration'] > 366])
-                details_list = []
-                agg_recs = agg_recs.sort_values('D_From')
-                for _, r in agg_recs.iterrows():
-                    tam = str(r.get('Ταμείο', '')).strip()
-                    d_str = f"{r['Από']}-{r['Έως']}"
-                    details_list.append(f"{tam} ({d_str})")
-                details_str = "<br>".join(details_list)
-                finding_msg = f"{count_total} > 1 μήνα"
-                if count_year > 0: finding_msg += f", {count_year} > 1 έτος"
-                
-                audit_rows.append({
-                    'A/A': 9, 'Έλεγχος': 'Ενοποιημένα διαστήματα', 
-                    'Εύρημα': finding_msg, 
-                    'Λεπτομέρειες': details_str,
-                    'Ενέργειες': '-'
-                })
-            else:
-                audit_rows.append({'A/A': 9, 'Έλεγχος': 'Ενοποιημένα διαστήματα', 'Εύρημα': 'Κανένα', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
-    except Exception: pass
-
-    return pd.DataFrame(audit_rows)
-
-def show_print_layout(context):
-    exports = context.get('exports', {})
-    audit_rows = context.get('audit', [])
-    filename = context.get('filename', 'Report')
-    is_palios = context.get('is_palios', False)
-    
-    st.markdown(\"""
-    <style>
-        @media print {
-            header[data-testid="stHeader"] { display: none !important; }
-            .stApp > header { display: none !important; }
-            .stApp .main .block-container { padding: 0 !important; max-width: 100% !important; margin: 0 !important; }
-            section[data-testid="stSidebar"] { display: none !important; }
-            .no-print { display: none !important; }
-            .print-only { display: block !important; }
-            @page { margin: 1cm; size: auto; }
-        }
-        .report-container { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 1000px; margin: 0 auto; }
-        .report-header { text-align: center; margin-bottom: 2rem; border-bottom: 2px solid #666; padding-bottom: 1rem; }
-        .report-section { margin-bottom: 3rem; page-break-inside: avoid; }
-        .report-section h3 { color: #2c3e50; border-bottom: 1px solid #eee; padding-bottom: 0.5rem; margin-top: 0; }
-        table { width: 100%; border-collapse: collapse; font-size: 11px; }
-        th, td { border: 1px solid #ddd; padding: 4px; text-align: left; }
-        th { background-color: #f8f9fa; font-weight: 600; }
-        tr:nth-child(even) { background-color: #f9f9f9; }
-        .audit-warning { color: #d9534f; font-weight: bold; }
-        .audit-ok { color: #28a745; }
-        .details-col { font-size: 10px; color: #555; }
-    </style>
-    \""", unsafe_allow_html=True)
-    
-    st.markdown('<div class="no-print" style="padding: 1rem; background: #f0f2f6; border-radius: 8px; margin-bottom: 2rem; display: flex; gap: 1rem; align-items: center; justify-content: space-between;">', unsafe_allow_html=True)
-    
-    if st.button("⬅️ Επιστροφή", key="print_back"):
-        st.query_params.clear()
-        st.rerun()
-        
-    st.markdown(f'<button onclick="window.print()" style="padding: 0.6rem 1.2rem; background: #2e7d32; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; font-weight: 500;">🖨️ Εκτύπωση Αναφοράς</button>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('<div class="report-container">', unsafe_allow_html=True)
-    
-    st.markdown(f\"""
-    <div class="report-header">
-        <h2>Ασφαλιστικό Βιογραφικό - Αναφορά</h2>
-        <p><strong>Αρχείο:</strong> {filename} | <strong>Ημερομηνία:</strong> {datetime.datetime.now().strftime('%d/%m/%Y')}</p>
-        <p>{'Παλιός Ασφαλισμένος (< 1993)' if is_palios else 'Νέος Ασφαλισμένος (>= 1993)'}</p>
-    </div>
-    \""", unsafe_allow_html=True)
-    
-    if audit_rows:
-        st.markdown('<div class="report-section"><h3>Βασικοί Έλεγχοι Δεδομένων</h3>', unsafe_allow_html=True)
-        audit_html = "<table class='table'><thead><tr><th style='width: 25%'>Έλεγχος</th><th style='width: 15%'>Εύρημα</th><th>Λεπτομέρειες</th><th style='width: 20%'>Ενέργειες</th></tr></thead><tbody>"
-        for row in audit_rows:
-            style = ""
-            if row['Εύρημα'] in ['Πιθανή', 'Εντοπίστηκαν', 'Υπέρβαση', 'Σφάλμα ελέγχου']:
-                style = "color: #d9534f; font-weight: bold;"
-            actions = row['Ενέργειες'] if row['Ενέργειες'] != '-' else ''
-            audit_html += f"<tr><td>{row['Έλεγχος']}</td><td style='{style}'>{row['Εύρημα']}</td><td class='details-col'>{row['Λεπτομέρειες']}</td><td class='details-col'>{actions}</td></tr>"
-        audit_html += "</tbody></table></div>"
-        st.markdown(audit_html, unsafe_allow_html=True)
-
-    sections = [
-        ("Σύνοψη", "Συνοπτική Αναφορά"),
-        ("Κενά", "Κενά Διαστήματα"),
-        ("Παράλληλη", "Παράλληλη Ασφάλιση"),
-        ("Πολλαπλή", "Πολλαπλή Απασχόληση"),
-        ("Ετήσια", "Ετήσια Αναφορά"),
-        ("Ημέρες", "Ημέρες Ασφάλισης"),
-        ("Παράρτημα", "Παράρτημα")
-    ]
-    
-    for key, title in sections:
-        if key in exports and exports[key] is not None and not exports[key].empty:
-            df = exports[key]
-            st.markdown(f'<div class="report-section"><h3>{title}</h3>', unsafe_allow_html=True)
-            html = df.to_html(classes="table", index=False, escape=False, border=0)
-            st.markdown(html, unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-    st.markdown(\"""
-    <div class="report-footer" style="margin-top: 3rem; font-size: 0.8rem; color: #666; text-align: center; border-top: 1px solid #ddd; padding-top: 1rem;">
-        <p>Disclaimer: Η παρούσα αναφορά παράχθηκε αυτόματα από το αρχείο ΑΤΛΑΣ και δεν αποτελεί επίσημο έγγραφο του e-ΕΦΚΑ. 
-        Ο δημιουργός της εφαρμογής δεν φέρει ευθύνη για τυχόν λάθη ή παραλείψεις.</p>
-        <p>Created by myadvisor - Χαράλαμπος Ματωνάκης</p>
-    </div>
-    </div>
-    \""", unsafe_allow_html=True)
-
 def show_results_page(df, filename):
     """
     Εμφανίζει τη σελίδα αποτελεσμάτων
@@ -1675,18 +1265,6 @@ def show_results_page(df, filename):
 
     # Συλλογή προβολών για εξαγωγή μεμονωμένων πινάκων
     view_exports = {}
-
-    # Check for print mode
-    if st.query_params.get('view') == 'print':
-        if 'print_data' in st.session_state:
-            show_print_layout(st.session_state['print_data'])
-            return
-        else:
-            st.warning('Δεν βρέθηκαν δεδομένα για εκτύπωση. Παρακαλώ φορτώστε ξανά το αρχείο.')
-            if st.button('Επιστροφή'):
-                st.query_params.clear()
-                st.rerun()
-            return
 
     def register_view(label: str, data: pd.DataFrame):
         """Αποθηκεύει το τρέχον DataFrame για χρήση στο κουμπί 'Εξαγωγή πίνακα'."""
@@ -1750,7 +1328,6 @@ def show_results_page(df, filename):
             </div>
             <div class="header-right">
                 <a href="." target="_self" class="nav-link">Αρχική</a>
-                <a href="?view=print" target="_self" class="nav-link" style="margin-left: 10px;">Προβολή Εκτύπωσης</a>
             </div>
         </div>
     </div>
@@ -2134,6 +1711,334 @@ def show_results_page(df, filename):
         
         # --- Audit Report Integration ---
         if not df.empty and 'Από' in df.columns:
+            def generate_audit_report(data_df, extra_data_df=None):
+                audit_rows = []
+                
+                # Check 1: Old/New Insured
+                try:
+                    dates = pd.to_datetime(data_df['Από'], format='%d/%m/%Y', errors='coerce')
+                    min_date = dates.min()
+                    if pd.notna(min_date):
+                        cutoff = pd.Timestamp('1993-01-01')
+                        is_palios = min_date < cutoff
+                        status_str = "Παλιός" if is_palios else "Νέος"
+                        details = f"Πρώτη εγγραφή: {min_date.strftime('%d/%m/%Y')}"
+                        audit_rows.append({
+                            'A/A': 1, 'Έλεγχος': 'Παλιός ή νέος ασφαλισμένος', 
+                            'Εύρημα': status_str, 'Λεπτομέρειες': details, 'Ενέργειες': '-'
+                        })
+                except Exception: pass
+
+                # Check 2: Insurance Funds History (ανά Ταμείο & Τύπο Ασφάλισης: πρώτη/τελευταία ημερομηνία)
+                try:
+                    if 'Ταμείο' in data_df.columns:
+                        temp_df = data_df.copy()
+                        temp_df['Start'] = pd.to_datetime(temp_df['Από'], format='%d/%m/%Y', errors='coerce')
+                        temp_df['End'] = pd.to_datetime(temp_df['Έως'], format='%d/%m/%Y', errors='coerce')
+                        temp_df['End'] = temp_df['End'].fillna(temp_df['Start'])
+                        temp_df = temp_df.dropna(subset=['Start'])
+                        
+                        # Ομαδοποίηση ανά Ταμείο και Τύπο Ασφάλισης (αν υπάρχει)
+                        group_cols = ['Ταμείο']
+                        if 'Τύπος Ασφάλισης' in temp_df.columns:
+                            group_cols.append('Τύπος Ασφάλισης')
+                        
+                        grouped = temp_df.groupby(group_cols).agg({
+                            'Start': 'min',
+                            'End': 'max'
+                        }).reset_index()
+                        grouped = grouped.sort_values('Start')
+                        
+                        rows_html = []
+                        for _, row2 in grouped.iterrows():
+                            fund = str(row2['Ταμείο']).strip()
+                            typ = str(row2['Τύπος Ασφάλισης']).strip() if 'Τύπος Ασφάλισης' in grouped.columns else ""
+                            label = fund if typ in [None, '', 'nan'] else f"{fund} - {typ}"
+                            s_date = row2['Start'].strftime('%d/%m/%Y')
+                            e_date = row2['End'].strftime('%d/%m/%Y')
+                            rows_html.append(
+                                f"<div style='font-weight: 600; color: #2c3e50;'>{label}</div>"
+                                f"<div style='color: #555;'>{s_date} - {e_date}</div>"
+                            )
+                        history_html = (
+                            "<div style='display: grid; grid-template-columns: 1fr auto; column-gap: 12px; row-gap: 4px;'>"
+                            + "".join(rows_html) +
+                            "</div>"
+                        )
+                        
+                        count_funds = temp_df['Ταμείο'].dropna().nunique()
+                        audit_rows.append({
+                            'A/A': 2, 'Έλεγχος': 'Ασφαλιστικά ταμεία', 
+                            'Εύρημα': f"{count_funds} Ταμεία", 
+                            'Λεπτομέρειες': history_html, 'Ενέργειες': '-'
+                        })
+                except Exception: pass
+
+                # Check 3: Gaps
+                try:
+                    gaps = find_gaps_in_insurance_data(data_df)
+                    if not gaps.empty:
+                        # Format first few gaps
+                        gap_details = []
+                        for _, g in gaps.head(3).iterrows():
+                            # Fix column name access
+                            duration = g.get('Ημερολογιακές ημέρες', '')
+                            gap_details.append(f"Από {g['Από']} έως {g['Έως']} ({duration} ημέρες)")
+                        if len(gaps) > 3:
+                            gap_details.append("...")
+                        
+                        audit_rows.append({
+                            'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης', 
+                            'Εύρημα': f"{len(gaps)} Διάστημα(τα)", 
+                            'Λεπτομέρειες': "<br>".join(gap_details),
+                            'Ενέργειες': 'Ελέγξτε την καρτέλα "Κενά Διαστήματα"'
+                        })
+                    else:
+                        audit_rows.append({
+                            'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης', 
+                            'Εύρημα': 'Κανένα', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'
+                        })
+                except Exception as e:
+                     audit_rows.append({
+                        'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης', 
+                        'Εύρημα': 'Σφάλμα ελέγχου', 'Λεπτομέρειες': str(e), 'Ενέργειες': '-'
+                    })
+
+                # Check 4: Unpaid OAEE
+                try:
+                    if 'Κλάδος/Πακέτο Κάλυψης' in data_df.columns and 'Συνολικές εισφορές' in data_df.columns:
+                        def clean_money_chk(x):
+                            if isinstance(x, str):
+                                if 'DRX' in x or 'ΔΡΧ' in x: return 0.0
+                                return clean_numeric_value(x, exclude_drx=True)
+                            return x
+                        
+                        t_df = data_df.copy()
+                        t_df['C'] = t_df['Συνολικές εισφορές'].apply(clean_money_chk)
+                        t_df['K'] = t_df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip().str.upper()
+                        unpaid = t_df[(t_df['K'].isin(['K', 'Κ'])) & (t_df['C'] == 0)]
+                        
+                        if not unpaid.empty:
+                            months = []
+                            for _, r in unpaid.iterrows():
+                                try:
+                                    d = pd.to_datetime(r['Από'], format='%d/%m/%Y', errors='coerce')
+                                    if pd.notna(d):
+                                        months.append(d.strftime('%m/%Y'))
+                                except: pass
+                            
+                            months_str = ", ".join(months) if months else ""
+                            details_msg = f"{len(unpaid)} μήνες ΟΑΕΕ (Κ) με μηδενική εισφορά."
+                            if months_str:
+                                details_msg += f"<br><span style='font-size: 0.85rem; color: #666;'>({months_str})</span>"
+
+                            audit_rows.append({
+                                'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 
+                                'Εύρημα': 'Εντοπίστηκαν', 
+                                'Λεπτομέρειες': details_msg,
+                                'Ενέργειες': 'Ελέγξτε για τυχόν οφειλές στον ΟΑΕΕ'
+                            })
+                        else:
+                            audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': 'Καμία', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                except Exception: pass
+
+                # Check 5: Parallel Insurance (Month-based Logic)
+                try:
+                    p_found = False
+                    
+                    p_df = data_df.copy()
+                    p_df['Start'] = pd.to_datetime(p_df['Από'], format='%d/%m/%Y', errors='coerce')
+                    p_df['End'] = pd.to_datetime(p_df['Έως'], format='%d/%m/%Y', errors='coerce')
+                    p_df = p_df.dropna(subset=['Start', 'End'])
+                    
+                    def is_ika_simple(row):
+                        et = str(row.get('Τύπος Αποδοχών', '')).strip()
+                        t = str(row.get('Ταμείο', '')).upper()
+                        return ('IKA' in t or 'ΙΚΑ' in t) and et in ['01', '1', '16', '99']
+
+                    def is_oaee_simple(row):
+                        kl = str(row.get('Κλάδος/Πακέτο Κάλυψης', '')).strip().upper()
+                        t = str(row.get('Ταμείο', '')).upper()
+                        return ('OAEE' in t or 'ΟΑΕΕ' in t or 'TEBE' in t or 'ΤΕΒΕ' in t) and kl in ['K', 'Κ']
+
+                    p_df['is_ika'] = p_df.apply(is_ika_simple, axis=1)
+                    p_df['is_oaee'] = p_df.apply(is_oaee_simple, axis=1)
+                    
+                    ika_set = p_df[p_df['is_ika']]
+                    oaee_set = p_df[p_df['is_oaee']]
+                    
+                    if not ika_set.empty and not oaee_set.empty:
+                        for _, i_row in ika_set.iterrows():
+                            ov = oaee_set[(oaee_set['Start'] <= i_row['End']) & (oaee_set['End'] >= i_row['Start'])]
+                            if not ov.empty:
+                                p_found = True
+                                break
+                    
+                    if p_found:
+                         audit_rows.append({
+                            'A/A': 5, 'Έλεγχος': 'Παράλληλη ασφάλιση', 
+                            'Εύρημα': 'Πιθανή', 
+                            'Λεπτομέρειες': 'Βρέθηκαν χρονικά επικαλυπτόμενα διαστήματα ΙΚΑ (01/16/99) και ΟΑΕΕ (Κ).',
+                            'Ενέργειες': 'Ελέγξτε την καρτέλα "Παράλληλη Ασφάλιση"'
+                        })
+                    else:
+                        audit_rows.append({'A/A': 5, 'Έλεγχος': 'Παράλληλη ασφάλιση', 'Εύρημα': 'Όχι', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                except Exception: pass
+
+                # Check 6: Multiple Employers (Month-based Logic)
+                try:
+                    m_found = False
+                    
+                    if 'Α-Μ εργοδότη' in data_df.columns:
+                        m_df = data_df.copy()
+                        m_df['Start'] = pd.to_datetime(m_df['Από'], format='%d/%m/%Y', errors='coerce')
+                        m_df['End'] = pd.to_datetime(m_df['Έως'], format='%d/%m/%Y', errors='coerce')
+                        m_df = m_df.dropna(subset=['Start', 'End'])
+                        
+                        def is_ika_multi(row):
+                            et = str(row.get('Τύπος Αποδοχών', '')).strip()
+                            t = str(row.get('Ταμείο', '')).upper()
+                            return ('IKA' in t or 'ΙΚΑ' in t) and et in ['01', '1', '16', '99']
+                        
+                        m_df['is_ika'] = m_df.apply(is_ika_multi, axis=1)
+                        m_df = m_df[m_df['is_ika']]
+                        
+                        m_df['Emp'] = m_df['Α-Μ εργοδότη'].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], pd.NA)
+                        m_df = m_df.dropna(subset=['Emp'])
+                        
+                        if m_df['Emp'].nunique() > 1:
+                            m_df = m_df.sort_values('Start')
+                            seen_months = {}
+                            
+                            for _, row in m_df.iterrows():
+                                s = row['Start']
+                                e = row['End']
+                                emp = row['Emp']
+                                curr = s.replace(day=1)
+                                end_m = e.replace(day=1)
+                                while curr <= end_m:
+                                    k = (curr.year, curr.month)
+                                    if k not in seen_months: seen_months[k] = set()
+                                    seen_months[k].add(emp)
+                                    if len(seen_months[k]) > 1:
+                                        m_found = True
+                                        break
+                                    if curr.month == 12: curr = curr.replace(year=curr.year+1, month=1)
+                                    else: curr = curr.replace(month=curr.month+1)
+                                if m_found: break
+
+                    if m_found:
+                        audit_rows.append({
+                            'A/A': 6, 'Έλεγχος': 'Πολλαπλή απασχόληση', 
+                            'Εύρημα': 'Πιθανή', 
+                            'Λεπτομέρειες': f"Βρέθηκαν μήνες με > 1 εργοδότες για ΙΚΑ (01/16/99).",
+                            'Ενέργειες': 'Ελέγξτε την καρτέλα "Πολλαπλή"'
+                        })
+                    else:
+                        audit_rows.append({'A/A': 6, 'Έλεγχος': 'Πολλαπλή απασχόληση', 'Εύρημα': '-', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                except Exception: pass
+
+                # Check 7: Low APD
+                try:
+                    if 'Μικτές αποδοχές' in data_df.columns and 'Συνολικές εισφορές' in data_df.columns:
+                        def get_val_chk(x):
+                            if isinstance(x, str):
+                                if 'DRX' in x or 'ΔΡΧ' in x: return 0.0
+                                return clean_numeric_value(x, exclude_drx=True) or 0.0
+                            return x if pd.notna(x) else 0.0
+                        t_df = data_df.copy()
+                        t_df['G'] = t_df['Μικτές αποδοχές'].apply(get_val_chk)
+                        t_df['C'] = t_df['Συνολικές εισφορές'].apply(get_val_chk)
+                        t_df = t_df[t_df['G'] > 0]
+                        if not t_df.empty:
+                            t_df['Ratio'] = t_df['C'] / t_df['G']
+                            # Check < 0.30 (30%)
+                            cnt = len(t_df[t_df['Ratio'] < 0.30])
+                            if cnt > 0:
+                                audit_rows.append({
+                                    'A/A': 7, 'Έλεγχος': 'ΑΠΔ με χαμηλές κρατήσεις', 
+                                    'Εύρημα': 'Εντοπίστηκαν', 
+                                    'Λεπτομέρειες': f"{cnt} εγγραφές με εισφορές < 30% των αποδοχών.",
+                                    'Ενέργειες': 'Ελέγξτε για πιθανά σφάλματα ή ειδικές περιπτώσεις'
+                                })
+                            else:
+                                audit_rows.append({'A/A': 7, 'Έλεγχος': 'ΑΠΔ με χαμηλές κρατήσεις', 'Εύρημα': 'Καμία', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                        else:
+                            audit_rows.append({'A/A': 7, 'Έλεγχος': 'ΑΠΔ με χαμηλές κρατήσεις', 'Εύρημα': '-', 'Λεπτομέρειες': 'Δεν βρέθηκαν αποδοχές', 'Ενέργειες': '-'})
+                except Exception: pass
+
+                # Check 8: Plafond
+                try:
+                    if 'Από' in data_df.columns and 'Μικτές αποδοχές' in data_df.columns and 'Μήνες' in data_df.columns:
+                        t_df = data_df.copy()
+                        t_df['Dt'] = pd.to_datetime(t_df['Από'], format='%d/%m/%Y', errors='coerce')
+                        t_df['Y'] = t_df['Dt'].dt.year
+                        
+                        def get_val_chk(x):
+                            if isinstance(x, str):
+                                if 'DRX' in x or 'ΔΡΧ' in x: return 0.0
+                                return clean_numeric_value(x, exclude_drx=True) or 0.0
+                            return x if pd.notna(x) else 0.0
+                        
+                        t_df['G'] = t_df['Μικτές αποδοχές'].apply(get_val_chk)
+                        t_df['M'] = t_df['Μήνες'].apply(lambda x: clean_numeric_value(x) or 1)
+                        
+                        min_dt = t_df['Dt'].min()
+                        is_p = False
+                        if pd.notna(min_dt) and min_dt < pd.Timestamp('1993-01-01'): is_p = True
+                        curr_pl = PLAFOND_PALIOS if is_p else PLAFOND_NEOS
+                        
+                        exc = 0
+                        for _, r in t_df.iterrows():
+                            ys = str(int(r['Y'])) if pd.notna(r['Y']) else ""
+                            if ys in curr_pl:
+                                m_g = r['G'] / r['M'] if r['M'] > 0 else 0
+                                if m_g > curr_pl[ys]: exc += 1
+                        
+                        if exc > 0:
+                            audit_rows.append({
+                                'A/A': 8, 'Έλεγχος': 'Ανώτατο εισφορίσιμο πλαφόν', 
+                                'Εύρημα': 'Υπέρβαση', 
+                                'Λεπτομέρειες': f"{exc} εγγραφές ξεπερνούν το μηνιαίο πλαφόν.",
+                                'Ενέργειες': 'Ελέγξτε τα ποσά'
+                            })
+                        else:
+                            audit_rows.append({'A/A': 8, 'Έλεγχος': 'Ανώτατο εισφορίσιμο πλαφόν', 'Εύρημα': 'Εντός ορίων', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                except Exception: pass
+
+                # Check 9: Aggregated Intervals (Enhanced)
+                try:
+                    if 'Από' in data_df.columns and 'Έως' in data_df.columns:
+                        t_df = data_df.copy()
+                        t_df['D_From'] = pd.to_datetime(t_df['Από'], format='%d/%m/%Y', errors='coerce')
+                        t_df['D_To'] = pd.to_datetime(t_df['Έως'], format='%d/%m/%Y', errors='coerce')
+                        t_df['Duration'] = (t_df['D_To'] - t_df['D_From']).dt.days + 1
+                        agg_recs = t_df[t_df['Duration'] > 31]
+                        
+                        if not agg_recs.empty:
+                            count_total = len(agg_recs)
+                            count_year = len(agg_recs[agg_recs['Duration'] > 366])
+                            details_list = []
+                            agg_recs = agg_recs.sort_values('D_From')
+                            for _, r in agg_recs.iterrows():
+                                tam = str(r.get('Ταμείο', '')).strip()
+                                d_str = f"{r['Από']}-{r['Έως']}"
+                                details_list.append(f"{tam} ({d_str})")
+                            details_str = "<br>".join(details_list)
+                            finding_msg = f"{count_total} > 1 μήνα"
+                            if count_year > 0: finding_msg += f", {count_year} > 1 έτος"
+                            
+                            audit_rows.append({
+                                'A/A': 9, 'Έλεγχος': 'Ενοποιημένα διαστήματα', 
+                                'Εύρημα': finding_msg, 
+                                'Λεπτομέρειες': details_str,
+                                'Ενέργειες': '-'
+                            })
+                        else:
+                            audit_rows.append({'A/A': 9, 'Έλεγχος': 'Ενοποιημένα διαστήματα', 'Εύρημα': 'Κανένα', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                except Exception: pass
+
+                return pd.DataFrame(audit_rows)
 
             st.markdown("### Βασικοί έλεγχοι δεδομένων")
             audit_df = generate_audit_report(df, extra_df)
@@ -5093,15 +4998,6 @@ def show_results_page(df, filename):
     }
     </script>
     """, unsafe_allow_html=True)
-
-
-    # Save data for printing
-    st.session_state['print_data'] = {
-        'exports': view_exports,
-        'audit': audit_df.to_dict('records') if 'audit_df' in locals() and not audit_df.empty else [],
-        'filename': filename,
-        'is_palios': is_palios
-    }
 
 def main():
     """Κύρια συνάρτηση της εφαρμογής"""
