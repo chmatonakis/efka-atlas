@@ -18,6 +18,7 @@ from pathlib import Path
 import subprocess
 import datetime
 import html
+from weasyprint import HTML, CSS
 
 # Προσπάθεια εισαγωγής διαφορετικών PDF readers
 try:
@@ -1257,6 +1258,195 @@ def extract_efka_data(uploaded_file):
         # Διαγράφουμε το προσωρινό αρχείο
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
+
+# ------------------------------
+# PDF helpers (WeasyPrint)
+# ------------------------------
+def dataframe_to_html_table(df: pd.DataFrame) -> str:
+    """Μετατρέπει DataFrame σε HTML πίνακα για PDF. Κενό μήνυμα αν δεν έχει δεδομένα."""
+    if df is None or df.empty:
+        return "<div class='empty-table'>Δεν υπάρχουν διαθέσιμα δεδομένα.</div>"
+    return df.to_html(index=False, escape=False, classes="data-table")
+
+
+def build_pdf_report(client_info: dict, audit_df: pd.DataFrame, tables: list, filename: str, disclaimer: str = "") -> bytes:
+    """
+    Δημιουργεί PDF αναφορά με WeasyPrint με βάση στοιχεία ασφαλισμένου, τους ελέγχους και επιλεγμένους πίνακες.
+    - client_info: dict με name, amka, afm
+    - audit_df: DataFrame των βασικών ελέγχων
+    - tables: λίστα από tuples (τίτλος, DataFrame)
+    """
+    today_str = datetime.datetime.now().strftime("%d/%m/%Y")
+    safe_name = html.escape(client_info.get("name", "") or "")
+    safe_amka = html.escape(client_info.get("amka", "") or "")
+    safe_afm = html.escape(client_info.get("afm", "") or "")
+    safe_file = html.escape(filename or "ΑΤΛΑΣ")
+
+    audit_cards = ""
+    if audit_df is not None and not audit_df.empty:
+        parts = []
+        for _, row in audit_df.sort_values("A/A").iterrows():
+            title = html.escape(str(row.get("Έλεγχος", "")))
+            finding = html.escape(str(row.get("Εύρημα", "")))
+            details_val = row.get("Λεπτομέρειες", "") or ""
+            # Τα details μπορεί να περιέχουν ήδη HTML (π.χ. <br>), οπότε δεν κάνουμε escape.
+            details = details_val
+            parts.append(
+                f"""
+                <div class="audit-card">
+                    <div class="audit-title">{title}</div>
+                    <div class="audit-finding">{finding}</div>
+                    <div class="audit-details">{details}</div>
+                </div>
+                """
+            )
+        audit_cards = "<div class='section'><h2>Βασικοί έλεγχοι δεδομένων</h2>" + "".join(parts) + "</div>"
+
+    table_sections = []
+    for title, df in tables:
+        if df is None or getattr(df, "empty", True):
+            continue
+        table_sections.append(
+            f"""
+            <div class="section">
+                <h2>{html.escape(str(title))}</h2>
+                {dataframe_to_html_table(df)}
+            </div>
+            """
+        )
+
+    pdf_css = """
+    @page {
+        size: A4 landscape;
+        margin: 18mm 14mm 16mm 14mm;
+    }
+    * { box-sizing: border-box; }
+    body {
+        font-family: "DejaVu Sans", "Arial", sans-serif;
+        font-size: 11px;
+        color: #111;
+        background: #fff;
+        line-height: 1.45;
+    }
+    h1 {
+        font-size: 20px;
+        color: #2c3e50;
+        margin: 0 0 6px 0;
+    }
+    h2 {
+        font-size: 15px;
+        color: #2c3e50;
+        margin: 0 0 8px 0;
+        padding-bottom: 4px;
+        border-bottom: 1px solid #e5e7eb;
+    }
+    .header {
+        margin-bottom: 12px;
+        padding-bottom: 6px;
+        border-bottom: 2px solid #d1d5db;
+    }
+    .meta {
+        font-size: 10.5px;
+        color: #374151;
+    }
+    .section {
+        margin-top: 12px;
+        margin-bottom: 12px;
+    }
+    .info-table, .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 6px 0 0 0;
+        font-size: 10.5px;
+        table-layout: auto;
+        word-break: break-word;
+    }
+    .info-table th, .info-table td,
+    .data-table th, .data-table td {
+        border: 1px solid #e5e7eb;
+        padding: 5px 7px;
+        text-align: left;
+        vertical-align: top;
+    }
+    .data-table tr:nth-child(even) { background-color: #f9fafb; }
+    .data-table th {
+        background: #f3f4f6;
+        font-weight: 700;
+        color: #111827;
+    }
+    .empty-table {
+        font-size: 10.5px;
+        color: #6b7280;
+        padding: 4px 0;
+    }
+    .audit-card {
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        padding: 10px;
+        margin-bottom: 8px;
+        background: #ffffff;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        page-break-inside: avoid;
+    }
+    .audit-title {
+        font-size: 12.5px;
+        font-weight: 700;
+        color: #111827;
+        margin-bottom: 2px;
+    }
+    .audit-finding {
+        font-size: 11.5px;
+        font-weight: 600;
+        color: #1f2937;
+    }
+    .audit-details {
+        font-size: 10.5px;
+        color: #374151;
+        margin-top: 4px;
+    }
+    .footer {
+        margin-top: 14px;
+        font-size: 10px;
+        color: #6b7280;
+        border-top: 1px solid #e5e7eb;
+        padding-top: 6px;
+    }
+    """
+
+    html_doc = f"""
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <style>{pdf_css}</style>
+    </head>
+    <body>
+      <div class="header">
+        <h1>Ασφαλιστικό βιογραφικό ΑΤΛΑΣ - Πλήρης Αναφορά</h1>
+        <div class="meta">Αρχείο: {safe_file}</div>
+        <div class="meta">Ημερομηνία δημιουργίας: {today_str}</div>
+      </div>
+
+      <div class="section">
+        <h2>Στοιχεία ασφαλισμένου</h2>
+        <table class="info-table">
+          <tr><th>Ονοματεπώνυμο</th><td>{safe_name}</td></tr>
+          <tr><th>ΑΜΚΑ</th><td>{safe_amka}</td></tr>
+          <tr><th>ΑΦΜ</th><td>{safe_afm}</td></tr>
+        </table>
+      </div>
+
+      {audit_cards}
+      {''.join(table_sections)}
+
+      <div class="footer">
+        {html.escape(disclaimer)}
+      </div>
+    </body>
+    </html>
+    """
+
+    return HTML(string=html_doc, base_url=os.getcwd()).write_pdf(stylesheets=[CSS(string="")])
+
 
 def show_results_page(df, filename):
     """
@@ -4729,6 +4919,9 @@ def show_results_page(df, filename):
                     }
                     display_final_df = display_final_df.rename(columns=header_map)
                     
+                    # Καταχώρηση για εξαγωγές/αναφορές
+                    register_view("Πολλαπλή Απασχόληση", display_final_df)
+                    
                     def style_multi(row):
                         if row.name >= len(mask_rows): 
                             return [''] * len(row)
@@ -4786,6 +4979,87 @@ def show_results_page(df, filename):
         else:
             st.warning("Λείπουν απαραίτητες στήλες.")
     
+    # Πλήρης Αναφορά PDF (WeasyPrint)
+    st.markdown("---")
+    st.markdown("### Πλήρης αναφορά (PDF)")
+    pdf_c1, pdf_c2, pdf_c3 = st.columns([1, 1, 1])
+    with pdf_c1:
+        pdf_name = st.text_input(
+            "Ονοματεπώνυμο (στο PDF):",
+            value=st.session_state.get('pdf_full_name', st.session_state.get('print_client_name', '')),
+            key="pdf_full_name"
+        )
+    with pdf_c2:
+        pdf_amka = st.text_input(
+            "ΑΜΚΑ (προαιρετικό):",
+            value=st.session_state.get('pdf_full_amka', st.session_state.get('print_client_amka', '')),
+            key="pdf_full_amka"
+        )
+    with pdf_c3:
+        pdf_afm = st.text_input(
+            "ΑΦΜ (προαιρετικό):",
+            value=st.session_state.get('pdf_full_afm', ''),
+            key="pdf_full_afm"
+        )
+
+    table_order = [
+        "Διαγνωστικός_Έλεγχος",  # θα χρησιμοποιηθεί ξεχωριστά
+        "Συνοπτική Αναφορά",
+        "Καταμέτρηση",
+        "Κενά Διαστήματα",
+        "Διαστήματα χωρίς ημέρες",
+        "Παράλληλη_Ασφάλιση",
+        "Πολλαπλή Απασχόληση",
+        "Ετήσια Αναφορά",
+        "Ημέρες Ασφάλισης",
+        "Παράρτημα"
+    ]
+
+    title_map = {
+        "Διαγνωστικός_Έλεγχος": "Βασικοί έλεγχοι δεδομένων",
+        "Συνοπτική Αναφορά": "Σύνοψη",
+        "Καταμέτρηση": "Καταμέτρηση",
+        "Κενά Διαστήματα": "Κενά",
+        "Διαστήματα χωρίς ημέρες": "Διαστήματα χωρίς ημέρες",
+        "Παράλληλη_Ασφάλιση": "Παράλληλη Ασφάλιση",
+        "Πολλαπλή Απασχόληση": "Πολλαπλή Απασχόληση",
+        "Ετήσια Αναφορά": "Ετήσια Αναφορά",
+        "Ημέρες Ασφάλισης": "Ημέρες Ασφάλισης",
+        "Παράρτημα": "Παράρτημα"
+    }
+
+    audit_for_pdf = view_exports.get("Διαγνωστικός_Έλεγχος")
+    pdf_tables = []
+    for key in table_order:
+        if key == "Διαγνωστικός_Έλεγχος":
+            continue  # θα μπει ξεχωριστά
+        if key in view_exports:
+            pdf_tables.append((title_map.get(key, key), view_exports[key]))
+
+    disclaimer_text = "Η αναφορά δημιουργείται τοπικά για προσωπική χρήση. Τα προσωπικά στοιχεία δεν αποθηκεύονται στον διακομιστή."
+    pdf_bytes = None
+    try:
+        pdf_bytes = build_pdf_report(
+            client_info={"name": pdf_name, "amka": pdf_amka, "afm": pdf_afm},
+            audit_df=audit_for_pdf,
+            tables=pdf_tables,
+            filename=filename,
+            disclaimer=disclaimer_text
+        )
+    except Exception as e:
+        st.error(f"Αποτυχία δημιουργίας PDF: {e}")
+
+    if pdf_bytes:
+        base_name = Path(filename).stem if filename else "atlas"
+        pdf_filename = f"{base_name}_πλήρης_αναφορά.pdf"
+        st.download_button(
+            label="Λήψη πλήρους αναφοράς (PDF)",
+            data=pdf_bytes,
+            file_name=pdf_filename,
+            mime="application/pdf",
+            use_container_width=True
+        )
+
     # Download section
     st.markdown("---")
     st.markdown("### Επιλογές εκτύπωσης")
