@@ -4892,24 +4892,38 @@ def show_results_page(df, filename):
     _add_section("Παράρτημα", "Παράρτημα")
 
     print_all_html = _build_print_all_html(print_sections)
+    print_all_b64 = ""
+    try:
+        print_all_b64 = base64.b64encode(print_all_html.encode('utf-8')).decode('ascii') if print_all_html else ""
+    except Exception:
+        print_all_b64 = ""
 
-    if print_all_html:
+    if print_all_b64:
         st.markdown(
             f"""
             <script>
             (function() {{
-                window.__atlasPrintContent = {json.dumps(print_all_html)};
+                window.__atlasPrintContentB64 = "{print_all_b64}";
                 window.openPrintAllReport = function() {{
-                    const content = window.__atlasPrintContent;
-                    if (!content) {{
+                    const b64 = window.__atlasPrintContentB64;
+                    if (!b64) {{
                         alert('Δεν υπάρχει διαθέσιμο περιεχόμενο για εκτύπωση.');
                         return;
                     }}
+                    let content = '';
+                    try {{
+                        content = atob(b64);
+                    }} catch (e) {{
+                        console.error('Αποτυχία αποκωδικοποίησης εκτύπωσης', e);
+                        alert('Σφάλμα προετοιμασίας εκτύπωσης.');
+                        return;
+                    }}
                     const w = window.open('', 'atlas_print_all', 'width=1100,height=800');
+                    w.document.open();
                     w.document.write(content);
                     w.document.close();
                     w.focus();
-                    setTimeout(() => w.print(), 350);
+                    setTimeout(() => w.print(), 400);
                 }};
                 const btn = document.getElementById('print-all-btn');
                 if (btn) {{
