@@ -5432,385 +5432,384 @@ def main():
 if __name__ == "__main__":
     main()
 
- 
- d e f   g e n e r a t e _ u n i f i e d _ r e p o r t _ h t m l ( ) : 
- 
-         " " " G e n e r a t e s   a n d   o p e n s   a   u n i f i e d   H T M L   r e p o r t   c o n t a i n i n g   a l l   k e y   s e c t i o n s . " " " 
- 
-         i m p o r t   h t m l 
- 
-         i m p o r t   s t r e a m l i t . c o m p o n e n t s . v 1   a s   c o m p o n e n t s 
- 
-         
- 
-         #   R e t r i e v e   d a t a   f r o m   s e s s i o n   s t a t e 
- 
-         c l i e n t _ n a m e   =   s t . s e s s i o n _ s t a t e . g e t ( ' p r i n t _ c l i e n t _ n a m e ' ,   ' ' ) 
- 
-         c l i e n t _ a m k a   =   s t . s e s s i o n _ s t a t e . g e t ( ' p r i n t _ c l i e n t _ a m k a ' ,   ' ' ) 
- 
-         
- 
-         a u d i t _ d f   =   s t . s e s s i o n _ s t a t e . g e t ( ' a u d i t _ d f ' ,   p d . D a t a F r a m e ( ) ) 
- 
-         s u m m a r y _ d f   =   s t . s e s s i o n _ s t a t e . g e t ( ' s u m m a r y _ d f ' ,   p d . D a t a F r a m e ( ) ) 
- 
-         c o u n t i n g _ d f   =   s t . s e s s i o n _ s t a t e . g e t ( ' c o u n t i n g _ d f ' ,   p d . D a t a F r a m e ( ) ) 
- 
-         c o u n t i n g _ s t y l e s   =   s t . s e s s i o n _ s t a t e . g e t ( ' c o u n t i n g _ s t y l e _ r o w s ' ,   [ ] ) 
- 
-         g a p s _ d f   =   s t . s e s s i o n _ s t a t e . g e t ( ' g a p s _ d f ' ,   p d . D a t a F r a m e ( ) ) 
- 
-         p a r a l l e l _ d f   =   s t . s e s s i o n _ s t a t e . g e t ( ' p a r a l l e l _ d f ' ,   p d . D a t a F r a m e ( ) ) 
- 
-         p a r a l l e l _ d a y s   =   s t . s e s s i o n _ s t a t e . g e t ( ' p a r a l l e l _ d a y s ' ,   0 ) 
- 
-         m u l t i p l e _ d f   =   s t . s e s s i o n _ s t a t e . g e t ( ' m u l t i p l e _ d f ' ,   p d . D a t a F r a m e ( ) ) 
- 
-         
- 
-         #   H e l p e r   t o   g e n e r a t e   H T M L   t a b l e   w i t h   s t y l e s 
- 
-         d e f   d f _ t o _ h t m l _ t a b l e ( d f ,   s t y l e _ r o w s = N o n e ,   c u s t o m _ c l a s s = " p r i n t - t a b l e " ) : 
- 
-                 i f   d f . e m p t y : 
- 
-                         r e t u r n   " < p   s t y l e = ' f o n t - s t y l e : i t a l i c ;   c o l o r : # 6 6 6 ; ' > � �� ��   �� �� �� ���� ���� ��   ���� �������� �� �� . < / p > " 
- 
-                 
- 
-                 #   C o l g r o u p s   l o g i c   ( r e u s e d   f r o m   p r i n t   o p t i m i z a t i o n ) 
- 
-                 c o l g r o u p _ h t m l   =   ' < c o l g r o u p > ' 
- 
-                 f o r   c o l   i n   d f . c o l u m n s : 
- 
-                         c _ n a m e   =   s t r ( c o l ) . u p p e r ( ) . s t r i p ( ) 
- 
-                         w i d t h   =   ' a u t o ' 
- 
-                         i f   c _ n a m e   i n   [ ' �" �� �� �� ' ,   ' E T O S ' ] :   w i d t h   =   ' 3 0 p x ' 
- 
-                         e l i f   c _ n a m e   i n   [ ' �� � �� �" �"!�� ' ,   ' T A M E I O ' ] :   w i d t h   =   ' 4 5 p x ' 
- 
-                         e l i f   c _ n a m e   i n   [ ' �� �� �� �� ��   � �� �� � �: �"!�� � �� ' ] :   w i d t h   =   ' 4 5 p x ' 
- 
-                         e l i f   c _ n a m e   i n   [ ' �" ��� �� � �� �� � �� ' ] :   w i d t h   =   ' 4 5 p x ' 
- 
-                         e l i f   ' �� �: � � �� �� '   i n   c _ n a m e :   w i d t h   =   ' 3 0 p x ' 
- 
-                         e l i f   c _ n a m e   i n   [ ' �� �" ���"!� ��� �� � ' ] :   w i d t h   =   ' 9 0 p x ' 
- 
-                         e l i f   ' � �� �� � �� �� �� �� '   i n   c _ n a m e   a n d   ' �� �� �� �� �� '   i n   c _ n a m e :   w i d t h   =   ' 4 5 p x ' 
- 
-                         e l i f   c _ n a m e   i n   [ ' �� �� �� �� �: �� ' ] :   w i d t h   =   ' 3 0 p x ' 
- 
-                         e l i f   c _ n a m e . e n d s w i t h ( ' ��� ' ) :   w i d t h   =   ' 4 6 p x ' 
- 
-                         e l i f   ' �� �"!�� �� �" �� '   i n   c _ n a m e :   w i d t h   =   ' 5 5 p x ' 
- 
-                         e l i f   ' �" �"!�� �� �� ���" �� '   i n   c _ n a m e :   w i d t h   =   ' 5 5 p x ' 
- 
-                         e l i f   ' �� �� �� �� �� �� �� '   i n   c _ n a m e :   w i d t h   =   ' 3 5 p x ' 
- 
-                         c o l g r o u p _ h t m l   + =   f ' < c o l   s t y l e = " w i d t h : { w i d t h } " > ' 
- 
-                 c o l g r o u p _ h t m l   + =   ' < / c o l g r o u p > ' 
- 
- 
- 
-                 h e a d e r s   =   " " . j o i n ( f " < t h > { h } < / t h > "   f o r   h   i n   d f . c o l u m n s ) 
- 
-                 r o w s   =   [ ] 
- 
-                 f o r   i d x ,   r o w   i n   d f . i t e r r o w s ( ) : 
- 
-                         i s _ t o t a l   =   a n y ( s t r ( v ) . s t r i p ( ) . s t a r t s w i t h ( ' �� �� �� ���� ��' )   f o r   v   i n   r o w . v a l u e s ) 
- 
-                         t r _ c l s   =   '   c l a s s = " t o t a l - r o w " '   i f   i s _ t o t a l   e l s e   ' ' 
- 
-                         
- 
-                         t d s   =   [ ] 
- 
-                         r o w _ s t y l e   =   s t y l e _ r o w s [ i d x ]   i f   s t y l e _ r o w s   a n d   i d x   <   l e n ( s t y l e _ r o w s )   e l s e   { } 
- 
-                         
- 
-                         f o r   c o l _ i d x ,   v a l   i n   e n u m e r a t e ( r o w . v a l u e s ) : 
- 
-                                 c o l _ n a m e   =   d f . c o l u m n s [ c o l _ i d x ] 
- 
-                                 s t y l e   =   r o w _ s t y l e . g e t ( c o l _ n a m e ,   ' ' ) 
- 
-                                 v a l _ s t r   =   " "   i f   p d . i s n a ( v a l )   e l s e   s t r ( v a l ) 
- 
-                                 t d s . a p p e n d ( f " < t d   s t y l e = ' { s t y l e } ' > { v a l _ s t r } < / t d > " ) 
- 
-                         r o w s . a p p e n d ( f " < t r { t r _ c l s } > { ' ' . j o i n ( t d s ) } < / t r > " ) 
- 
-                         
- 
-                 r e t u r n   f " < t a b l e   c l a s s = ' { c u s t o m _ c l a s s } ' > { c o l g r o u p _ h t m l } < t h e a d > < t r > { h e a d e r s } < / t r > < / t h e a d > < t b o d y > { ' ' . j o i n ( r o w s ) } < / t b o d y > < / t a b l e > " 
- 
- 
- 
-         #   1 .   A u d i t   S e c t i o n 
- 
-         a u d i t _ h t m l   =   " " 
- 
-         i f   n o t   a u d i t _ d f . e m p t y : 
- 
-                 #   C u s t o m   r e n d e r i n g   f o r   A u d i t   c a r d s   ( s i m p l i f i e d   f o r   p r i n t ) 
- 
-                 c a r d s   =   [ ] 
- 
-                 #   G r o u p   1 
- 
-                 f o r   a a   i n   [ 1 ,   2 ,   5 ,   6 ] : 
- 
-                         r   =   a u d i t _ d f [ a u d i t _ d f [ ' A / A ' ]   = =   a a ] 
- 
-                         i f   n o t   r . e m p t y : 
- 
-                                 r o w   =   r . i l o c [ 0 ] 
- 
-                                 c a r d s . a p p e n d ( f " < d i v   c l a s s = ' a u d i t - c a r d ' > < s t r o n g > { r o w [ ' �� �� �� �� �! ��� ' ] } < / s t r o n g > < b r > < s p a n   s t y l e = ' c o l o r : # 2 9 8 0 b 9 ' > { r o w [ ' �" �� �� �� ���� ' ] } < / s p a n > < b r > < s p a n   s t y l e = ' f o n t - s i z e : 0 . 9 e m ; c o l o r : # 5 5 5 ' > { r o w [ ' �: �� �� � ������ �� �� ���� � ' ] } < / s p a n > < / d i v > " ) 
- 
-                 c o l 1 _ h t m l   =   " " . j o i n ( c a r d s ) 
- 
-                 
- 
-                 c a r d s   =   [ ] 
- 
-                 #   G r o u p   2 
- 
-                 f o r   a a   i n   [ 3 ,   4 ,   7 ,   8 ] : 
- 
-                         r   =   a u d i t _ d f [ a u d i t _ d f [ ' A / A ' ]   = =   a a ] 
- 
-                         i f   n o t   r . e m p t y : 
- 
-                                 r o w   =   r . i l o c [ 0 ] 
- 
-                                 c a r d s . a p p e n d ( f " < d i v   c l a s s = ' a u d i t - c a r d ' > < s t r o n g > { r o w [ ' �� �� �� �� �! ��� ' ] } < / s t r o n g > < b r > < s p a n   s t y l e = ' c o l o r : # 2 9 8 0 b 9 ' > { r o w [ ' �" �� �� �� ���� ' ] } < / s p a n > < b r > < s p a n   s t y l e = ' f o n t - s i z e : 0 . 9 e m ; c o l o r : # 5 5 5 ' > { r o w [ ' �: �� �� � ������ �� �� ���� � ' ] } < / s p a n > < / d i v > " ) 
- 
-                 c o l 2 _ h t m l   =   " " . j o i n ( c a r d s ) 
- 
-                 
- 
-                 c a r d s   =   [ ] 
- 
-                 #   G r o u p   3 
- 
-                 f o r   a a   i n   [ 9 ] : 
- 
-                         r   =   a u d i t _ d f [ a u d i t _ d f [ ' A / A ' ]   = =   a a ] 
- 
-                         i f   n o t   r . e m p t y : 
- 
-                                 r o w   =   r . i l o c [ 0 ] 
- 
-                                 c a r d s . a p p e n d ( f " < d i v   c l a s s = ' a u d i t - c a r d ' > < s t r o n g > { r o w [ ' �� �� �� �� �! ��� ' ] } < / s t r o n g > < b r > < s p a n   s t y l e = ' c o l o r : # 2 9 8 0 b 9 ' > { r o w [ ' �" �� �� �� ���� ' ] } < / s p a n > < b r > < s p a n   s t y l e = ' f o n t - s i z e : 0 . 9 e m ; c o l o r : # 5 5 5 ; c o l u m n s : 2 ' > { r o w [ ' �: �� �� � ������ �� �� ���� � ' ] } < / s p a n > < / d i v > " ) 
- 
-                 c o l 3 _ h t m l   =   " " . j o i n ( c a r d s ) 
- 
-                 
- 
-                 a u d i t _ h t m l   =   f " " " 
- 
-                 < d i v   c l a s s = ' s e c t i o n - t i t l e ' > � �� ���������   �� �� �� �� �! ����  � �� �������� �� �0 �� < / d i v > 
- 
-                 < d i v   c l a s s = ' a u d i t - c o n t a i n e r ' > 
- 
-                         < d i v   c l a s s = ' a u d i t - c o l ' > { c o l 1 _ h t m l } < / d i v > 
- 
-                         < d i v   c l a s s = ' a u d i t - c o l ' > { c o l 2 _ h t m l } < / d i v > 
- 
-                         < d i v   c l a s s = ' a u d i t - c o l ' > { c o l 3 _ h t m l } < / d i v > 
- 
-                 < / d i v > 
- 
-                 " " " 
- 
- 
- 
-         #   2 .   S u m m a r y   S e c t i o n 
- 
-         s u m m a r y _ h t m l   =   " " 
- 
-         i f   n o t   s u m m a r y _ d f . e m p t y : 
- 
-                 s u m m a r y _ h t m l   =   f " < d i v   c l a s s = ' s e c t i o n - t i t l e ' > �� �& �� ���� � ������   � �� �� �  ���� �� < / d i v > { d f _ t o _ h t m l _ t a b l e ( s u m m a r y _ d f ) } " 
- 
- 
- 
-         #   3 .   C o u n t i n g   S e c t i o n 
- 
-         c o u n t i n g _ h t m l   =   " " 
- 
-         i f   n o t   c o u n t i n g _ d f . e m p t y : 
- 
-                 c o u n t i n g _ h t m l   =   f " < d i v   c l a s s = ' s e c t i o n - t i t l e ' > �� �� � �� ���� � �� �� ����   � ���� �� �� ��   � ���  �� �� ������ � < / d i v > { d f _ t o _ h t m l _ t a b l e ( c o u n t i n g _ d f ,   c o u n t i n g _ s t y l e s ) } " 
- 
- 
- 
-         #   4 .   G a p s   S e c t i o n 
- 
-         g a p s _ h t m l   =   " " 
- 
-         i f   n o t   g a p s _ d f . e m p t y : 
- 
-                 g a p s _ h t m l   =   f " < d i v   c l a s s = ' s e c t i o n - t i t l e ' > �� �� �� ��   � ���� ��� �� ���� � �� < / d i v > { d f _ t o _ h t m l _ t a b l e ( g a p s _ d f ) } " 
- 
-                 #   A d d   s u m m a r y   m e t r i c s 
- 
-                 g _ d a y s   =   g a p s _ d f [ ' � ���� �� ���� ���� ���� ���� �   �� ���� �� �� � ' ] . s u m ( )   i f   ' � ���� �� ���� ���� ���� ���� �   �� ���� �� �� � '   i n   g a p s _ d f . c o l u m n s   e l s e   0 
- 
-                 g a p s _ h t m l   + =   f " < d i v   s t y l e = ' m a r g i n - t o p : 5 p x ;   f o n t - w e i g h t : b o l d ; ' > �� �� �� ���� ��  �� �� �� �� ��   � ���� �� �� �� :   { g _ d a y s : , . 0 f } < / d i v > " 
- 
- 
- 
-         #   5 .   P a r a l l e l   S e c t i o n 
- 
-         p a r a l l e l _ h t m l   =   " " 
- 
-         i f   n o t   p a r a l l e l _ d f . e m p t y : 
- 
-                 p _ s t y l e s   =   s t . s e s s i o n _ s t a t e . g e t ( ' p a r a l l e l _ s t y l e _ r o w s ' ,   [ ] ) 
- 
-                 p a r a l l e l _ h t m l   =   f " < d i v   c l a s s = ' s e c t i o n - t i t l e ' > �� �� �� �� �� �� �� �� ��   � ���  �� �� ������   ( �"!�� �   &   �� � �" �" ) < / d i v > { d f _ t o _ h t m l _ t a b l e ( p a r a l l e l _ d f ,   p _ s t y l e s ) } " 
- 
-                 p a r a l l e l _ h t m l   + =   f " < d i v   s t y l e = ' m a r g i n - t o p : 5 p x ;   f o n t - w e i g h t : b o l d ; ' > �� �� �� ���� ��  �� �� �� �� �� �� �� �� �0 ��   � ���� �� �� �� :   { p a r a l l e l _ d a y s } < / d i v > " 
- 
- 
- 
-         #   6 .   M u l t i p l e   S e c t i o n 
- 
-         m u l t i p l e _ h t m l   =   " " 
- 
-         i f   n o t   m u l t i p l e _ d f . e m p t y : 
- 
-                 m u l t i p l e _ h t m l   =   f " < d i v   c l a s s = ' s e c t i o n - t i t l e ' > �� ���� �� �� �� �� ��   � �� �� ���! �� �� �� ���� < / d i v > { d f _ t o _ h t m l _ t a b l e ( m u l t i p l e _ d f ) } " 
- 
- 
- 
-         #   C o n s t r u c t   F u l l   H T M L 
- 
-         f u l l _ h t m l   =   f " " " < ! D O C T Y P E   h t m l > 
- 
- < h t m l   l a n g = " e l " > 
- 
- < h e a d > 
- 
-         < m e t a   c h a r s e t = " U T F - 8 " > 
- 
-         < t i t l e > �� �& �� ���� ������   � �� �� �  ���� ��   � ���  �� �� ������ � < / t i t l e > 
- 
-         < s t y l e > 
- 
-                 @ m e d i a   p r i n t   { {   @ p a g e   { {   s i z e :   A 4   l a n d s c a p e ;   m a r g i n :   5 m m ;   } }   } } 
- 
-                 b o d y   { {   f o n t - f a m i l y :   - a p p l e - s y s t e m ,   s y s t e m - u i ,   s a n s - s e r i f ;   f o n t - s i z e :   1 0 p x ;   c o l o r :   # 2 2 2 ;   } } 
- 
-                 h 1   { {   t e x t - a l i g n :   c e n t e r ;   f o n t - s i z e :   1 8 p x ;   m a r g i n :   1 0 p x   0 ;   } } 
- 
-                 . h e a d e r - i n f o   { {   t e x t - a l i g n :   c e n t e r ;   m a r g i n - b o t t o m :   1 5 p x ;   } } 
- 
-                 . c l i e n t - n a m e   { {   f o n t - s i z e :   2 4 p x ;   f o n t - w e i g h t :   b o l d ;   } } 
- 
-                 . s e c t i o n - t i t l e   { {   f o n t - s i z e :   1 4 p x ;   f o n t - w e i g h t :   b o l d ;   m a r g i n - t o p :   2 0 p x ;   m a r g i n - b o t t o m :   5 p x ;   b o r d e r - b o t t o m :   2 p x   s o l i d   # d d d ;   p a d d i n g - b o t t o m :   2 p x ;   p a g e - b r e a k - a f t e r :   a v o i d ;   } } 
- 
-                 
- 
-                 / *   T a b l e s   * / 
- 
-                 t a b l e . p r i n t - t a b l e   { {   b o r d e r - c o l l a p s e :   c o l l a p s e ;   w i d t h :   1 0 0 % ;   f o n t - s i z e :   9 p x ;   t a b l e - l a y o u t :   f i x e d ;   m a r g i n - b o t t o m :   1 0 p x ;   } } 
- 
-                 t a b l e . p r i n t - t a b l e   t h   { {   b a c k g r o u n d :   # f 0 f 2 f 5 ;   b o r d e r :   1 p x   s o l i d   # c c c ;   p a d d i n g :   3 p x ;   t e x t - a l i g n :   l e f t ;   o v e r f l o w :   h i d d e n ;   w h i t e - s p a c e :   n o w r a p ;   } } 
- 
-                 t a b l e . p r i n t - t a b l e   t d   { {   b o r d e r :   1 p x   s o l i d   # e e e ;   p a d d i n g :   3 p x ;   o v e r f l o w :   h i d d e n ;   w h i t e - s p a c e :   n o w r a p ;   t e x t - o v e r f l o w :   e l l i p s i s ;   } } 
- 
-                 t a b l e . p r i n t - t a b l e   t r . t o t a l - r o w   t d   { {   b a c k g r o u n d - c o l o r :   # e 6 f 2 f f   ! i m p o r t a n t ;   f o n t - w e i g h t :   b o l d ;   } } 
- 
-                 
- 
-                 / *   A u d i t   G r i d   * / 
- 
-                 . a u d i t - c o n t a i n e r   { {   d i s p l a y :   f l e x ;   g a p :   1 0 p x ;   m a r g i n - b o t t o m :   1 0 p x ;   } } 
- 
-                 . a u d i t - c o l   { {   f l e x :   1 ;   d i s p l a y :   f l e x ;   f l e x D i r e c t i o n :   c o l u m n ;   g a p :   8 p x ;   } } 
- 
-                 . a u d i t - c a r d   { {   b o r d e r :   1 p x   s o l i d   # d d d ;   p a d d i n g :   6 p x ;   b o r d e r - r a d i u s :   4 p x ;   b a c k g r o u n d :   # f f f ;   p a g e - b r e a k - i n s i d e :   a v o i d ;   } } 
- 
-                 
- 
-                 / *   D i s c l a i m e r   * / 
- 
-                 . d i s c l a i m e r   { {   m a r g i n - t o p :   3 0 p x ;   f o n t - s i z e :   9 p x ;   c o l o r :   # 6 6 6 ;   t e x t - a l i g n :   c e n t e r ;   b o r d e r - t o p :   1 p x   s o l i d   # e e e ;   p a d d i n g - t o p :   1 0 p x ;   p a g e - b r e a k - i n s i d e :   a v o i d ;   } } 
- 
-         < / s t y l e > 
- 
- < / h e a d > 
- 
- < b o d y   o n l o a d = " w i n d o w . p r i n t ( ) " > 
- 
-         < d i v   c l a s s = " h e a d e r - i n f o " > 
- 
-                 < d i v   c l a s s = " c l i e n t - n a m e " > { h t m l . e s c a p e ( c l i e n t _ n a m e ) } < / d i v > 
- 
-                 < d i v > � �� �� � :   { h t m l . e s c a p e ( c l i e n t _ a m k a ) } < / d i v > 
- 
-                 < d i v > � ���� �� ������ �� � �� :   { p d . T i m e s t a m p . n o w ( ) . s t r f t i m e ( ' % d / % m / % Y ' ) } < / d i v > 
- 
-         < / d i v > 
- 
-         
- 
-         { a u d i t _ h t m l } 
- 
-         { s u m m a r y _ h t m l } 
- 
-         { c o u n t i n g _ h t m l } 
- 
-         { g a p s _ h t m l } 
- 
-         { p a r a l l e l _ h t m l } 
- 
-         { m u l t i p l e _ h t m l } 
- 
-         
- 
-         < d i v   c l a s s = " d i s c l a i m e r " > 
- 
-                 < s t r o n g > �� � �� � �� �� �"!�� �   �� � �� �" �"!�� �� � : < / s t r o n g >   �   �� �� �� ���� ����   �� �� �� �  ���� ��   �� �� ��� �� �� � �� ��  �� �� ������ �� ����� ������   ��� ��   ���� �������� �� ��   �� ���&   �� ���  �� �� � �� ���� � �� ��  ��� ��  �� �� �! �� � ��  � �� �: � �� / e - �" �� �� � .   
- 
-                 � �� ��� �� �� �� �   �� �� �� �� �� �� � ��  �& �� ���� ���� ���� ���� �   ���� ��  ���� ��   �& �� ������ ������� ��   �� �� � ���� ����   �� �� �� �� �� �  ��   ��   �� �� �� �� ���� ���� ���   � ���&   e - �" �� �� � . 
- 
-         < / d i v > 
- 
- < / b o d y > 
- 
- < / h t m l > " " " 
- 
- 
- 
-         #   O p e n   i n   n e w   w i n d o w   v i a   J S 
- 
-         j s   =   f " " " 
- 
-         < s c r i p t > 
- 
-                 v a r   w i n   =   w i n d o w . o p e n ( ' ' ,   ' _ b l a n k ' ,   ' w i d t h = 1 2 0 0 , h e i g h t = 8 0 0 ' ) ; 
- 
-                 w i n . d o c u m e n t . w r i t e ( ` { f u l l _ h t m l } ` ) ; 
- 
-                 w i n . d o c u m e n t . c l o s e ( ) ; 
- 
-         < / s c r i p t > 
- 
-         " " " 
- 
-         c o m p o n e n t s . h t m l ( j s ,   h e i g h t = 0 ,   w i d t h = 0 ) 
- 
- 
+
+def generate_unified_report_html():
+
+    """Generates and opens a unified HTML report containing all key sections."""
+
+    import html
+
+    import streamlit.components.v1 as components
+
+    
+
+    # Retrieve data from session state
+
+    client_name = st.session_state.get('print_client_name', '')
+
+    client_amka = st.session_state.get('print_client_amka', '')
+
+    
+
+    audit_df = st.session_state.get('audit_df', pd.DataFrame())
+
+    summary_df = st.session_state.get('summary_df', pd.DataFrame())
+
+    counting_df = st.session_state.get('counting_df', pd.DataFrame())
+
+    counting_styles = st.session_state.get('counting_style_rows', [])
+
+    gaps_df = st.session_state.get('gaps_df', pd.DataFrame())
+
+    parallel_df = st.session_state.get('parallel_df', pd.DataFrame())
+
+    parallel_days = st.session_state.get('parallel_days', 0)
+
+    multiple_df = st.session_state.get('multiple_df', pd.DataFrame())
+
+    
+
+    # Helper to generate HTML table with styles
+
+    def df_to_html_table(df, style_rows=None, custom_class="print-table"):
+
+        if df.empty:
+
+            return "<p style='font-style:italic; color:#666;'>� ���� ���������������� ����������������.</p>"
+
+        
+
+        # Colgroups logic (reused from print optimization)
+
+        colgroup_html = '<colgroup>'
+
+        for col in df.columns:
+
+            c_name = str(col).upper().strip()
+
+            width = 'auto'
+
+            if c_name in ['�" ������', 'ETOS']: width = '30px'
+
+            elif c_name in ['��� ���" �"!��', 'TAMEIO']: width = '45px'
+
+            elif c_name in ['���������� � ����� �: �"!��� ��']: width = '45px'
+
+            elif c_name in ['�" ��� ��� ����� ��']: width = '45px'
+
+            elif '���: � � ����' in c_name: width = '30px'
+
+            elif c_name in ['���" ���"!� ��� ��� ']: width = '90px'
+
+            elif '� ����� ��������' in c_name and '����������' in c_name: width = '45px'
+
+            elif c_name in ['���������: ��']: width = '30px'
+
+            elif c_name.endswith('��� '): width = '46px'
+
+            elif '���"!�����" ��' in c_name: width = '55px'
+
+            elif '�" �"!���������" ��' in c_name: width = '55px'
+
+            elif '��������������' in c_name: width = '35px'
+
+            colgroup_html += f'<col style="width:{width}">'
+
+        colgroup_html += '</colgroup>'
+
+
+
+        headers = "".join(f"<th>{h}</th>" for h in df.columns)
+
+        rows = []
+
+        for idx, row in df.iterrows():
+
+            is_total = any(str(v).strip().startswith('������������') for v in row.values)
+
+            tr_cls = ' class="total-row"' if is_total else ''
+
+            
+
+            tds = []
+
+            row_style = style_rows[idx] if style_rows and idx < len(style_rows) else {}
+
+            
+
+            for col_idx, val in enumerate(row.values):
+
+                col_name = df.columns[col_idx]
+
+                style = row_style.get(col_name, '')
+
+                val_str = "" if pd.isna(val) else str(val)
+
+                tds.append(f"<td style='{style}'>{val_str}</td>")
+
+            rows.append(f"<tr{tr_cls}>{''.join(tds)}</tr>")
+
+            
+
+        return f"<table class='{custom_class}'>{colgroup_html}<thead><tr>{headers}</tr></thead><tbody>{''.join(rows)}</tbody></table>"
+
+
+
+    # 1. Audit Section
+
+    audit_html = ""
+
+    if not audit_df.empty:
+
+        # Custom rendering for Audit cards (simplified for print)
+
+        cards = []
+
+        # Group 1
+
+        for aa in [1, 2, 5, 6]:
+
+            r = audit_df[audit_df['A/A'] == aa]
+
+            if not r.empty:
+
+                row = r.iloc[0]
+
+                cards.append(f"<div class='audit-card'><strong>{row['���������! ��� ']}</strong><br><span style='color:#2980b9'>{row['�" ����������']}</span><br><span style='font-size:0.9em;color:#555'>{row['�: ���� � ��������������� ']}</span></div>")
+
+        col1_html = "".join(cards)
+
+        
+
+        cards = []
+
+        # Group 2
+
+        for aa in [3, 4, 7, 8]:
+
+            r = audit_df[audit_df['A/A'] == aa]
+
+            if not r.empty:
+
+                row = r.iloc[0]
+
+                cards.append(f"<div class='audit-card'><strong>{row['���������! ��� ']}</strong><br><span style='color:#2980b9'>{row['�" ����������']}</span><br><span style='font-size:0.9em;color:#555'>{row['�: ���� � ��������������� ']}</span></div>")
+
+        col2_html = "".join(cards)
+
+        
+
+        cards = []
+
+        # Group 3
+
+        for aa in [9]:
+
+            r = audit_df[audit_df['A/A'] == aa]
+
+            if not r.empty:
+
+                row = r.iloc[0]
+
+                cards.append(f"<div class='audit-card'><strong>{row['���������! ��� ']}</strong><br><span style='color:#2980b9'>{row['�" ����������']}</span><br><span style='font-size:0.9em;color:#555;columns:2'>{row['�: ���� � ��������������� ']}</span></div>")
+
+        col3_html = "".join(cards)
+
+        
+
+        audit_html = f"""
+
+        <div class='section-title'>� �����������  ���������! ���� � �������������0 ��</div>
+
+        <div class='audit-container'>
+
+            <div class='audit-col'>{col1_html}</div>
+
+            <div class='audit-col'>{col2_html}</div>
+
+            <div class='audit-col'>{col3_html}</div>
+
+        </div>
+
+        """
+
+
+
+    # 2. Summary Section
+
+    summary_html = ""
+
+    if not summary_df.empty:
+
+        summary_html = f"<div class='section-title'>���& ������ � ������ � �����  ������</div>{df_to_html_table(summary_df)}"
+
+
+
+    # 3. Counting Section
+
+    counting_html = ""
+
+    if not counting_df.empty:
+
+        counting_html = f"<div class='section-title'>����� ������� �������� � ���������� � ���  ����������� </div>{df_to_html_table(counting_df, counting_styles)}"
+
+
+
+    # 4. Gaps Section
+
+    gaps_html = ""
+
+    if not gaps_df.empty:
+
+        gaps_html = f"<div class='section-title'>�������� � ������� ������� ��</div>{df_to_html_table(gaps_df)}"
+
+        # Add summary metrics
+
+        g_days = gaps_df['� �����������������������  ����������� '].sum() if '� �����������������������  ����������� ' in gaps_df.columns else 0
+
+        gaps_html += f"<div style='margin-top:5px; font-weight:bold;'>������������ ���������� � ����������: {g_days:,.0f}</div>"
+
+
+
+    # 5. Parallel Section
+
+    parallel_html = ""
+
+    if not parallel_df.empty:
+
+        p_styles = st.session_state.get('parallel_style_rows', [])
+
+        parallel_html = f"<div class='section-title'>������������������ � ���  ���������� (�"!���  & ��� �" �" )</div>{df_to_html_table(parallel_df, p_styles)}"
+
+        parallel_html += f"<div style='margin-top:5px; font-weight:bold;'>������������ �����������������0 �� � ����������: {parallel_days}</div>"
+
+
+
+    # 6. Multiple Section
+
+    multiple_html = ""
+
+    if not multiple_df.empty:
+
+        multiple_html = f"<div class='section-title'>������������ ���� � �� �����! ����������</div>{df_to_html_table(multiple_df)}"
+
+
+
+    # Construct Full HTML
+
+    full_html = f"""<!DOCTYPE html>
+
+<html lang="el">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <title>���& ������������ � �����  ������ � ���  ����������� </title>
+
+    <style>
+
+        @media print {{ @page {{ size: A4 landscape; margin: 5mm; }} }}
+
+        body {{ font-family: -apple-system, system-ui, sans-serif; font-size: 10px; color: #222; }}
+
+        h1 {{ text-align: center; font-size: 18px; margin: 10px 0; }}
+
+        .header-info {{ text-align: center; margin-bottom: 15px; }}
+
+        .client-name {{ font-size: 24px; font-weight: bold; }}
+
+        .section-title {{ font-size: 14px; font-weight: bold; margin-top: 20px; margin-bottom: 5px; border-bottom: 2px solid #ddd; padding-bottom: 2px; page-break-after: avoid; }}
+
+        
+
+        /* Tables */
+
+        table.print-table {{ border-collapse: collapse; width: 100%; font-size: 9px; table-layout: fixed; margin-bottom: 10px; }}
+
+        table.print-table th {{ background: #f0f2f5; border: 1px solid #ccc; padding: 3px; text-align: left; overflow: hidden; white-space: nowrap; }}
+
+        table.print-table td {{ border: 1px solid #eee; padding: 3px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }}
+
+        table.print-table tr.total-row td {{ background-color: #e6f2ff !important; font-weight: bold; }}
+
+        
+
+        /* Audit Grid */
+
+        .audit-container {{ display: flex; gap: 10px; margin-bottom: 10px; }}
+
+        .audit-col {{ flex: 1; display: flex; flexDirection: column; gap: 8px; }}
+
+        .audit-card {{ border: 1px solid #ddd; padding: 6px; border-radius: 4px; background: #fff; page-break-inside: avoid; }}
+
+        
+
+        /* Disclaimer */
+
+        .disclaimer {{ margin-top: 30px; font-size: 9px; color: #666; text-align: center; border-top: 1px solid #eee; padding-top: 10px; page-break-inside: avoid; }}
+
+    </style>
+
+</head>
+
+<body onload="window.print()">
+
+    <div class="header-info">
+
+        <div class="client-name">{html.escape(client_name)}</div>
+
+        <div>� ����� : {html.escape(client_amka)}</div>
+
+        <div>� ��������������� ��: {pd.Timestamp.now().strftime('%d/%m/%Y')}</div>
+
+    </div>
+
+    
+
+    {audit_html}
+
+    {summary_html}
+
+    {counting_html}
+
+    {gaps_html}
+
+    {parallel_html}
+
+    {multiple_html}
+
+    
+
+    <div class="disclaimer">
+
+        <strong>��� ��� �����"!���  ��� ���" �"!����� :</strong> �  �� ������������ �������  ������ ������� ����� ���� ���� ������������� ������ ��� �� ���������������� �� ���&  �����  ����� ������� ���� ��� �� �����! ��� �� � ���: � ��/e-�" ����� . 
+
+        � �� ��� �������  ������������� �� �& �� �����������������  ������ ������ �& �� ������������� �� ���� � �������� �����������  �� �� �������������������  � ���&  e-�" ����� .
+
+    </div>
+
+</body>
+
+</html>"""
+
+
+
+    # Open in new window via JS
+
+    js = f"""
+
+    <script>
+
+        var win = window.open('', '_blank', 'width=1200,height=800');
+
+        win.document.write(`{full_html}`);
+
+        win.document.close();
+
+    </script>
+
+    """
+
+    components.html(js, height=0, width=0)
+
