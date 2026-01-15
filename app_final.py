@@ -1494,14 +1494,6 @@ def show_results_page(df, filename):
         height=0
     )
     
-    # --- Unified Report Button (Above Tabs) ---
-    with st.container():
-        uc1, uc2 = st.columns([3, 1])
-        with uc2:
-            if st.button("🖨️ Προβολή Συνολικής Αναφοράς", key="btn_unified_report", use_container_width=True):
-                generate_unified_report_html()
-        st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
-
     # Δημιουργία tabs για διαφορετικούς τύπους δεδομένων
     tab_summary, tab_count, tab_gaps, tab_apd, tab_parallel, tab_multi, tab_yearly, tab_days, tab_main, tab_annex = st.tabs([
         "Σύνοψη",
@@ -2186,7 +2178,6 @@ def show_results_page(df, filename):
                     if not r.empty: render_check(r.iloc[0])
             
             register_view("Διαγνωστικός_Έλεγχος", audit_df)
-            st.session_state['audit_df'] = audit_df
             st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
         
         if 'Κλάδος/Πακέτο Κάλυψης' in df.columns:
@@ -2358,7 +2349,6 @@ def show_results_page(df, filename):
                 display_summary,
                 use_container_width=True
             )
-            st.session_state['summary_df'] = display_summary
             register_view("Συνοπτική Αναφορά", display_summary)
             render_print_button(
                 "print_summary",
@@ -2982,23 +2972,20 @@ def show_results_page(df, filename):
                         decimals = 1 if col in ['Μήνες', 'Έτη'] else 0
                         display_gaps[col] = display_gaps[col].apply(lambda x: format_number_greek(x, decimals=decimals) if pd.notna(x) and x != '' else x)
                 
-            # Save Gaps DF to session state
-            st.session_state['gaps_df'] = display_gaps
-
-            # Εμφάνιση πίνακα
-            st.dataframe(
-                display_gaps,
-                use_container_width=True
-            )
-            register_view("Κενά Διαστήματα", display_gaps)
-            
-            # Κουμπί εκτύπωσης
-            render_print_button(
-                "print_gaps",
-                "Κενά Διαστήματα",
-                gaps_df,
-                description="Χρονικές περίοδοι όπου δεν βρέθηκε ασφαλιστική κάλυψη μεταξύ των δηλωμένων εγγραφών."
-            )
+                # Εμφάνιση πίνακα
+                st.dataframe(
+                    display_gaps,
+                    use_container_width=True
+                )
+                register_view("Κενά Διαστήματα", display_gaps)
+                
+                # Κουμπί εκτύπωσης
+                render_print_button(
+                    "print_gaps",
+                    "Κενά Διαστήματα",
+                    gaps_df,
+                    description="Χρονικές περίοδοι όπου δεν βρέθηκε ασφαλιστική κάλυψη μεταξύ των δηλωμένων εγγραφών."
+                )
                 
                 # Συμβουλές
                 st.markdown("#### Συμβουλές")
@@ -4246,9 +4233,6 @@ def show_results_page(df, filename):
                         row_styles[col] = style
                     print_style_rows.append(row_styles)
                 
-                st.session_state['counting_df'] = final_display_df
-                st.session_state['counting_style_rows'] = print_style_rows
-                
                 render_print_button(
                     "print_counting",
                     "Πίνακας Καταμέτρησης",
@@ -4668,9 +4652,6 @@ def show_results_page(df, filename):
 
                     # Register for Export
                     register_view("Παράλληλη_Ασφάλιση", display_final_df)
-                    st.session_state['parallel_df'] = display_final_df
-                    st.session_state['parallel_days'] = parallel_days_total
-                    st.session_state['parallel_style_rows'] = multiple_style_rows
                     
                     render_print_button(
                         "print_parallel",
@@ -5016,9 +4997,8 @@ def show_results_page(df, filename):
                     )
                     st.markdown('</div>', unsafe_allow_html=True)
                     
-                        st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
+                    st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
                     
-                    st.session_state['multiple_df'] = display_final_df
                     render_print_button(
                         "print_multi",
                         "Πολλαπλή Απασχόληση",
@@ -5431,385 +5411,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-def generate_unified_report_html():
-
-    """Generates and opens a unified HTML report containing all key sections."""
-
-    import html
-
-    import streamlit.components.v1 as components
-
-    
-
-    # Retrieve data from session state
-
-    client_name = st.session_state.get('print_client_name', '')
-
-    client_amka = st.session_state.get('print_client_amka', '')
-
-    
-
-    audit_df = st.session_state.get('audit_df', pd.DataFrame())
-
-    summary_df = st.session_state.get('summary_df', pd.DataFrame())
-
-    counting_df = st.session_state.get('counting_df', pd.DataFrame())
-
-    counting_styles = st.session_state.get('counting_style_rows', [])
-
-    gaps_df = st.session_state.get('gaps_df', pd.DataFrame())
-
-    parallel_df = st.session_state.get('parallel_df', pd.DataFrame())
-
-    parallel_days = st.session_state.get('parallel_days', 0)
-
-    multiple_df = st.session_state.get('multiple_df', pd.DataFrame())
-
-    
-
-    # Helper to generate HTML table with styles
-
-    def df_to_html_table(df, style_rows=None, custom_class="print-table"):
-
-        if df.empty:
-
-            return "<p style='font-style:italic; color:#666;'>� ���� ���������������� ����������������.</p>"
-
-        
-
-        # Colgroups logic (reused from print optimization)
-
-        colgroup_html = '<colgroup>'
-
-        for col in df.columns:
-
-            c_name = str(col).upper().strip()
-
-            width = 'auto'
-
-            if c_name in ['�" ������', 'ETOS']: width = '30px'
-
-            elif c_name in ['��� ���" �"!��', 'TAMEIO']: width = '45px'
-
-            elif c_name in ['���������� � ����� �: �"!��� ��']: width = '45px'
-
-            elif c_name in ['�" ��� ��� ����� ��']: width = '45px'
-
-            elif '���: � � ����' in c_name: width = '30px'
-
-            elif c_name in ['���" ���"!� ��� ��� ']: width = '90px'
-
-            elif '� ����� ��������' in c_name and '����������' in c_name: width = '45px'
-
-            elif c_name in ['���������: ��']: width = '30px'
-
-            elif c_name.endswith('��� '): width = '46px'
-
-            elif '���"!�����" ��' in c_name: width = '55px'
-
-            elif '�" �"!���������" ��' in c_name: width = '55px'
-
-            elif '��������������' in c_name: width = '35px'
-
-            colgroup_html += f'<col style="width:{width}">'
-
-        colgroup_html += '</colgroup>'
-
-
-
-        headers = "".join(f"<th>{h}</th>" for h in df.columns)
-
-        rows = []
-
-        for idx, row in df.iterrows():
-
-            is_total = any(str(v).strip().startswith('������������') for v in row.values)
-
-            tr_cls = ' class="total-row"' if is_total else ''
-
-            
-
-            tds = []
-
-            row_style = style_rows[idx] if style_rows and idx < len(style_rows) else {}
-
-            
-
-            for col_idx, val in enumerate(row.values):
-
-                col_name = df.columns[col_idx]
-
-                style = row_style.get(col_name, '')
-
-                val_str = "" if pd.isna(val) else str(val)
-
-                tds.append(f"<td style='{style}'>{val_str}</td>")
-
-            rows.append(f"<tr{tr_cls}>{''.join(tds)}</tr>")
-
-            
-
-        return f"<table class='{custom_class}'>{colgroup_html}<thead><tr>{headers}</tr></thead><tbody>{''.join(rows)}</tbody></table>"
-
-
-
-    # 1. Audit Section
-
-    audit_html = ""
-
-    if not audit_df.empty:
-
-        # Custom rendering for Audit cards (simplified for print)
-
-        cards = []
-
-        # Group 1
-
-        for aa in [1, 2, 5, 6]:
-
-            r = audit_df[audit_df['A/A'] == aa]
-
-            if not r.empty:
-
-                row = r.iloc[0]
-
-                cards.append(f"<div class='audit-card'><strong>{row['���������! ��� ']}</strong><br><span style='color:#2980b9'>{row['�" ����������']}</span><br><span style='font-size:0.9em;color:#555'>{row['�: ���� � ��������������� ']}</span></div>")
-
-        col1_html = "".join(cards)
-
-        
-
-        cards = []
-
-        # Group 2
-
-        for aa in [3, 4, 7, 8]:
-
-            r = audit_df[audit_df['A/A'] == aa]
-
-            if not r.empty:
-
-                row = r.iloc[0]
-
-                cards.append(f"<div class='audit-card'><strong>{row['���������! ��� ']}</strong><br><span style='color:#2980b9'>{row['�" ����������']}</span><br><span style='font-size:0.9em;color:#555'>{row['�: ���� � ��������������� ']}</span></div>")
-
-        col2_html = "".join(cards)
-
-        
-
-        cards = []
-
-        # Group 3
-
-        for aa in [9]:
-
-            r = audit_df[audit_df['A/A'] == aa]
-
-            if not r.empty:
-
-                row = r.iloc[0]
-
-                cards.append(f"<div class='audit-card'><strong>{row['���������! ��� ']}</strong><br><span style='color:#2980b9'>{row['�" ����������']}</span><br><span style='font-size:0.9em;color:#555;columns:2'>{row['�: ���� � ��������������� ']}</span></div>")
-
-        col3_html = "".join(cards)
-
-        
-
-        audit_html = f"""
-
-        <div class='section-title'>� �����������  ���������! ���� � �������������0 ��</div>
-
-        <div class='audit-container'>
-
-            <div class='audit-col'>{col1_html}</div>
-
-            <div class='audit-col'>{col2_html}</div>
-
-            <div class='audit-col'>{col3_html}</div>
-
-        </div>
-
-        """
-
-
-
-    # 2. Summary Section
-
-    summary_html = ""
-
-    if not summary_df.empty:
-
-        summary_html = f"<div class='section-title'>���& ������ � ������ � �����  ������</div>{df_to_html_table(summary_df)}"
-
-
-
-    # 3. Counting Section
-
-    counting_html = ""
-
-    if not counting_df.empty:
-
-        counting_html = f"<div class='section-title'>����� ������� �������� � ���������� � ���  ����������� </div>{df_to_html_table(counting_df, counting_styles)}"
-
-
-
-    # 4. Gaps Section
-
-    gaps_html = ""
-
-    if not gaps_df.empty:
-
-        gaps_html = f"<div class='section-title'>�������� � ������� ������� ��</div>{df_to_html_table(gaps_df)}"
-
-        # Add summary metrics
-
-        g_days = gaps_df['� �����������������������  ����������� '].sum() if '� �����������������������  ����������� ' in gaps_df.columns else 0
-
-        gaps_html += f"<div style='margin-top:5px; font-weight:bold;'>������������ ���������� � ����������: {g_days:,.0f}</div>"
-
-
-
-    # 5. Parallel Section
-
-    parallel_html = ""
-
-    if not parallel_df.empty:
-
-        p_styles = st.session_state.get('parallel_style_rows', [])
-
-        parallel_html = f"<div class='section-title'>������������������ � ���  ���������� (�"!���  & ��� �" �" )</div>{df_to_html_table(parallel_df, p_styles)}"
-
-        parallel_html += f"<div style='margin-top:5px; font-weight:bold;'>������������ �����������������0 �� � ����������: {parallel_days}</div>"
-
-
-
-    # 6. Multiple Section
-
-    multiple_html = ""
-
-    if not multiple_df.empty:
-
-        multiple_html = f"<div class='section-title'>������������ ���� � �� �����! ����������</div>{df_to_html_table(multiple_df)}"
-
-
-
-    # Construct Full HTML
-
-    full_html = f"""<!DOCTYPE html>
-
-<html lang="el">
-
-<head>
-
-    <meta charset="UTF-8">
-
-    <title>���& ������������ � �����  ������ � ���  ����������� </title>
-
-    <style>
-
-        @media print {{ @page {{ size: A4 landscape; margin: 5mm; }} }}
-
-        body {{ font-family: -apple-system, system-ui, sans-serif; font-size: 10px; color: #222; }}
-
-        h1 {{ text-align: center; font-size: 18px; margin: 10px 0; }}
-
-        .header-info {{ text-align: center; margin-bottom: 15px; }}
-
-        .client-name {{ font-size: 24px; font-weight: bold; }}
-
-        .section-title {{ font-size: 14px; font-weight: bold; margin-top: 20px; margin-bottom: 5px; border-bottom: 2px solid #ddd; padding-bottom: 2px; page-break-after: avoid; }}
-
-        
-
-        /* Tables */
-
-        table.print-table {{ border-collapse: collapse; width: 100%; font-size: 9px; table-layout: fixed; margin-bottom: 10px; }}
-
-        table.print-table th {{ background: #f0f2f5; border: 1px solid #ccc; padding: 3px; text-align: left; overflow: hidden; white-space: nowrap; }}
-
-        table.print-table td {{ border: 1px solid #eee; padding: 3px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }}
-
-        table.print-table tr.total-row td {{ background-color: #e6f2ff !important; font-weight: bold; }}
-
-        
-
-        /* Audit Grid */
-
-        .audit-container {{ display: flex; gap: 10px; margin-bottom: 10px; }}
-
-        .audit-col {{ flex: 1; display: flex; flexDirection: column; gap: 8px; }}
-
-        .audit-card {{ border: 1px solid #ddd; padding: 6px; border-radius: 4px; background: #fff; page-break-inside: avoid; }}
-
-        
-
-        /* Disclaimer */
-
-        .disclaimer {{ margin-top: 30px; font-size: 9px; color: #666; text-align: center; border-top: 1px solid #eee; padding-top: 10px; page-break-inside: avoid; }}
-
-    </style>
-
-</head>
-
-<body onload="window.print()">
-
-    <div class="header-info">
-
-        <div class="client-name">{html.escape(client_name)}</div>
-
-        <div>� ����� : {html.escape(client_amka)}</div>
-
-        <div>� ��������������� ��: {pd.Timestamp.now().strftime('%d/%m/%Y')}</div>
-
-    </div>
-
-    
-
-    {audit_html}
-
-    {summary_html}
-
-    {counting_html}
-
-    {gaps_html}
-
-    {parallel_html}
-
-    {multiple_html}
-
-    
-
-    <div class="disclaimer">
-
-        <strong>��� ��� �����"!���  ��� ���" �"!����� :</strong> �  �� ������������ �������  ������ ������� ����� ���� ���� ������������� ������ ��� �� ���������������� �� ���&  �����  ����� ������� ���� ��� �� �����! ��� �� � ���: � ��/e-�" ����� . 
-
-        � �� ��� �������  ������������� �� �& �� �����������������  ������ ������ �& �� ������������� �� ���� � �������� �����������  �� �� �������������������  � ���&  e-�" ����� .
-
-    </div>
-
-</body>
-
-</html>"""
-
-
-
-    # Open in new window via JS
-
-    js = f"""
-
-    <script>
-
-        var win = window.open('', '_blank', 'width=1200,height=800');
-
-        win.document.write(`{full_html}`);
-
-        win.document.close();
-
-    </script>
-
-    """
-
-    components.html(js, height=0, width=0)
-
