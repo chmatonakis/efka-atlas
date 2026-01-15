@@ -3199,20 +3199,22 @@ def show_results_page(df, filename):
                         apd_df = apd_df[apd_df[earnings_col].isin(selected_typos_apodochon)]
 
             # Γραμμή 2: Φίλτρα ημερομηνιών και ποσοστού
-            col5, col6, col7, col8 = st.columns([1.4, 1.4, 1.2, 1.6])
+            col5, col6, col7, col8, col9 = st.columns([1.2, 1.2, 1.0, 1.4, 1.2])
             with col5:
                 from_date_str = st.text_input("Από (dd/mm/yyyy):", value="01/01/2002", placeholder="01/01/2002", key="apd_filter_from_date")
             with col6:
                 to_date_str = st.text_input("Έως (dd/mm/yyyy):", value="", placeholder="31/12/1990", key="apd_filter_to_date")
             with col7:
-                retention_filter = st.number_input("Επισήμανση % κράτησης <", min_value=0.0, max_value=100.0, value=30.0, step=0.1, format="%.1f")
+                filter_threshold = st.number_input("Φίλτρο %", min_value=0.0, max_value=100.0, value=18.0, step=0.1, format="%.1f", key="apd_filter_val")
             with col8:
                 retention_filter_mode = st.selectbox(
-                    "Φίλτρο % κράτησης",
+                    "Τύπος Φίλτρου",
                     options=["Όλα", "Μεγαλύτερο ή ίσο", "Μικρότερο από"],
-                    index=0,
+                    index=1,
                     key="apd_filter_retention_mode"
                 )
+            with col9:
+                highlight_threshold = st.number_input("Επισήμανση <", min_value=0.0, max_value=100.0, value=21.0, step=0.1, format="%.1f", key="apd_highlight_val")
 
             # Εφαρμογή φίλτρων ημερομηνιών
             if 'Από' in apd_df.columns and (from_date_str or to_date_str):
@@ -3359,7 +3361,7 @@ def show_results_page(df, filename):
 
         # Εφαρμογή φίλτρου % κράτησης βάσει επιλογής
         if '% κράτησης' in display_apd_df.columns:
-            retention_threshold_decimal = (retention_filter or 0.0) / 100.0
+            retention_threshold_decimal = (filter_threshold or 0.0) / 100.0
             retention_numeric = pd.to_numeric(display_apd_df['% κράτησης'], errors='coerce')
 
             if retention_filter_mode == "Μεγαλύτερο ή ίσο":
@@ -3371,14 +3373,73 @@ def show_results_page(df, filename):
 
         data_rows_count = len(display_apd_df)
 
-        # Προσθήκη γραμμών συνόλων ανά έτος (από 2002 και μετά)
+        # Προσθήκη στήλης Έτος και ομαδοποίηση (όπως στην Καταμέτρηση)
         if data_rows_count > 0 and 'Από' in display_apd_df.columns:
             working_df = display_apd_df.copy()
-            working_df['_Από_dt'] = pd.to_datetime(working_df['Από'], format='%d/%m/%Y', errors='coerce')
-            working_df['_Έτος'] = working_df['_Από_dt'].dt.year
-            working_df = working_df.sort_values('_Από_dt', na_position='last')
 
-            all_columns = [col for col in working_df.columns if col not in ['_Από_dt', '_Έτος']]
+            # Υπολογισμός ενιαίας στήλης "Ημέρες Ασφ." = Ημέρες + (Μήνες * 25) + (Έτη * 300)
+            def calc_total_days(row):
+                d = clean_numeric_value(row.get('Ημέρες', 0)) or 0
+                m = clean_numeric_value(row.get('Μήνες', 0)) or 0
+                y = clean_numeric_value(row.get('Έτη', 0)) or 0
+                return d + (m * 25) + (y * 300)
+
+            working_df['Ημέρες Ασφ.'] = working_df.apply(calc_total_days, axis=1)
+
+            # Αφαίρεση των παλιών στηλών Έτη/Μήνες/Ημέρες
+            cols_to_remove = [c for c in ['Έτη', 'Μήνες', 'Ημέρες'] if c in working_df.columns]
+            if cols_to_remove:
+                working_df = working_df.drop(columns=cols_to_remove)
+
+            working_df['_Από_dt'] = pd.to_datetime(working_df['Από'], format='%d/%m/%Y', errors='coerce')
+            working_df['Έτος'] = working_df['_Από_dt'].dt.year
+            
+            # Ταξινόμηση: Έτος -> Ταμείο -> Τύπος Ασφάλισης -> Από
+            sort_cols = ['Έτος']
+            if 'Ταμείο' in working_df.columns: sort_cols.append('Ταμείο')
+            if 'Τύπος Ασφάλισης' in working_df.columns: sort_cols.append('Τύπος Ασφάλισης')
+            sort_cols.append('_Από_dt')
+            
+            working_df = working_df.sort_values(sort_cols, na_position='last')
+            
+            # Αφαίρεση βοηθητικής στήλης
+            if '_Από_dt' in working_df.columns:
+                working_df = working_df.drop(columns=['_Από_dt'])
+
+            # Ορισμός τελικών στηλών με το Έτος πρώτο
+            all_columns = list(working_df.columns)
+            if 'Έτος' in all_columns:
+                all_columns.remove('Έτος')
+                all_columns.insert(0, 'Έτος')
+            
+            # Προσθήκη στήλης "Μήνας" πριν το "Από"
+            if 'Μήνας' not in all_columns:
+                apo_idx = all_columns.index('Από') if 'Από' in all_columns else 1
+                all_columns.insert(apo_idx, 'Μήνας')
+            
+            # Μετακίνηση "Ημέρες Ασφ." μετά το "Έως"
+            if 'Ημέρες Ασφ.' in all_columns and 'Έως' in all_columns:
+                all_columns.remove('Ημέρες Ασφ.')
+                eos_idx = all_columns.index('Έως')
+                all_columns.insert(eos_idx + 1, 'Ημέρες Ασφ.')
+
+            # Προσθήκη στήλης "Συν. μήνα" μετά τις "Μικτές αποδοχές"
+            if 'Συν. μήνα' not in all_columns:
+                working_df['Συν. μήνα'] = ''
+                if 'Μικτές αποδοχές' in all_columns:
+                    gross_idx = all_columns.index('Μικτές αποδοχές')
+                    all_columns.insert(gross_idx + 1, 'Συν. μήνα')
+                else:
+                    all_columns.append('Συν. μήνα')
+            elif 'Συν. μήνα' in all_columns and 'Μικτές αποδοχές' in all_columns:
+                 all_columns.remove('Συν. μήνα')
+                 gross_idx = all_columns.index('Μικτές αποδοχές')
+                 all_columns.insert(gross_idx + 1, 'Συν. μήνα')
+
+            # Επαναδιάταξη του dataframe
+            if 'Μήνας' not in working_df.columns: working_df['Μήνας'] = ''
+            working_df = working_df[all_columns]
+            
             final_frames = []
 
             def _sum_column(df_slice, column, exclude_drx=False):
@@ -3397,50 +3458,253 @@ def show_results_page(df, filename):
                     has_value = True
                 return total if has_value else None
 
-            valid_years = sorted(working_df['_Έτος'].dropna().unique())
+            # Εύρεση στήλης Τύπου Αποδοχών για εξαίρεση 03, 04, 05
+            earnings_col_name = next((c for c in working_df.columns if 'Τύπος Αποδοχών' in c), None)
+
+            valid_years = sorted(working_df['Έτος'].dropna().unique())
 
             for year in valid_years:
-                year_slice = working_df[working_df['_Έτος'] == year]
-                final_frames.append(year_slice[all_columns])
+                # Φιλτράρισμα έτους και δημιουργία αντιγράφου για επεξεργασία
+                year_slice = working_df[working_df['Έτος'] == year].copy()
+                
+                # --- Υπολογισμός Μήνα και Ταξινόμηση ---
+                def get_month_info(row):
+                    # Λήψη ημερομηνίας (προτεραιότητα στο Έως για κατάταξη)
+                    date_val = row.get('Έως')
+                    if pd.isna(date_val) or str(date_val).strip() == '':
+                        date_val = row.get('Από')
+                    
+                    try:
+                        dt = pd.to_datetime(date_val, format='%d/%m/%Y')
+                        month_num = dt.month
+                    except:
+                        month_num = 13 # Fallback
+                    
+                    # Έλεγχος για ειδικούς τύπους αποδοχών (Δώρα, Bonus, Επίδομα Ισολογισμού)
+                    is_special = False
+                    special_codes = ['03', '04', '05', 
+                                     '10', '28', '43', '49', '63', '74', '85', '96', '107', '118',
+                                     '06', '25', '40', '60', '71', '82', '93', '104', '115']
+                    
+                    if earnings_col_name:
+                        code = str(row.get(earnings_col_name, '')).strip()
+                        # Καθαρίζουμε τον κωδικό από πιθανή περιγραφή (π.χ. "10 - Bonus")
+                        clean_code = code.split(' ')[0].strip()
+                        
+                        if clean_code in special_codes:
+                            is_special = True
+                        elif len(clean_code) >= 2 and clean_code[:2] in ['03', '04', '05']:
+                             is_special = True
+                    
+                    if is_special:
+                        # Αν είναι special (Δώρα/Bonus), τα βάζουμε στο τέλος του έτους (SortMonth=20)
+                        # ώστε να εμφανίζονται μετά από όλους τους μήνες, ταξινομημένα με βάση το Priority
+                        return 20, "" 
+                    else:
+                        return month_num, f"{month_num}ος"
 
+                # Εφαρμογή υπολογισμού
+                month_info = year_slice.apply(get_month_info, axis=1, result_type='expand')
+                year_slice['_SortMonth'] = month_info[0]
+                year_slice['Μήνας'] = month_info[1]
+                
+                year_slice['_SortDate'] = pd.to_datetime(year_slice['Από'], format='%d/%m/%Y', errors='coerce')
+
+                # --- Υπολογισμός Priority Ταξινόμησης ---
+                def get_sort_priority(row):
+                    if not earnings_col_name: return 0
+                    code = str(row.get(earnings_col_name, '')).strip()
+                    clean_code = code.split(' ')[0].strip()
+                    
+                    special_codes = ['03', '04', '05', '10', '28', '43', '49', '63', '74', '85', '96', '107', '118',
+                                     '06', '25', '40', '60', '71', '82', '93', '104', '115']
+                    
+                    is_special = (clean_code in special_codes) or (len(clean_code) >= 2 and clean_code[:2] in ['03', '04', '05'])
+                    
+                    if not is_special: return 0
+                    
+                    if clean_code.startswith('03'): return 1
+                    if clean_code.startswith('04'): return 2
+                    if clean_code.startswith('05'): return 3
+                    
+                    return 4
+
+                year_slice['_SortPriority'] = year_slice.apply(get_sort_priority, axis=1)
+
+                # --- Υπολογισμός "Συν. μήνα" ---
+                def get_gross(row):
+                    return clean_numeric_value(row.get('Μικτές αποδοχές', 0), exclude_drx=True) or 0.0
+                
+                year_slice['_GrossFloat'] = year_slice.apply(get_gross, axis=1)
+                
+                # Αθροίσματα ανά μήνα (για τους μη κενούς μήνες)
+                monthly_sums = year_slice[year_slice['Μήνας'] != ''].groupby('Μήνας')['_GrossFloat'].sum().to_dict()
+                
+                def calculate_monthly_total_col(row):
+                    m = row.get('Μήνας')
+                    if m and m != '':
+                        return monthly_sums.get(m, 0.0)
+                    else:
+                        return row['_GrossFloat']
+                
+                year_slice['Συν. μήνα'] = year_slice.apply(calculate_monthly_total_col, axis=1)
+
+                # --- NEW: Υπολογισμός Περικοπής/Συντ. Αποδοχών στο Σύνολο Μήνα ---
+                
+                # 1. Άθροισμα Εισφορών Μήνα (για το ποσοστό)
+                def get_contrib(row):
+                    return clean_numeric_value(row.get('Συνολικές εισφορές', 0), exclude_drx=True) or 0.0
+                year_slice['_ContribFloat'] = year_slice.apply(get_contrib, axis=1)
+                
+                monthly_contrib_sums = year_slice[year_slice['Μήνας'] != ''].groupby('Μήνας')['_ContribFloat'].sum().to_dict()
+                
+                def calculate_monthly_contrib_total(row):
+                    m = row.get('Μήνας')
+                    if m and m != '':
+                        return monthly_contrib_sums.get(m, 0.0)
+                    else:
+                        return row['_ContribFloat']
+                
+                year_slice['_MonthlyContribTotal'] = year_slice.apply(calculate_monthly_contrib_total, axis=1)
+                
+                # 2. Επαναϋπολογισμός Περικοπής, Συντ. Αποδοχών, % Κράτησης
+                def recalc_financials(row):
+                    monthly_gross = row.get('Συν. μήνα', 0.0)
+                    monthly_contrib = row.get('_MonthlyContribTotal', 0.0)
+                    
+                    plaf = row.get('Εισφ. πλαφόν')
+                    plaf_val = clean_numeric_value(plaf) if plaf is not None else None
+                    
+                    if plaf_val is None:
+                        p = (monthly_contrib/monthly_gross if monthly_gross else 0)
+                        return None, monthly_gross, p
+
+                    if monthly_gross > plaf_val:
+                        cut = monthly_gross - plaf_val
+                        adjusted = plaf_val
+                    else:
+                        cut = None
+                        adjusted = monthly_gross
+                    
+                    percent = (monthly_contrib / adjusted) if adjusted and adjusted > 0 else 0.0
+                    
+                    return cut, adjusted, percent
+
+                new_fin = year_slice.apply(recalc_financials, axis=1, result_type='expand')
+                year_slice['Περικοπή'] = new_fin[0]
+                year_slice['Συντ. Αποδοχές'] = new_fin[1]
+                year_slice['% κράτησης'] = new_fin[2]
+
+                # Ταξινόμηση: Μήνας (SortMonth) -> Priority -> Ταμείο -> Από
+                year_slice = year_slice.sort_values(['_SortMonth', '_SortPriority', 'Ταμείο', '_SortDate'], na_position='last')
+                year_slice = year_slice.reset_index(drop=True)
+                
+                # Masking logic
+                prev_month = None
+                prev_tameio = None
+                prev_ins_type = None
+                
+                processed_rows = []
+                for idx, row in year_slice.iterrows():
+                    new_row = row.copy()
+                    
+                    # Έτος
+                    if idx > 0:
+                        new_row['Έτος'] = ''
+                    else:
+                        try:
+                            new_row['Έτος'] = str(int(year))
+                        except:
+                            new_row['Έτος'] = str(year)
+                    
+                    # Μήνας masking
+                    curr_month = row.get('Μήνας')
+                    is_month_hidden = False
+                    
+                    if curr_month: 
+                        if idx > 0 and curr_month == prev_month:
+                            new_row['Μήνας'] = ''
+                            is_month_hidden = True
+                        else:
+                            prev_month = curr_month
+                    else:
+                        # Αν είναι Bonus (κενός μήνας), δεν αλλάζουμε το prev_month.
+                        # Έτσι διατηρούμε τη συνέχεια του "3ος" μήνα πριν και μετά το Bonus.
+                        pass
+                    
+                    # Συν. μήνα & Financials masking
+                    if is_month_hidden:
+                        new_row['Συν. μήνα'] = ''
+                        new_row['Περικοπή'] = ''
+                        new_row['Συντ. Αποδοχές'] = ''
+                        new_row['% κράτησης'] = ''
+                        new_row['Εισφ. πλαφόν'] = ''
+
+                    # Ταμείο
+                    curr_tameio = row.get('Ταμείο')
+                    if idx > 0 and curr_tameio == prev_tameio:
+                         new_row['Ταμείο'] = ''
+                    else:
+                        prev_tameio = curr_tameio
+                    
+                    # Τύπος Ασφάλισης
+                    curr_ins_type = row.get('Τύπος Ασφάλισης')
+                    if idx > 0 and curr_ins_type == prev_ins_type:
+                        new_row['Τύπος Ασφάλισης'] = ''
+                    else:
+                        prev_ins_type = curr_ins_type
+                    
+                    processed_rows.append(new_row)
+                
+                # Cleanup
+                proc_df = pd.DataFrame(processed_rows)
+                for col in ['_SortMonth', '_SortDate', '_GrossFloat', '_ContribFloat', '_MonthlyContribTotal', '_SortPriority']:
+                    if col in proc_df.columns:
+                        proc_df = proc_df.drop(columns=[col])
+                
+                final_frames.append(proc_df)
+
+                # Γραμμή Συνόλων
                 year_int = int(year)
                 if year_int >= 2002:
                     totals_row = {col: '' for col in all_columns}
-                    if 'Από' in totals_row:
-                        totals_row['Από'] = ''
-                    if 'Έως' in totals_row:
+                    # Καθαρισμός ετικετών
+                    if 'Από' in totals_row: totals_row['Από'] = ''
+                    if 'Έως' in totals_row: totals_row['Έως'] = ''
+                    
+                    if 'Μήνας' in totals_row:
+                        totals_row['Μήνας'] = f"Σύνολο {year_int}"
+                    elif 'Έως' in totals_row:
                         totals_row['Έως'] = f"Σύνολο {year_int}"
                     elif 'Από' in totals_row:
                         totals_row['Από'] = f"Σύνολο {year_int}"
 
-                    years_sum = _sum_column(year_slice, 'Έτη')
-                    months_sum = _sum_column(year_slice, 'Μήνες')
-                    days_sum = _sum_column(year_slice, 'Ημέρες')
-                    gross_sum = _sum_column(year_slice, 'Μικτές αποδοχές', exclude_drx=True)
-                    adjusted_sum = _sum_column(year_slice, 'Συντ. Αποδοχές', exclude_drx=True)
-                    cut_sum = _sum_column(year_slice, 'Περικοπή', exclude_drx=True)
-
-                    if years_sum is not None:
-                        totals_row['Έτη'] = years_sum
-                    if months_sum is not None:
-                        totals_row['Μήνες'] = months_sum
-                    if days_sum is not None:
-                        totals_row['Ημέρες'] = days_sum
-                    if gross_sum is not None:
+                    # Υπολογισμός αθροισμάτων (από το masked dataframe)
+                    days_total = _sum_column(proc_df, 'Ημέρες Ασφ.')
+                    gross_sum = _sum_column(proc_df, 'Μικτές αποδοχές', exclude_drx=True)
+                    adjusted_sum = _sum_column(proc_df, 'Συντ. Αποδοχές', exclude_drx=True)
+                    cut_sum = _sum_column(proc_df, 'Περικοπή', exclude_drx=True)
+                    
+                    if days_total is not None: totals_row['Ημέρες Ασφ.'] = days_total
+                    if gross_sum is not None: 
                         totals_row['Μικτές αποδοχές'] = gross_sum
-                    if adjusted_sum is not None:
-                        totals_row['Συντ. Αποδοχές'] = adjusted_sum
-                    if cut_sum is not None:
-                        totals_row['Περικοπή'] = cut_sum
+                        totals_row['Συν. μήνα'] = gross_sum 
+                    if adjusted_sum is not None: totals_row['Συντ. Αποδοχές'] = adjusted_sum
+                    if cut_sum is not None: totals_row['Περικοπή'] = cut_sum
 
                     if '% κράτησης' in totals_row:
                         totals_row['% κράτησης'] = ''
 
                     final_frames.append(pd.DataFrame([totals_row], columns=all_columns))
+                
+                # Κενή γραμμή διαχωρισμού
+                empty_row = {col: '' for col in all_columns}
+                final_frames.append(pd.DataFrame([empty_row], columns=all_columns))
 
-            remainder = working_df[working_df['_Έτος'].isna()]
+            remainder = working_df[working_df['Έτος'].isna()]
             if not remainder.empty:
-                final_frames.append(remainder[all_columns])
+                remainder = remainder[all_columns]
+                final_frames.append(remainder)
 
             if final_frames:
                 display_apd_df = pd.concat(final_frames, ignore_index=True)
@@ -3467,7 +3731,7 @@ def show_results_page(df, filename):
         apd_export_df = display_apd_df.copy()
 
         # Εφαρμόζουμε μορφοποίηση νομισμάτων μόνο για εμφάνιση
-        currency_columns = ['Μικτές αποδοχές', 'Συνολικές εισφορές', 'Εισφ. πλαφόν', 'Περικοπή', 'Συντ. Αποδοχές']
+        currency_columns = ['Μικτές αποδοχές', 'Συν. μήνα', 'Συνολικές εισφορές', 'Εισφ. πλαφόν', 'Περικοπή', 'Συντ. Αποδοχές']
         for col in currency_columns:
             if col in display_apd_df.columns:
                 display_apd_df[col] = display_apd_df[col].apply(format_currency)
@@ -3494,31 +3758,61 @@ def show_results_page(df, filename):
 
         # Function for conditional formatting
         def highlight_low_retention(row):
-            for label_col in ['Έως', 'Από']:
+            styles = [''] * len(row)
+            
+            # Check for Total rows
+            is_total = False
+            for label_col in ['Μήνας', 'Έως', 'Από']:
                 label_value = row.get(label_col)
                 if isinstance(label_value, str) and label_value.startswith('Σύνολο'):
-                    return ['background-color: #e6f2ff; color: #000000; font-weight: 700;'] * len(row)
+                    is_total = True
+                    break
+            
+            if is_total:
+                return ['background-color: #e6f2ff; color: #000000; font-weight: 700;'] * len(row)
 
+            # Check for Low Retention
             retention_str = row.get('% κράτησης', '0,0%').replace('%', '').replace(',', '.')
             try:
                 retention_val = float(retention_str)
-                if retention_val < retention_filter:
-                    return ['background-color: #fff8e1'] * len(row)
+                if retention_val < highlight_threshold:
+                    styles = ['background-color: #fff8e1'] * len(row)
             except (ValueError, TypeError):
                 pass
-            return [''] * len(row)
+            
+            # Apply Bold to 'Έτος' and 'Ταμείο'
+            for i, col_name in enumerate(row.index):
+                if col_name in ['Έτος', 'Ταμείο']:
+                    if styles[i]:
+                        styles[i] += '; font-weight: 700;'
+                    else:
+                        styles[i] = 'font-weight: 700;'
+            
+            return styles
 
         # Apply styling
         register_view("Ανάλυση ΑΠΔ", display_apd_df)
         styled_df = display_apd_df.style.apply(highlight_low_retention, axis=1)
 
         # Εφαρμόζουμε ελληνική μορφοποίηση για αριθμητικές στήλες
-        numeric_columns = ['Ημερολογιακές ημέρες', 'Ημέρες', 'Μήνες', 'Έτη']
+        numeric_columns = ['Ημερολογιακές ημέρες', 'Ημέρες Ασφ.', 'Ημέρες', 'Μήνες', 'Έτη']
         for col in numeric_columns:
             if col in display_apd_df.columns:
                 # Μήνες και Έτη με 1 δεκαδικό, ημέρες χωρίς δεκαδικά
                 decimals = 1 if col in ['Μήνες', 'Έτη'] else 0
-                display_apd_df[col] = display_apd_df[col].apply(lambda x: format_number_greek(x, decimals=decimals) if pd.notna(x) and x != '' else x)
+                
+                def fmt_num(x):
+                    if pd.isna(x) or x == '':
+                        return x
+                    try:
+                        val = float(x)
+                        if val == 0:  # Κρύβουμε το μηδέν
+                            return ""
+                        return format_number_greek(val, decimals=decimals)
+                    except:
+                        return x
+
+                display_apd_df[col] = display_apd_df[col].apply(fmt_num)
         
         st.markdown("### Ανάλυση ΑΠΔ (Με χρονολογική σειρά)")
         st.dataframe(
@@ -3527,10 +3821,16 @@ def show_results_page(df, filename):
             hide_index=True
         )
         # Κουμπί εκτύπωσης για Ανάλυση ΑΠΔ
+        # Αφαιρούμε τις στήλες 'Από' και 'Έως' για την εκτύπωση
+        print_df = display_apd_df.copy()
+        cols_to_drop = [c for c in ['Από', 'Έως'] if c in print_df.columns]
+        if cols_to_drop:
+            print_df = print_df.drop(columns=cols_to_drop)
+
         render_print_button(
             "print_apd",
             "Ανάλυση ΑΠΔ",
-            display_apd_df,
+            print_df,
             description="Ανάλυση εγγραφών ΑΠΔ με υπολογισμό εισφ. πλαφόν ΙΚΑ, περικοπής λόγω πλαφόν και ποσοστού κράτησης για τον εντοπισμό των πραγματικών εισφορίσιμων αποδοχών."
         )
 
@@ -3877,6 +4177,7 @@ def show_results_page(df, filename):
                     if missing_years:
                         filler_rows = []
                         filler_masks = []
+                        block_rows_list = []
                         for missing_year in missing_years:
                             row_template = {col: '' for col in display_cnt_df.columns}
                             row_template['ΕΤΟΣ'] = missing_year
