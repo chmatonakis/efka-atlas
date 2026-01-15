@@ -2987,18 +2987,18 @@ def show_results_page(df, filename):
 
             # Εμφάνιση πίνακα
             st.dataframe(
-                    display_gaps,
-                    use_container_width=True
-                )
-                register_view("Κενά Διαστήματα", display_gaps)
-                
-                # Κουμπί εκτύπωσης
-                render_print_button(
-                    "print_gaps",
-                    "Κενά Διαστήματα",
-                    gaps_df,
-                    description="Χρονικές περίοδοι όπου δεν βρέθηκε ασφαλιστική κάλυψη μεταξύ των δηλωμένων εγγραφών."
-                )
+                display_gaps,
+                use_container_width=True
+            )
+            register_view("Κενά Διαστήματα", display_gaps)
+            
+            # Κουμπί εκτύπωσης
+            render_print_button(
+                "print_gaps",
+                "Κενά Διαστήματα",
+                gaps_df,
+                description="Χρονικές περίοδοι όπου δεν βρέθηκε ασφαλιστική κάλυψη μεταξύ των δηλωμένων εγγραφών."
+            )
                 
                 # Συμβουλές
                 st.markdown("#### Συμβουλές")
