@@ -1494,19 +1494,71 @@ def show_results_page(df, filename):
         height=0
     )
     
-    # Δημιουργία tabs για διαφορετικούς τύπους δεδομένων
-    tab_summary, tab_count, tab_gaps, tab_apd, tab_parallel, tab_multi, tab_yearly, tab_days, tab_main, tab_annex = st.tabs([
-        "Σύνοψη",
-        "Καταμέτρηση",
-        "Κενά",
-        "Ανάλυση ΑΠΔ",
-        "Παράλληλη",
-        "Πολλαπλή",
-        "Ετήσια Αναφορά",
-        "Ημέρες Ασφάλισης",
-        "Κύρια Δεδομένα",
-        "Παράρτημα"
-    ])
+    # Προ-υπολογισμός ειδοποιήσεων για Tabs
+    tab_titles = {
+        "summary": "Σύνοψη",
+        "count": "Καταμέτρηση",
+        "gaps": "Κενά",
+        "apd": "Ανάλυση ΑΠΔ",
+        "parallel": "Παράλληλη",
+        "multi": "Πολλαπλή",
+        "yearly": "Ετήσια Αναφορά",
+        "days": "Ημέρες Ασφάλισης",
+        "main": "Κύρια Δεδομένα",
+        "annex": "Παράρτημα"
+    }
+
+    if not df.empty and 'Από' in df.columns:
+        # 1. Κενά
+        try:
+            gaps_found = find_gaps_in_insurance_data(df)
+            if not gaps_found.empty:
+                tab_titles["gaps"] = "❗ Κενά"
+        except: pass
+
+        # 2. Πολλαπλή (Γρήγορος έλεγχος: >1 εργοδότης τον ίδιο μήνα)
+        try:
+            t_df = df.copy()
+            t_df['_d'] = pd.to_datetime(t_df['Από'], format='%d/%m/%Y', errors='coerce')
+            t_df['_ym'] = t_df['_d'].dt.to_period('M')
+            if 'Α-Μ εργοδότη' in t_df.columns:
+                multi_counts = t_df.groupby('_ym')['Α-Μ εργοδότη'].nunique()
+                if (multi_counts > 1).any():
+                    tab_titles["multi"] = "❗ Πολλαπλή"
+        except: pass
+
+        # 3. Παράλληλη (Έλεγχος overlaps IKA vs OAEE)
+        try:
+            if 'Ταμείο' in df.columns:
+                # Φιλτράρισμα ΙΚΑ και ΟΑΕΕ
+                ika_mask = df['Ταμείο'].astype(str).str.contains('ΙΚΑ', case=False, na=False)
+                oaee_mask = df['Ταμείο'].astype(str).str.contains('ΟΑΕΕ', case=False, na=False)
+                
+                if ika_mask.any() and oaee_mask.any():
+                    t_df = df.dropna(subset=['Από', 'Έως']).copy()
+                    t_df['Start'] = pd.to_datetime(t_df['Από'], format='%d/%m/%Y', errors='coerce')
+                    t_df['End'] = pd.to_datetime(t_df['Έως'], format='%d/%m/%Y', errors='coerce')
+                    
+                    ika_intervals = t_df[ika_mask][['Start', 'End']].values
+                    oaee_intervals = t_df[oaee_mask][['Start', 'End']].values
+                    
+                    found_overlap = False
+                    for i_s, i_e in ika_intervals:
+                        if pd.isna(i_s) or pd.isna(i_e): continue
+                        for o_s, o_e in oaee_intervals:
+                            if pd.isna(o_s) or pd.isna(o_e): continue
+                            # Overlap logic: Max(Starts) < Min(Ends)
+                            if max(i_s, o_s) < min(i_e, o_e):
+                                found_overlap = True
+                                break
+                        if found_overlap: break
+                    
+                    if found_overlap:
+                        tab_titles["parallel"] = "❗ Παράλληλη"
+        except: pass
+
+    # Δημιουργία tabs
+    tab_summary, tab_count, tab_gaps, tab_apd, tab_parallel, tab_multi, tab_yearly, tab_days, tab_main, tab_annex = st.tabs(list(tab_titles.values()))
     
     with tab_main:
         # Κύρια δεδομένα (χωρίς τις στήλες από τελευταίες σελίδες)
@@ -1544,27 +1596,27 @@ def show_results_page(df, filename):
                 with col1:
                     # Φίλτρο Ταμείου
                     if 'Ταμείο' in main_df.columns:
-                        taimeia_options = ['Όλα'] + sorted(main_df['Ταμείο'].dropna().unique().tolist())
+                        taimeia_options = sorted(main_df['Ταμείο'].dropna().unique().tolist())
                         selected_taimeia = st.multiselect(
                             "Ταμείο:",
                             options=taimeia_options,
-                            default=['Όλα'],
+                            default=[],
                             key="filter_taimeio"
                         )
-                        if 'Όλα' not in selected_taimeia:
+                        if selected_taimeia:
                             main_df = main_df[main_df['Ταμείο'].isin(selected_taimeia)]
 
                 with col2:
                     # Φίλτρο Τύπου Ασφάλισης
                     if 'Τύπος Ασφάλισης' in main_df.columns:
-                        typos_options = ['Όλα'] + sorted(main_df['Τύπος Ασφάλισης'].dropna().unique().tolist())
+                        typos_options = sorted(main_df['Τύπος Ασφάλισης'].dropna().unique().tolist())
                         selected_typos = st.multiselect(
                             "Τύπος Ασφάλισης:",
                             options=typos_options,
-                            default=['Όλα'],
+                            default=[],
                             key="filter_typos"
                         )
-                        if 'Όλα' not in selected_typos:
+                        if selected_typos:
                             main_df = main_df[main_df['Τύπος Ασφάλισης'].isin(selected_typos)]
 
                 with col3:
@@ -1572,7 +1624,7 @@ def show_results_page(df, filename):
                     if 'Κλάδος/Πακέτο Κάλυψης' in main_df.columns:
                         # Δημιουργούμε options με περιγραφές
                         klados_codes = sorted(main_df['Κλάδος/Πακέτο Κάλυψης'].dropna().unique().tolist())
-                        klados_options_with_desc = ['Όλα']
+                        klados_options_with_desc = []
                         klados_code_map = {}  # Mapping από "Κωδικός - Περιγραφή" -> Κωδικός
                         
                         for code in klados_codes:
@@ -1587,11 +1639,11 @@ def show_results_page(df, filename):
                         selected_klados = st.multiselect(
                             "Κλάδος/Πακέτο:",
                             options=klados_options_with_desc,
-                            default=['Όλα'],
+                            default=[],
                             key="filter_klados"
                         )
                         
-                        if 'Όλα' not in selected_klados:
+                        if selected_klados:
                             # Μετατρέπουμε τις επιλογές σε κωδικούς
                             selected_codes = [klados_code_map.get(opt, opt) for opt in selected_klados]
                             main_df = main_df[main_df['Κλάδος/Πακέτο Κάλυψης'].isin(selected_codes)]
@@ -1609,14 +1661,14 @@ def show_results_page(df, filename):
                                 break
                     if earnings_col is not None:
                         options_raw = main_df[earnings_col].dropna().astype(str).unique().tolist()
-                        typos_apodochon_options = ['Όλα'] + sorted(options_raw)
+                        typos_apodochon_options = sorted(options_raw)
                         selected_typos_apodochon = st.multiselect(
                             "Τύπος Αποδοχών:",
                             options=typos_apodochon_options,
-                            default=['Όλα'],
+                            default=[],
                             key="filter_apodochon"
                         )
-                        if 'Όλα' not in selected_typos_apodochon:
+                        if selected_typos_apodochon:
                             main_df = main_df[main_df[earnings_col].isin(selected_typos_apodochon)]
 
                 with col5:
@@ -2144,13 +2196,33 @@ def show_results_page(df, filename):
                 else:
                     details_html = ""
 
+                # Εικονίδιο προσοχής για προβληματικά ευρήματα
+                finding_text = str(row['Εύρημα'])
+                aa = row['A/A']
+                icon_html = ""
+                is_safe = False
+                
+                safe_keywords = ["Κανένα", "Κανένας", "Καμία", "Όχι", "Εντός ορίων", "Δεν εντοπίστηκαν", "0 ημέρες", "-"]
+                
+                if aa in [1, 2]: # Πληροφοριακά
+                    is_safe = True
+                else:
+                    for safe in safe_keywords:
+                        if safe in finding_text:
+                            is_safe = True
+                            break
+                
+                if not is_safe:
+                    icon_html = "⚠️ "
+                    finding_text = f"<span style='color: #d9534f;'>{finding_text}</span>"
+
                 st.markdown(
                     f"""
                     <div style="margin-bottom: 20px; padding: 12px; background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                         <div style="font-size: 1.3rem; color: #111; margin-bottom: 6px;">
                             <span style="font-weight: 700; color: #2c3e50;">{row['Έλεγχος']}</span>
                             <br>
-                            <span style="font-weight: 600; color: #2980b9;">{row['Εύρημα']}</span>
+                            <span style="font-weight: 600; color: #2980b9;">{icon_html}{finding_text}</span>
                         </div>
                         {details_html}
                         {actions_html}
@@ -2201,15 +2273,16 @@ def show_results_page(df, filename):
 
             with filter_cols[0]:
                 if 'Ταμείο' in summary_df.columns:
-                    tameia_options = ['Όλα'] + sorted(summary_df['Ταμείο'].dropna().astype(str).unique().tolist())
+                    tameia_options = sorted(summary_df['Ταμείο'].dropna().astype(str).unique().tolist())
                     selected_tameia = st.multiselect(
                         "Ταμείο:",
                         options=tameia_options,
-                        default=['Όλα'],
+                        default=[],
                         key="summary_filter_tameio"
                     )
                 else:
                     st.write("")
+                    selected_tameia = []
 
             with filter_cols[1]:
                 from_summary_str = st.text_input(
@@ -2231,7 +2304,7 @@ def show_results_page(df, filename):
                 st.write("")
 
             # Εφαρμογή φίλτρων Ταμείου
-            if 'Ταμείο' in summary_df.columns and 'Όλα' not in selected_tameia:
+            if 'Ταμείο' in summary_df.columns and selected_tameia:
                 summary_df = summary_df[summary_df['Ταμείο'].isin(selected_tameia)]
 
             # Εφαρμογή φίλτρων ημερομηνιών
@@ -2385,50 +2458,51 @@ def show_results_page(df, filename):
                         break
 
             # Φίλτρα (μόνιμα εμφανή, χωρίς τίτλους/expanders)
-            y1, y2, y3, y4, y5, y6, y7 = st.columns([1.2, 1.2, 1.6, 1.2, 1.0, 1.0, 0.6])
+            with st.container():
+                y1, y2, y3, y4, y5, y6, y7 = st.columns([1.1, 1.1, 1.4, 1.1, 1.0, 1.0, 1.2])
 
-            with y1:
-                if 'Ταμείο' in yearly_df.columns:
-                    tameia_opts = ['Όλα'] + sorted(yearly_df['Ταμείο'].dropna().astype(str).unique().tolist())
-                    sel_tameia = st.multiselect("Ταμείο:", tameia_opts, default=['Όλα'], key="y_filter_tameio")
-                    if 'Όλα' not in sel_tameia:
-                        yearly_df = yearly_df[yearly_df['Ταμείο'].isin(sel_tameia)]
+                with y1:
+                    if 'Ταμείο' in yearly_df.columns:
+                        tameia_opts = sorted(yearly_df['Ταμείο'].dropna().astype(str).unique().tolist())
+                        sel_tameia = st.multiselect("Ταμείο:", tameia_opts, default=[], key="y_filter_tameio")
+                        if sel_tameia:
+                            yearly_df = yearly_df[yearly_df['Ταμείο'].isin(sel_tameia)]
 
-            with y2:
-                if 'Τύπος Ασφάλισης' in yearly_df.columns:
-                    tyas_opts = ['Όλα'] + sorted(yearly_df['Τύπος Ασφάλισης'].dropna().astype(str).unique().tolist())
-                    sel_tyas = st.multiselect("Τύπος Ασφάλισης:", tyas_opts, default=['Όλα'], key="y_filter_typos_asfal")
-                    if 'Όλα' not in sel_tyas:
-                        yearly_df = yearly_df[yearly_df['Τύπος Ασφάλισης'].isin(sel_tyas)]
+                with y2:
+                    if 'Τύπος Ασφάλισης' in yearly_df.columns:
+                        tyas_opts = sorted(yearly_df['Τύπος Ασφάλισης'].dropna().astype(str).unique().tolist())
+                        sel_tyas = st.multiselect("Τύπος Ασφάλισης:", tyas_opts, default=[], key="y_filter_typos_asfal")
+                        if sel_tyas:
+                            yearly_df = yearly_df[yearly_df['Τύπος Ασφάλισης'].isin(sel_tyas)]
 
-            with y3:
-                if 'Κλάδος/Πακέτο Κάλυψης' in yearly_df.columns:
-                    # Δημιουργούμε options με περιγραφές
-                    klados_codes = sorted(yearly_df['Κλάδος/Πακέτο Κάλυψης'].dropna().astype(str).unique().tolist())
-                    klados_opts_with_desc = ['Όλα']
-                    klados_code_map_y = {}
-                    
-                    for code in klados_codes:
-                        if code in description_map and description_map[code]:
-                            option_label = f"{code} - {description_map[code]}"
-                            klados_opts_with_desc.append(option_label)
-                            klados_code_map_y[option_label] = code
-                        else:
-                            klados_opts_with_desc.append(code)
-                            klados_code_map_y[code] = code
-                    
-                    sel_klados = st.multiselect("Κλάδος/Πακέτο:", klados_opts_with_desc, default=['Όλα'], key="y_filter_klados")
-                    
-                    if 'Όλα' not in sel_klados:
-                        selected_codes = [klados_code_map_y.get(opt, opt) for opt in sel_klados]
-                        yearly_df = yearly_df[yearly_df['Κλάδος/Πακέτο Κάλυψης'].isin(selected_codes)]
+                with y3:
+                    if 'Κλάδος/Πακέτο Κάλυψης' in yearly_df.columns:
+                        # Δημιουργούμε options με περιγραφές
+                        klados_codes = sorted(yearly_df['Κλάδος/Πακέτο Κάλυψης'].dropna().astype(str).unique().tolist())
+                        klados_opts_with_desc = []
+                        klados_code_map_y = {}
+                        
+                        for code in klados_codes:
+                            if code in description_map and description_map[code]:
+                                option_label = f"{code} - {description_map[code]}"
+                                klados_opts_with_desc.append(option_label)
+                                klados_code_map_y[option_label] = code
+                            else:
+                                klados_opts_with_desc.append(code)
+                                klados_code_map_y[code] = code
+                        
+                        sel_klados = st.multiselect("Κλάδος/Πακέτο:", klados_opts_with_desc, default=[], key="y_filter_klados")
+                        
+                        if sel_klados:
+                            selected_codes = [klados_code_map_y.get(opt, opt) for opt in sel_klados]
+                            yearly_df = yearly_df[yearly_df['Κλάδος/Πακέτο Κάλυψης'].isin(selected_codes)]
 
-            with y4:
-                if earnings_col and earnings_col in yearly_df.columns:
-                    apod_opts = ['Όλα'] + sorted(yearly_df[earnings_col].dropna().astype(str).unique().tolist())
-                    sel_apod = st.multiselect("Τύπος Αποδοχών:", apod_opts, default=['Όλα'], key="y_filter_apodochon")
-                    if 'Όλα' not in sel_apod:
-                        yearly_df = yearly_df[yearly_df[earnings_col].isin(sel_apod)]
+                with y4:
+                    if earnings_col and earnings_col in yearly_df.columns:
+                        apod_opts = sorted(yearly_df[earnings_col].dropna().astype(str).unique().tolist())
+                        sel_apod = st.multiselect("Τύπος Αποδοχών:", apod_opts, default=[], key="y_filter_apodochon")
+                        if sel_apod:
+                            yearly_df = yearly_df[yearly_df[earnings_col].isin(sel_apod)]
 
             with y5:
                 from_y_str = st.text_input("Από (dd/mm/yyyy):", value="", placeholder="01/01/1980", key="y_filter_from_date")
@@ -2719,15 +2793,15 @@ def show_results_page(df, filename):
             f1, f2, f3, f4, f6 = st.columns([1.4, 1.8, 0.9, 0.9, 1.4])
             with f1:
                 if 'Ταμείο' in days_df.columns:
-                    tameia_opts = ['Όλα'] + sorted(days_df['Ταμείο'].dropna().astype(str).unique().tolist())
-                    sel_tameia = st.multiselect('Ταμείο:', tameia_opts, default=['Όλα'], key='insdays_filter_tameio')
-                    if 'Όλα' not in sel_tameia:
+                    tameia_opts = sorted(days_df['Ταμείο'].dropna().astype(str).unique().tolist())
+                    sel_tameia = st.multiselect('Ταμείο:', tameia_opts, default=[], key='insdays_filter_tameio')
+                    if sel_tameia:
                         days_df = days_df[days_df['Ταμείο'].isin(sel_tameia)]
             with f2:
                 # Φίλτρο για πακέτα κάλυψης (με περιγραφές από description_map)
                 selected_package_codes = []
                 if available_packages:
-                    package_opts_with_desc = ['Όλα']
+                    package_opts_with_desc = []
                     package_label_to_code = {}
                     for code in available_packages:
                         if code in description_map and description_map[code]:
@@ -2737,11 +2811,11 @@ def show_results_page(df, filename):
                         else:
                             package_opts_with_desc.append(code)
                             package_label_to_code[code] = code
-                    sel_packages = st.multiselect('Πακέτα Κάλυψης:', package_opts_with_desc, default=['Όλα'], key='insdays_filter_packages')
-                    if 'Όλα' not in sel_packages:
+                    sel_packages = st.multiselect('Πακέτα Κάλυψης:', package_opts_with_desc, default=[], key='insdays_filter_packages')
+                    if sel_packages:
                         selected_package_codes = [package_label_to_code.get(opt, opt) for opt in sel_packages]
                 else:
-                    sel_packages = ['Όλα']
+                    sel_packages = []
                     selected_package_codes = []
             with f3:
                 from_str = st.text_input('Από (dd/mm/yyyy):', value='', placeholder='01/01/1980', key='insdays_filter_from')
@@ -3104,6 +3178,9 @@ def show_results_page(df, filename):
         if 'Σελίδα' in apd_df.columns:
             apd_df = apd_df.drop('Σελίδα', axis=1)
         
+        # Αρχικό πλήθος εγγραφών (πριν τα φίλτρα)
+        initial_count = len(apd_df)
+        
         # Το καθεστώς ασφάλισης θα εμφανιστεί κάτω από τα φίλτρα
 
         retention_filter_mode = st.session_state.get('apd_filter_retention_mode', 'Όλα')
@@ -3116,54 +3193,43 @@ def show_results_page(df, filename):
             with col1:
                 # Φίλτρο Ταμείου
                 if 'Ταμείο' in apd_df.columns:
-                    taimeia_options = ['Όλα'] + sorted(apd_df['Ταμείο'].dropna().unique().tolist())
+                    taimeia_options = sorted(apd_df['Ταμείο'].dropna().unique().tolist())
                     selected_taimeia = st.multiselect(
                         "Ταμείο:",
                         options=taimeia_options,
-                        default=['Όλα'],
-                        key="apd_filter_taimeio"
+                        default=[],
+                        key="apd_filter_taimeio",
+                        placeholder=""
                     )
-                    if 'Όλα' not in selected_taimeia:
+                    if selected_taimeia:
                         apd_df = apd_df[apd_df['Ταμείο'].isin(selected_taimeia)]
 
             with col2:
-                # Φίλτρο Τύπου Ασφάλισης
+                # Φίλτρο Τύπου Ασφάλισης (με προεπιλογή ΜΙΣΘΩΤΗ)
                 if 'Τύπος Ασφάλισης' in apd_df.columns:
-                    typos_options = ['Όλα'] + sorted(apd_df['Τύπος Ασφάλισης'].dropna().unique().tolist())
+                    typos_options = sorted(apd_df['Τύπος Ασφάλισης'].dropna().unique().tolist())
                     
-                    # Προεπιλογή "ΜΙΣΘΩΤΗ ΑΣΦΑΛΙΣΗ" (και ΟΧΙ ΜΗ ΜΙΣΘΩΤΗ)
-                    default_typos = ['Όλα']
-                    found_misthoti = False
-                    
-                    # Πρώτα ψάχνουμε για καθαρή μισθωτή (αποκλείοντας το "ΜΗ ΜΙΣΘΩΤΗ")
+                    default_typos = []
                     for opt in typos_options:
-                        opt_u = str(opt).upper()
-                        if "ΜΙΣΘΩΤΗ ΑΣΦΑΛΙΣΗ" in opt_u and "ΜΗ ΜΙΣΘΩΤΗ" not in opt_u:
+                        if "ΜΙΣΘΩΤΗ ΑΣΦΑΛΙΣΗ" in str(opt).upper():
                             default_typos = [opt]
-                            found_misthoti = True
                             break
                     
-                    if not found_misthoti:
-                        # Fallback αν δεν βρεθεί ακριβής αντιστοιχία
-                        for opt in typos_options:
-                            if "ΜΙΣΘΩΤΗ ΑΣΦΑΛΙΣΗ" in str(opt).upper():
-                                default_typos = [opt]
-                                break
-                            
                     selected_typos = st.multiselect(
                         "Τύπος Ασφάλισης:",
                         options=typos_options,
                         default=default_typos,
-                        key="apd_filter_typos"
+                        key="apd_filter_typos",
+                        placeholder=""
                     )
-                    if 'Όλα' not in selected_typos:
+                    if selected_typos:
                         apd_df = apd_df[apd_df['Τύπος Ασφάλισης'].isin(selected_typos)]
 
             with col3:
                 # Φίλτρο Κλάδου/Πακέτου με περιγραφές
                 if 'Κλάδος/Πακέτο Κάλυψης' in apd_df.columns:
                     klados_codes = sorted(apd_df['Κλάδος/Πακέτο Κάλυψης'].dropna().unique().tolist())
-                    klados_options_with_desc = ['Όλα']
+                    klados_options_with_desc = []
                     klados_code_map = {}
                     for code in klados_codes:
                         if code in description_map and description_map[code]:
@@ -3173,13 +3239,15 @@ def show_results_page(df, filename):
                         else:
                             klados_options_with_desc.append(code)
                             klados_code_map[code] = code
+                    
                     selected_klados = st.multiselect(
                         "Κλάδος/Πακέτο:",
                         options=klados_options_with_desc,
-                        default=['Όλα'],
-                        key="apd_filter_klados"
+                        default=[],
+                        key="apd_filter_klados",
+                        placeholder=""
                     )
-                    if 'Όλα' not in selected_klados:
+                    if selected_klados:
                         selected_codes = [klados_code_map.get(opt, opt) for opt in selected_klados]
                         apd_df = apd_df[apd_df['Κλάδος/Πακέτο Κάλυψης'].isin(selected_codes)]
 
@@ -3188,14 +3256,15 @@ def show_results_page(df, filename):
                 earnings_col = next((c for c in apd_df.columns if 'Τύπος Αποδοχών' in c), None)
                 if earnings_col:
                     options_raw = apd_df[earnings_col].dropna().astype(str).unique().tolist()
-                    typos_apodochon_options = ['Όλα'] + sorted(options_raw)
+                    typos_apodochon_options = sorted(options_raw)
                     selected_typos_apodochon = st.multiselect(
                         "Τύπος Αποδοχών:",
                         options=typos_apodochon_options,
-                        default=['Όλα'],
-                        key="apd_filter_apodochon"
+                        default=[],
+                        key="apd_filter_apodochon",
+                        placeholder=""
                     )
-                    if 'Όλα' not in selected_typos_apodochon:
+                    if selected_typos_apodochon:
                         apd_df = apd_df[apd_df[earnings_col].isin(selected_typos_apodochon)]
 
             # Γραμμή 2: Φίλτρα ημερομηνιών και ποσοστού
@@ -3236,12 +3305,12 @@ def show_results_page(df, filename):
                 
                 apd_df = apd_df.drop('Από_DateTime', axis=1)
 
-        # Γραμμή ενημέρωσης κάτω από τα φίλτρα: Καθεστώς | Πλήθος γραμμών | Διακόπτης
-        info_col, count_col, toggle_col = st.columns([2, 1, 1])
+        # Γραμμή ενημέρωσης κάτω από τα φίλτρα
+        info_col, stats_col, toggle_col = st.columns([1.8, 2.5, 1.0])
         with info_col:
-            st.info(f"Καθεστώς Ασφάλισης: **{insurance_status_message}**")
-        with count_col:
-            row_info_placeholder = st.empty()
+            st.info(f"Καθεστώς: **{insurance_status_message}**")
+        with stats_col:
+            stats_placeholder = st.empty()
         with toggle_col:
             st.toggle("Μόνο ετήσιες γραμμές συνόλου", value=False, key="apd_year_totals_only")
         
@@ -3725,7 +3794,14 @@ def show_results_page(df, filename):
                 pass
 
         # Ενημέρωση πληροφοριακού μηνύματος για το πλήθος γραμμών
-        row_info_placeholder.info(f"Εμφανίζονται {data_rows_count} γραμμές")
+        filtered_count = initial_count - data_rows_count
+        stats_msg = f"Εμφανίζονται **{data_rows_count}** γραμμές"
+        
+        if filtered_count > 0:
+            stats_msg += f" • ⚠️ **{filtered_count}** έχουν φιλτραριστεί"
+            stats_placeholder.warning(stats_msg)
+        else:
+            stats_placeholder.info(stats_msg)
 
         # Κρατάμε αντίγραφο πριν τη μορφοποίηση για τις εξαγωγές Excel
         apd_export_df = display_apd_df.copy()
@@ -3854,47 +3930,51 @@ def show_results_page(df, filename):
                 with col1:
                     # Φίλτρο Ταμείου
                     if 'Ταμείο' in count_df.columns:
-                        tameia_options = ['Όλα'] + sorted(count_df['Ταμείο'].dropna().unique().tolist())
+                        tameia_options = sorted(count_df['Ταμείο'].dropna().unique().tolist())
                         sel_cnt_tameia = st.multiselect(
                             "Ταμείο:",
                             options=tameia_options,
-                            default=['Όλα'],
-                            key="cnt_filter_tameio"
+                            default=[],
+                            key="cnt_filter_tameio",
+                            placeholder=""
                         )
-                        if 'Όλα' not in sel_cnt_tameia:
+                        if sel_cnt_tameia:
                             count_df = count_df[count_df['Ταμείο'].isin(sel_cnt_tameia)]
 
                 with col2:
                     # Φίλτρο Τύπου Ασφάλισης
                     if 'Τύπος Ασφάλισης' in count_df.columns:
-                        typos_options = ['Όλα'] + sorted(count_df['Τύπος Ασφάλισης'].dropna().astype(str).unique().tolist())
+                        typos_options = sorted(count_df['Τύπος Ασφάλισης'].dropna().astype(str).unique().tolist())
+                        
                         sel_cnt_typos = st.multiselect(
                             "Τύπος Ασφάλισης:",
                             options=typos_options,
-                            default=['Όλα'],
-                            key="cnt_filter_insurance_type"
+                            default=[],
+                            key="cnt_filter_insurance_type",
+                            placeholder=""
                         )
-                        if 'Όλα' not in sel_cnt_typos:
+                        if sel_cnt_typos:
                             count_df = count_df[count_df['Τύπος Ασφάλισης'].astype(str).isin(sel_cnt_typos)]
 
                 with col3:
                     # Φίλτρο Εργοδότη
                     if 'Α-Μ εργοδότη' in count_df.columns:
-                        employer_options = ['Όλα'] + sorted(count_df['Α-Μ εργοδότη'].dropna().astype(str).unique().tolist())
+                        employer_options = sorted(count_df['Α-Μ εργοδότη'].dropna().astype(str).unique().tolist())
                         sel_cnt_employer = st.multiselect(
                             "Α-Μ Εργοδότη:",
                             options=employer_options,
-                            default=['Όλα'],
-                            key="cnt_filter_employer"
+                            default=[],
+                            key="cnt_filter_employer",
+                            placeholder=""
                         )
-                        if 'Όλα' not in sel_cnt_employer:
+                        if sel_cnt_employer:
                             count_df = count_df[count_df['Α-Μ εργοδότη'].astype(str).isin(sel_cnt_employer)]
                 
                 with col4:
                     # Φίλτρο Κλάδου/Πακέτου
                     if 'Κλάδος/Πακέτο Κάλυψης' in count_df.columns:
                         klados_codes = sorted(count_df['Κλάδος/Πακέτο Κάλυψης'].dropna().unique().tolist())
-                        klados_opts = ['Όλα']
+                        klados_opts = []
                         klados_map = {}
                         for code in klados_codes:
                             if 'description_map' in locals() and code in description_map:
@@ -3908,10 +3988,11 @@ def show_results_page(df, filename):
                         sel_cnt_klados = st.multiselect(
                             "Κλάδος/Πακέτο:",
                             options=klados_opts,
-                            default=['Όλα'],
-                            key="cnt_filter_klados"
+                            default=[],
+                            key="cnt_filter_klados",
+                            placeholder=""
                         )
-                        if 'Όλα' not in sel_cnt_klados:
+                        if sel_cnt_klados:
                             sel_codes = [klados_map.get(o, o) for o in sel_cnt_klados]
                             count_df = count_df[count_df['Κλάδος/Πακέτο Κάλυψης'].isin(sel_codes)]
                 
@@ -3919,14 +4000,15 @@ def show_results_page(df, filename):
                     # Φίλτρο Τύπου Αποδοχών
                     e_col = next((c for c in count_df.columns if 'Τύπος Αποδοχών' in c), None)
                     if e_col:
-                        earn_opts = ['Όλα'] + sorted(count_df[e_col].dropna().astype(str).unique().tolist())
+                        earn_opts = sorted(count_df[e_col].dropna().astype(str).unique().tolist())
                         sel_cnt_earn = st.multiselect(
                             "Τύπος Αποδοχών:",
                             options=earn_opts,
-                            default=['Όλα'],
-                            key="cnt_filter_earnings"
+                            default=[],
+                            key="cnt_filter_earnings",
+                            placeholder=""
                         )
-                        if 'Όλα' not in sel_cnt_earn:
+                        if sel_cnt_earn:
                             count_df = count_df[count_df[e_col].astype(str).isin(sel_cnt_earn)]
 
                 with col6:
