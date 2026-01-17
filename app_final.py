@@ -3418,20 +3418,20 @@ def show_results_page(df, filename):
                         return 0.0
                     return total_contributions / adjusted_earnings
 
-                display_apd_df['% κράτησης'] = display_apd_df.apply(calculate_retention_percentage, axis=1)
+                display_apd_df['Συν. % κράτησης'] = display_apd_df.apply(calculate_retention_percentage, axis=1)
                 
                 # Τοποθέτηση δίπλα στις Συνολικές εισφορές
                 cols = list(display_apd_df.columns)
-                if 'Συνολικές εισφορές' in cols and '% κράτησης' in cols:
+                if 'Συνολικές εισφορές' in cols and 'Συν. % κράτησης' in cols:
                     contributions_idx = cols.index('Συνολικές εισφορές')
-                    cols.remove('% κράτησης')
-                    cols.insert(contributions_idx + 1, '% κράτησης')
+                    cols.remove('Συν. % κράτησης')
+                    cols.insert(contributions_idx + 1, 'Συν. % κράτησης')
                     display_apd_df = display_apd_df[cols]
 
         # Εφαρμογή φίλτρου % κράτησης βάσει επιλογής
-        if '% κράτησης' in display_apd_df.columns:
+        if 'Συν. % κράτησης' in display_apd_df.columns:
             retention_threshold_decimal = (filter_threshold or 0.0) / 100.0
-            retention_numeric = pd.to_numeric(display_apd_df['% κράτησης'], errors='coerce')
+            retention_numeric = pd.to_numeric(display_apd_df['Συν. % κράτησης'], errors='coerce')
 
             if retention_filter_mode == "Μεγαλύτερο ή ίσο":
                 mask = retention_numeric >= retention_threshold_decimal
@@ -3549,10 +3549,9 @@ def show_results_page(df, filename):
                     except:
                         month_num = 13 # Fallback
                     
-                    # Έλεγχος για ειδικούς τύπους αποδοχών (Δώρα, Bonus, Επίδομα Ισολογισμού)
+                    # Έλεγχος για ειδικούς τύπους αποδοχών (Δώρα και Επίδομα Ισολογισμού)
                     is_special = False
                     special_codes = ['03', '04', '05', 
-                                     '10', '28', '43', '49', '63', '74', '85', '96', '107', '118',
                                      '06', '25', '40', '60', '71', '82', '93', '104', '115']
                     
                     if earnings_col_name:
@@ -3585,12 +3584,14 @@ def show_results_page(df, filename):
                     code = str(row.get(earnings_col_name, '')).strip()
                     clean_code = code.split(' ')[0].strip()
                     
-                    special_codes = ['03', '04', '05', '10', '28', '43', '49', '63', '74', '85', '96', '107', '118',
+                    special_codes = ['03', '04', '05', 
                                      '06', '25', '40', '60', '71', '82', '93', '104', '115']
                     
                     is_special = (clean_code in special_codes) or (len(clean_code) >= 2 and clean_code[:2] in ['03', '04', '05'])
                     
-                    if not is_special: return 0
+                    if not is_special:
+                        if clean_code == '01': return -1 # Τακτικές Αποδοχές πρώτες
+                        return 0
                     
                     if clean_code.startswith('03'): return 1
                     if clean_code.startswith('04'): return 2
@@ -3636,33 +3637,64 @@ def show_results_page(df, filename):
                 
                 year_slice['_MonthlyContribTotal'] = year_slice.apply(calculate_monthly_contrib_total, axis=1)
                 
-                # 2. Επαναϋπολογισμός Περικοπής, Συντ. Αποδοχών, % Κράτησης
+                # 2. Επαναϋπολογισμός Περικοπής, Συντ. Αποδοχών, % Κράτησης (με Δυναμικό Πλαφόν)
+                
+                # Προετοιμασία: Κωδικός και Ημέρες για υπολογισμό Πλαφόν
+                def get_clean_code(row):
+                    if not earnings_col_name: return ''
+                    c = str(row.get(earnings_col_name, '')).strip()
+                    return c.split(' ')[0].strip()
+                year_slice['_Code'] = year_slice.apply(get_clean_code, axis=1)
+                
+                def get_days_num(row):
+                    return clean_numeric_value(row.get('Ημέρες Ασφ.', 0)) or 0.0
+                
+                days_01_map = {}
+                rows_01 = year_slice[year_slice['_Code'] == '01'].copy()
+                if not rows_01.empty:
+                    rows_01['_DaysNum'] = rows_01.apply(get_days_num, axis=1)
+                    days_01_map = rows_01.groupby('Μήνας')['_DaysNum'].sum().to_dict()
+
                 def recalc_financials(row):
                     monthly_gross = row.get('Συν. μήνα', 0.0)
                     monthly_contrib = row.get('_MonthlyContribTotal', 0.0)
                     
                     plaf = row.get('Εισφ. πλαφόν')
-                    plaf_val = clean_numeric_value(plaf) if plaf is not None else None
+                    base_plaf_val = clean_numeric_value(plaf) if plaf is not None else None
                     
-                    if plaf_val is None:
+                    if base_plaf_val is None:
                         p = (monthly_contrib/monthly_gross if monthly_gross else 0)
-                        return None, monthly_gross, p
+                        return None, monthly_gross, p, None
 
-                    if monthly_gross > plaf_val:
-                        cut = monthly_gross - plaf_val
-                        adjusted = plaf_val
+                    # Υπολογισμός Δυναμικού Πλαφόν
+                    final_plafond = base_plaf_val
+                    m = row.get('Μήνας')
+                    
+                    # Αν είναι κανονικός μήνας (όχι κενός/special)
+                    if m and m != "":
+                        days_01 = days_01_map.get(m, 0)
+                        if days_01 > 0:
+                            days_capped = min(days_01, 25)
+                            daily_plafond = base_plaf_val / 25.0
+                            final_plafond = daily_plafond * days_capped
+                        # else: Παραμένει το πλήρες (25/25)
+                    
+                    if monthly_gross > final_plafond:
+                        cut = monthly_gross - final_plafond
+                        adjusted = final_plafond
                     else:
                         cut = None
                         adjusted = monthly_gross
                     
                     percent = (monthly_contrib / adjusted) if adjusted and adjusted > 0 else 0.0
                     
-                    return cut, adjusted, percent
+                    return cut, adjusted, percent, final_plafond
 
                 new_fin = year_slice.apply(recalc_financials, axis=1, result_type='expand')
                 year_slice['Περικοπή'] = new_fin[0]
                 year_slice['Συντ. Αποδοχές'] = new_fin[1]
-                year_slice['% κράτησης'] = new_fin[2]
+                year_slice['Συν. % κράτησης'] = new_fin[2]
+                year_slice['Εισφ. πλαφόν'] = new_fin[3]
 
                 # Ταξινόμηση: Μήνας (SortMonth) -> Priority -> Ταμείο -> Από
                 year_slice = year_slice.sort_values(['_SortMonth', '_SortPriority', 'Ταμείο', '_SortDate'], na_position='last')
@@ -3706,7 +3738,7 @@ def show_results_page(df, filename):
                         new_row['Συν. μήνα'] = ''
                         new_row['Περικοπή'] = ''
                         new_row['Συντ. Αποδοχές'] = ''
-                        new_row['% κράτησης'] = ''
+                        new_row['Συν. % κράτησης'] = ''
                         new_row['Εισφ. πλαφόν'] = ''
 
                     # Ταμείο
@@ -3727,7 +3759,7 @@ def show_results_page(df, filename):
                 
                 # Cleanup
                 proc_df = pd.DataFrame(processed_rows)
-                for col in ['_SortMonth', '_SortDate', '_GrossFloat', '_ContribFloat', '_MonthlyContribTotal', '_SortPriority']:
+                for col in ['_SortMonth', '_SortDate', '_GrossFloat', '_ContribFloat', '_MonthlyContribTotal', '_SortPriority', '_Code', '_DaysNum']:
                     if col in proc_df.columns:
                         proc_df = proc_df.drop(columns=[col])
                 
@@ -3761,8 +3793,8 @@ def show_results_page(df, filename):
                     if adjusted_sum is not None: totals_row['Συντ. Αποδοχές'] = adjusted_sum
                     if cut_sum is not None: totals_row['Περικοπή'] = cut_sum
 
-                    if '% κράτησης' in totals_row:
-                        totals_row['% κράτησης'] = ''
+                    if 'Συν. % κράτησης' in totals_row:
+                        totals_row['Συν. % κράτησης'] = ''
 
                     final_frames.append(pd.DataFrame([totals_row], columns=all_columns))
                 
@@ -3784,12 +3816,18 @@ def show_results_page(df, filename):
         if st.session_state.get('apd_year_totals_only', False):
             try:
                 total_mask = False
-                if 'Έως' in display_apd_df.columns:
-                    total_mask = display_apd_df['Έως'].astype(str).str.startswith('Σύνολο')
-                if 'Από' in display_apd_df.columns:
-                    total_mask = total_mask | display_apd_df['Από'].astype(str).str.startswith('Σύνολο')
-                display_apd_df = display_apd_df[total_mask]
-                data_rows_count = len(display_apd_df)
+                # Ψάχνουμε τη λέξη "Σύνολο" κυρίως στη στήλη Μήνας (νέα θέση), αλλά και Έως/Από για ασφάλεια
+                for col_name in ['Μήνας', 'Έως', 'Από']:
+                    if col_name in display_apd_df.columns:
+                        mask = display_apd_df[col_name].astype(str).str.startswith('Σύνολο')
+                        if isinstance(total_mask, bool) and not total_mask:
+                            total_mask = mask
+                        else:
+                            total_mask = total_mask | mask
+                
+                if not isinstance(total_mask, bool): # Αν βρήκαμε κάτι
+                    display_apd_df = display_apd_df[total_mask]
+                    data_rows_count = len(display_apd_df)
             except Exception:
                 pass
 
@@ -3813,7 +3851,7 @@ def show_results_page(df, filename):
                 display_apd_df[col] = display_apd_df[col].apply(format_currency)
         
         # Μορφοποίηση ποσοστού
-        if '% κράτησης' in display_apd_df.columns:
+        if 'Συν. % κράτησης' in display_apd_df.columns:
             def format_retention_value(val):
                 if isinstance(val, (int, float)) and not pd.isna(val):
                     return f"{val:.1%}".replace('.', ',')
@@ -3830,7 +3868,7 @@ def show_results_page(df, filename):
                         return stripped
                 return "0,0%"
 
-            display_apd_df['% κράτησης'] = display_apd_df['% κράτησης'].apply(format_retention_value)
+            display_apd_df['Συν. % κράτησης'] = display_apd_df['Συν. % κράτησης'].apply(format_retention_value)
 
         # Function for conditional formatting
         def highlight_low_retention(row):
@@ -3848,7 +3886,7 @@ def show_results_page(df, filename):
                 return ['background-color: #e6f2ff; color: #000000; font-weight: 700;'] * len(row)
 
             # Check for Low Retention
-            retention_str = row.get('% κράτησης', '0,0%').replace('%', '').replace(',', '.')
+            retention_str = row.get('Συν. % κράτησης', '0,0%').replace('%', '').replace(',', '.')
             try:
                 retention_val = float(retention_str)
                 if retention_val < highlight_threshold:
@@ -3856,13 +3894,23 @@ def show_results_page(df, filename):
             except (ValueError, TypeError):
                 pass
             
-            # Apply Bold to 'Έτος' and 'Ταμείο'
             for i, col_name in enumerate(row.index):
+                # Apply Bold to 'Έτος' and 'Ταμείο'
                 if col_name in ['Έτος', 'Ταμείο']:
                     if styles[i]:
                         styles[i] += '; font-weight: 700;'
                     else:
                         styles[i] = 'font-weight: 700;'
+                
+                # Apply Bold Red to 'Περικοπή'
+                if col_name == 'Περικοπή':
+                    val = row.get(col_name)
+                    if val and str(val).strip() != '':
+                        style_add = 'color: #d9534f; font-weight: 700;'
+                        if styles[i]:
+                            styles[i] += f'; {style_add}'
+                        else:
+                            styles[i] = style_add
             
             return styles
 
