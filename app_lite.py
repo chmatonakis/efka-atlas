@@ -33,6 +33,15 @@ st.set_page_config(
 st.markdown(
     """
 <style>
+    /* Hide Streamlit Main Menu and Footer */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    div[data-testid="stToolbar"] {visibility: hidden;}
+    div[data-testid="stDecoration"] {visibility: hidden;}
+    div[data-testid="stStatusWidget"] {visibility: hidden;}
+
+    /* Reset default padding/margin issues */
     .stApp {
         background-color: #f8f9fa;
     }
