@@ -699,24 +699,21 @@ def render_print_button(
                 scale=scale
             )
 
-            # Δημιουργία JavaScript που θα ανοίξει νέο παράθυρο
+            # Δημιουργία JavaScript που θα ανοίξει νέο tab με auto-print
             js_code = f"""
 <script>
-function openPrintWindow() {{
-    const printWindow = window.open('', '{window_name}', 'width=900,height=700');
-    const htmlContent = ${json.dumps(html_content)};
-    
-    try {{
-      printWindow.document.open();
-      printWindow.document.write(htmlContent);
-      printWindow.document.close();
-      printWindow.focus();
-    }} catch (e) {{
-      console.error('Print window error:', e);
-    }}
+function openPrintTab() {{
+  const htmlContent = {json.dumps(html_content)};
+  const blob = new Blob([htmlContent], {{ type: 'text/html' }});
+  const url = URL.createObjectURL(blob);
+  const printWindow = window.open(url, '{window_name}');
+  if (printWindow) {{
+    printWindow.focus();
+  }}
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
 }}
 
-openPrintWindow();
+openPrintTab();
 </script>
 """
             # Σε ορισμένες εκδόσεις Streamlit, το components.html δεν δέχεται 'key'.

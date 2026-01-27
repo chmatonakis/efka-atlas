@@ -3,7 +3,6 @@
 
 import os
 import uuid
-from pathlib import Path
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
@@ -202,39 +201,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-CACHE_DIR = Path(__file__).parent / ".lite_cache"
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
-LAST_TOKEN_FILE = CACHE_DIR / "last_token.txt"
-
-def save_cached_df(token: str, df: pd.DataFrame) -> None:
-    try:
-        df.to_pickle(CACHE_DIR / f"{token}.pkl")
-    except Exception:
-        pass
-
-def load_cached_df(token: str) -> pd.DataFrame | None:
-    try:
-        cache_path = CACHE_DIR / f"{token}.pkl"
-        if cache_path.exists():
-            return pd.read_pickle(cache_path)
-    except Exception:
-        return None
-    return None
-
-def save_last_token(token: str) -> None:
-    try:
-        LAST_TOKEN_FILE.write_text(token, encoding="utf-8")
-    except Exception:
-        pass
-
-def load_last_token() -> str:
-    try:
-        if LAST_TOKEN_FILE.exists():
-            return LAST_TOKEN_FILE.read_text(encoding="utf-8").strip()
-    except Exception:
-        return ""
-    return ""
-
 def get_section() -> str:
     try:
         section = st.query_params.get("section", "summary")
@@ -254,34 +220,15 @@ def get_query_param(name: str) -> str:
         return str(params.get(name, [""])[0])
 
 section = get_section()
-token = get_query_param("token").strip()
 client_name_param = get_query_param("client").strip()
-last_token = load_last_token()
 
 if "lite_file_uploaded" not in st.session_state:
     st.session_state["lite_file_uploaded"] = False
 if "lite_processing_done" not in st.session_state:
     st.session_state["lite_processing_done"] = False
 
-if token and st.session_state.get("lite_df") is None:
-    cached_df = load_cached_df(token)
-    if isinstance(cached_df, pd.DataFrame) and not cached_df.empty:
-        st.session_state["lite_df"] = cached_df
-        st.session_state["lite_token"] = token
-        st.session_state["lite_file_uploaded"] = True
-        st.session_state["lite_processing_done"] = True
-        if client_name_param and not st.session_state.get("lite_client_name"):
-            st.session_state["lite_client_name"] = client_name_param
-
-if not token and st.session_state.get("lite_df") is None and last_token:
-    cached_df = load_cached_df(last_token)
-    if isinstance(cached_df, pd.DataFrame) and not cached_df.empty:
-        try:
-            st.query_params["section"] = section
-            st.query_params["token"] = last_token
-        except Exception:
-            st.experimental_set_query_params(section=section, token=last_token)
-        st.rerun()
+if client_name_param and not st.session_state.get("lite_client_name"):
+    st.session_state["lite_client_name"] = client_name_param
 
 # Header
 st.markdown('''
@@ -378,20 +325,11 @@ if not st.session_state["lite_processing_done"]:
 if st.session_state.get("lite_df") is None:
     with st.spinner("Επεξεργασία αρχείου..."):
         st.session_state["lite_df"] = extract_efka_data(st.session_state["lite_uploaded_file"])
-        new_token = uuid.uuid4().hex
-        st.session_state["lite_token"] = new_token
-        save_cached_df(new_token, st.session_state["lite_df"])
-        save_last_token(new_token)
-        try:
-            st.query_params["token"] = new_token
-        except Exception:
-            st.experimental_set_query_params(token=new_token)
         st.rerun()
 
 df = st.session_state.get("lite_df")
 if df is None or df.empty:
-    if token:
-        st.warning("Δεν βρέθηκαν αποθηκευμένα δεδομένα για το link. Παρακαλώ ανεβάστε ξανά το αρχείο.")
+    st.warning("Δεν βρέθηκαν δεδομένα. Παρακαλώ ανεβάστε ξανά το αρχείο.")
     st.stop()
 
 if "lite_show_disclaimer" not in st.session_state:
@@ -409,11 +347,10 @@ def show_disclaimer_dialog():
             if st.button("Αποδοχή-Προβολή", type="primary"):
                 try:
                     st.query_params["section"] = "all"
-                    st.query_params["token"] = link_token
                     if client_value:
                         st.query_params["client"] = client_value
                 except Exception:
-                    st.experimental_set_query_params(section="all", token=link_token, client=client_value)
+                    st.experimental_set_query_params(section="all", client=client_value)
                 st.session_state["lite_show_disclaimer"] = False
                 st.rerun()
         _dlg()
@@ -422,11 +359,10 @@ def show_disclaimer_dialog():
         if st.button("Αποδοχή-Προβολή", type="primary"):
             try:
                 st.query_params["section"] = "all"
-                st.query_params["token"] = link_token
                 if client_value:
                     st.query_params["client"] = client_value
             except Exception:
-                st.experimental_set_query_params(section="all", token=link_token, client=client_value)
+                st.experimental_set_query_params(section="all", client=client_value)
             st.session_state["lite_show_disclaimer"] = False
             st.rerun()
 
@@ -439,7 +375,6 @@ with col_mid:
     client_name = st.text_input("Ονοματεπώνυμο:", value=st.session_state.get("lite_client_name", ""), key="client_input")
     st.session_state["lite_client_name"] = client_name
 
-    link_token = st.session_state.get("lite_token", token).strip()
     client_value = client_name.strip()
 
     st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
@@ -459,24 +394,11 @@ with col_mid:
                 "lite_uploaded_file",
                 "lite_filename",
                 "lite_df",
-                "lite_token",
                 "lite_client_name",
                 "lite_show_disclaimer",
             ]:
                 if key in st.session_state:
                     del st.session_state[key]
-            try:
-                if link_token:
-                    cached_path = CACHE_DIR / f"{link_token}.pkl"
-                    if cached_path.exists():
-                        cached_path.unlink()
-            except Exception:
-                pass
-            try:
-                if LAST_TOKEN_FILE.exists():
-                    LAST_TOKEN_FILE.unlink()
-            except Exception:
-                pass
             try:
                 st.query_params.clear()
             except Exception:
