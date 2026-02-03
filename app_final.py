@@ -1117,6 +1117,19 @@ def clean_numeric_value(value, exclude_drx=False):
         
         # Μετατροπή σε string και καθαρισμός
         clean_value = str(value).strip()
+        is_negative = False
+
+        # Υποστήριξη unicode minus και αρνητικού σε παρένθεση/τέλος
+        clean_value = clean_value.replace('\u2212', '-')
+        if clean_value.startswith('(') and clean_value.endswith(')'):
+            is_negative = True
+            clean_value = clean_value[1:-1].strip()
+        if clean_value.endswith('-'):
+            is_negative = True
+            clean_value = clean_value[:-1].strip()
+        if clean_value.startswith('-'):
+            is_negative = True
+            clean_value = clean_value[1:].strip()
         
         # Έλεγχος για ΔΡΧ αν exclude_drx=True
         if exclude_drx and 'ΔΡΧ' in clean_value:
@@ -1161,9 +1174,40 @@ def clean_numeric_value(value, exclude_drx=False):
                 clean_value = clean_value.replace(',', '')
         
         # Μετατροπή σε float
-        return float(clean_value)
+        result = float(clean_value)
+        return -result if is_negative else result
     except (ValueError, TypeError):
         return 0.0
+
+def get_negative_amount_sign(gross_val, contrib_val) -> int:
+    """Επιστρέφει -1 όταν υπάρχουν αρνητικά ποσά (αναστροφή εγγραφής)."""
+    try:
+        if (gross_val is not None and gross_val < 0) or (contrib_val is not None and contrib_val < 0):
+            return -1
+    except Exception:
+        pass
+    return 1
+
+def apply_negative_time_sign(df: pd.DataFrame,
+                             gross_col: str = 'Μικτές αποδοχές',
+                             contrib_col: str = 'Συνολικές εισφορές') -> pd.DataFrame:
+    """Αν υπάρχουν αρνητικά ποσά, κάνει αρνητικές τις ημέρες/μήνες/έτη."""
+    if not isinstance(df, pd.DataFrame):
+        return df
+    if gross_col not in df.columns and contrib_col not in df.columns:
+        return df
+
+    def _row_sign(r) -> int:
+        gross_val = clean_numeric_value(r.get(gross_col, 0), exclude_drx=True)
+        contrib_val = clean_numeric_value(r.get(contrib_col, 0), exclude_drx=True)
+        return get_negative_amount_sign(gross_val, contrib_val)
+
+    sign_series = df.apply(_row_sign, axis=1)
+    for col in ['Έτη', 'Μήνες', 'Ημέρες']:
+        if col in df.columns:
+            df[col] = df[col].apply(clean_numeric_value)
+            df[col] = df[col] * sign_series
+    return df
 
 def find_gaps_in_insurance_data(df):
     """
@@ -1909,6 +1953,8 @@ def build_summary_grouped_display(summary_df: pd.DataFrame, source_df: pd.DataFr
         if col in summary_df.columns:
             summary_df[col] = summary_df[col].apply(lambda x: clean_numeric_value(x, exclude_drx=True))
 
+    summary_df = apply_negative_time_sign(summary_df)
+
     group_keys = ['Κλάδος/Πακέτο Κάλυψης']
     if 'Ταμείο' in summary_df.columns:
         group_keys.append('Ταμείο')
@@ -2068,6 +2114,10 @@ def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] |
                 contrib_val = clean_numeric_value(raw_contrib, exclude_drx=True)
             if contrib_val is None:
                 contrib_val = 0.0
+
+            sign = get_negative_amount_sign(gross_val, contrib_val)
+            if sign == -1:
+                days_val = -abs(days_val)
 
             tameio = str(row.get('Ταμείο', '')).strip()
             insurance_type = str(row.get('Τύπος Ασφάλισης', '')).strip()
@@ -3489,6 +3539,8 @@ def show_results_page(df, filename):
             for col in currency_columns:
                 if col in summary_df.columns:
                     summary_df[col] = summary_df[col].apply(lambda x: clean_numeric_value(x, exclude_drx=True))
+
+            summary_df = apply_negative_time_sign(summary_df)
             
             # Ομαδοποίηση με βάση Κλάδος/Πακέτο και (αν υπάρχει) Ταμείο
             group_keys = ['Κλάδος/Πακέτο Κάλυψης']
@@ -3694,6 +3746,8 @@ def show_results_page(df, filename):
             for col in currency_columns:
                 if col in yearly_df.columns:
                     yearly_df[col] = yearly_df[col].apply(lambda x: clean_numeric_value(x, exclude_drx=True))
+
+            yearly_df = apply_negative_time_sign(yearly_df)
             
             # Ομαδοποίηση με βάση: Έτος, Ταμείο, Τύπο Ασφάλισης, Κλάδο/Πακέτο και Τύπο Αποδοχών (αν υπάρχει)
             group_keys = ['Έτος', 'Ταμείο']
@@ -4010,11 +4064,23 @@ def show_results_page(df, filename):
                 else:
                     days_df[col] = 0.0
 
+            sign_series = 1
+            if 'Μικτές αποδοχές' in days_df.columns or 'Συνολικές εισφορές' in days_df.columns:
+                sign_series = days_df.apply(
+                    lambda r: get_negative_amount_sign(
+                        clean_numeric_value(r.get('Μικτές αποδοχές', 0), exclude_drx=True),
+                        clean_numeric_value(r.get('Συνολικές εισφορές', 0), exclude_drx=True)
+                    ),
+                    axis=1
+                )
+
             # Υπολογισμός μονάδων ανά γραμμή (πάντα άθροισμα σε ημέρες)
             days_df['Μονάδες'] = days_df['Ημέρες'] + (days_df['Μήνες'] * month_days) + (days_df['Έτη'] * year_days)
+            if not isinstance(sign_series, int):
+                days_df['Μονάδες'] = days_df['Μονάδες'] * sign_series
             
             # Αφαίρεση γραμμών με μηδενικές μονάδες (χωρίς ημέρες/μήνες/έτη)
-            days_df = days_df[days_df['Μονάδες'] > 0]
+            days_df = days_df[days_df['Μονάδες'] != 0]
 
             # Ετικέτα διαστήματος
             days_df['Διάστημα'] = days_df['Από_DateTime'].dt.strftime('%d/%m/%Y') + ' - ' + days_df['Έως_DateTime'].dt.strftime('%d/%m/%Y')
@@ -5329,6 +5395,10 @@ def show_results_page(df, filename):
                         else:
                             contrib_val = clean_numeric_value(raw_contrib, exclude_drx=True)
                         if contrib_val is None: contrib_val = 0.0
+
+                        sign = get_negative_amount_sign(gross_val, contrib_val)
+                        if sign == -1:
+                            days_val = -abs(days_val)
                         
                         # Keys
                         tameio = str(row.get('Ταμείο', '')).strip()
@@ -5876,6 +5946,10 @@ def show_results_page(df, filename):
                         else:
                             contrib_val = clean_numeric_value(raw_contrib, exclude_drx=True)
                         if contrib_val is None: contrib_val = 0.0
+
+                        sign = get_negative_amount_sign(gross_val, contrib_val)
+                        if sign == -1:
+                            days_val = -abs(days_val)
                         
                         tameio = str(row.get('Ταμείο', '')).strip()
                         insurance_type = str(row.get('Τύπος Ασφάλισης', '')).strip()
@@ -6331,6 +6405,10 @@ def show_results_page(df, filename):
                         else:
                             contrib_val = clean_numeric_value(raw_contrib, exclude_drx=True)
                         if contrib_val is None: contrib_val = 0.0
+
+                        sign = get_negative_amount_sign(gross_val, contrib_val)
+                        if sign == -1:
+                            days_val = -abs(days_val)
                         
                         tameio = str(row.get('Ταμείο', '')).strip()
                         insurance_type = str(row.get('Τύπος Ασφάλισης', '')).strip()
@@ -6694,6 +6772,14 @@ def show_results_page(df, filename):
                 if 'Από' in summary_df.columns:
                     summary_df['Από_DateTime'] = pd.to_datetime(summary_df['Από'], format='%d/%m/%Y', errors='coerce')
                     summary_df = summary_df.dropna(subset=['Από_DateTime'])
+
+                for col in ['Έτη', 'Μήνες', 'Ημέρες']:
+                    if col in summary_df.columns:
+                        summary_df[col] = summary_df[col].apply(clean_numeric_value)
+                for col in ['Μικτές αποδοχές', 'Συνολικές εισφορές']:
+                    if col in summary_df.columns:
+                        summary_df[col] = summary_df[col].apply(lambda x: clean_numeric_value(x, exclude_drx=True))
+                summary_df = apply_negative_time_sign(summary_df)
                 
                 grouped = summary_df.groupby('Κλάδος/Πακέτο Κάλυψης').agg({
                     'Από': 'min',
@@ -6726,6 +6812,7 @@ def show_results_page(df, filename):
                     for col in numeric_columns:
                         if col in yearly_df.columns:
                             yearly_df[col] = yearly_df[col].apply(clean_numeric_value)
+                    yearly_df = apply_negative_time_sign(yearly_df)
                     
                     # Ομαδοποίηση με βάση έτος, ταμείο και κλάδο/πακέτο κάλυψης
                     yearly_grouped = yearly_df.groupby(['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης']).agg({
