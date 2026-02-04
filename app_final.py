@@ -2513,6 +2513,15 @@ def show_results_page(df, filename):
     # Συλλογή προβολών για εξαγωγή μεμονωμένων πινάκων
     view_exports = {}
 
+    excluded_packages = {"Α", "Λ", "Υ", "Ο", "Χ", "899"}
+    excluded_packages_label = ", ".join(sorted(excluded_packages))
+
+    def exclude_unused_packages(dataframe: pd.DataFrame) -> pd.DataFrame:
+        if 'Κλάδος/Πακέτο Κάλυψης' not in dataframe.columns:
+            return dataframe
+        pkg_series = dataframe['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
+        return dataframe[~pkg_series.isin(excluded_packages)]
+
     def register_view(label: str, data: pd.DataFrame):
         """Αποθηκεύει το τρέχον DataFrame για χρήση στο κουμπί 'Εξαγωγή πίνακα'."""
         if data is None:
@@ -2720,8 +2729,6 @@ def show_results_page(df, filename):
         "apd": "Ανάλυση ΑΠΔ",
         "parallel": "Παράλληλη",
         "multi": "Πολλαπλή",
-        "yearly": "Ετήσια Αναφορά",
-        "days": "Ημέρες Ασφάλισης",
         "main": "Κύρια Δεδομένα",
         "annex": "Παράρτημα"
     }
@@ -2787,7 +2794,7 @@ def show_results_page(df, filename):
         except: pass
 
     # Δημιουργία tabs
-    tab_summary, tab_count, tab_gaps, tab_apd, tab_parallel, tab_multi, tab_yearly, tab_days, tab_main, tab_annex = st.tabs(list(tab_titles.values()))
+    tab_summary, tab_count, tab_gaps, tab_apd, tab_parallel, tab_multi, tab_main, tab_annex = st.tabs(list(tab_titles.values()))
     
     with tab_main:
         # Κύρια δεδομένα (χωρίς τις στήλες από τελευταίες σελίδες)
@@ -3636,7 +3643,7 @@ def show_results_page(df, filename):
         else:
             st.warning("Η στήλη 'Κλάδος/Πακέτο Κάλυψης' δεν βρέθηκε στα δεδομένα.")
     
-    with tab_yearly:
+    if False:  # Καταργημένη καρτέλα: Ετήσια Αναφορά
         # Ετήσια Αναφορά - Ομαδοποίηση με βάση έτος, ταμείο και κλάδο/πακέτο
         st.markdown("### Ετήσια Αναφορά - Ομαδοποίηση κατά Έτος, Ταμείο και Κλάδο/Πακέτο")
         st.info("Σημείωση: Στα αθροίσματα συμπεριλαμβάνονται μόνο τα ποσά σε €. Τα ποσά σε ΔΡΧ (πριν το 2002) εμφανίζονται αλλά δεν υπολογίζονται στα συνολικά.")
@@ -3978,7 +3985,7 @@ def show_results_page(df, filename):
         else:
             st.warning("Οι στήλες 'Από' ή 'Ταμείο' δεν βρέθηκαν στα δεδομένα.")
     
-    with tab_days:
+    if False:  # Καταργημένη καρτέλα: Ημέρες Ασφάλισης
         # Αναφορά Ημερών Ασφάλισης ανά Έτος και Διάστημα, με στήλες τα Πακέτα Κάλυψης
         st.markdown("### Αναφορά Ημερών Ασφάλισης (Έτος × Διάστημα × Πακέτα)")
 
@@ -4395,6 +4402,8 @@ def show_results_page(df, filename):
         # Αφαιρούμε τη στήλη Σελίδα αν υπάρχει ακόμα
         if 'Σελίδα' in apd_df.columns:
             apd_df = apd_df.drop('Σελίδα', axis=1)
+
+        apd_df = exclude_unused_packages(apd_df)
         
         # Αρχικό πλήθος εγγραφών (πριν τα φίλτρα)
         initial_count = len(apd_df)
@@ -4429,7 +4438,9 @@ def show_results_page(df, filename):
                     
                     default_typos = []
                     for opt in typos_options:
-                        if "ΜΙΣΘΩΤΗ ΑΣΦΑΛΙΣΗ" in str(opt).upper():
+                        opt_upper = str(opt).upper().strip()
+                        is_misthoti = ("ΜΙΣΘΩΤΗ" in opt_upper) and ("ΜΗ ΜΙΣΘΩΤΗ" not in opt_upper) and not opt_upper.startswith("ΜΗ ")
+                        if is_misthoti:
                             default_typos = [opt]
                             break
                     
@@ -4440,7 +4451,9 @@ def show_results_page(df, filename):
                         key="apd_filter_typos",
                         placeholder=""
                     )
-                    if selected_typos:
+                    if not default_typos:
+                        apd_df = apd_df.iloc[0:0]
+                    elif selected_typos:
                         apd_df = apd_df[apd_df['Τύπος Ασφάλισης'].isin(selected_typos)]
 
             with col3:
@@ -4524,13 +4537,15 @@ def show_results_page(df, filename):
                 apd_df = apd_df.drop('Από_DateTime', axis=1)
 
         # Γραμμή ενημέρωσης κάτω από τα φίλτρα
-        info_col, stats_col, toggle_col = st.columns([1.8, 2.5, 1.0])
+        info_col, stats_col, toggle_col, exclude_col = st.columns([1.6, 2.3, 0.9, 1.2])
         with info_col:
             st.info(f"Καθεστώς: **{insurance_status_message}**")
         with stats_col:
             stats_placeholder = st.empty()
         with toggle_col:
             st.toggle("Μόνο ετήσιες γραμμές συνόλου", value=False, key="apd_year_totals_only")
+        with exclude_col:
+            st.info(f"Εξαιρούνται: {excluded_packages_label}")
         
         # --- Data Display and Processing ---
         
@@ -5176,13 +5191,16 @@ def show_results_page(df, filename):
 
     with tab_count:
         st.markdown("### Καταμέτρηση Ημερών Ασφάλισης")
-        info_col, warn_col = st.columns([2, 2])
+        info_col, warn_col, exclude_col = st.columns([1.6, 1.9, 1.5])
         with info_col:
             st.info("Αναλυτική καταμέτρηση ημερών ανά έτος, ταμείο, εργοδότη και μήνα.")
         with warn_col:
             st.warning("Διαστήματα που καλύπτουν πολλαπλούς μήνες επιμερίζονται και επισημαίνονται με κίτρινο χρώμα.")
+        with exclude_col:
+            st.info(f"Εξαιρούνται: {excluded_packages_label}")
 
         count_df = df.copy()
+        count_df = exclude_unused_packages(count_df)
         required_cols = ['Από', 'Έως', 'Ημέρες']
         
         if all(col in count_df.columns for col in required_cols):
