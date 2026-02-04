@@ -81,6 +81,21 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# Google Analytics (GA4)
+components.html(
+    """
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-34VGNYK55C"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-34VGNYK55C');
+    </script>
+    """,
+    height=0
+)
+
 # Lookup table για την περιγραφή αποδοχών
 APODOXES_DESCRIPTIONS = {
     '01': 'Τακτικές αποδοχές', '02': 'Αποδοχές υπαλλήλων ΝΠΔΔ κλπ.', '03': 'Δώρο Χριστουγέννων',

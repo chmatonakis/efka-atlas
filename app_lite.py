@@ -201,6 +201,21 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# Google Analytics (GA4)
+components.html(
+    """
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-PDYEH50X5W"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-PDYEH50X5W');
+    </script>
+    """,
+    height=0
+)
+
 def get_section() -> str:
     try:
         section = st.query_params.get("section", "summary")
