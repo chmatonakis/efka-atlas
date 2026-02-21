@@ -1558,6 +1558,153 @@ def compute_parallel_months(base_df: pd.DataFrame) -> list[tuple[int, int]]:
 
     return valid_months
 
+def compute_applied_monthly_day_caps(data_df: pd.DataFrame) -> list[dict]:
+    """Μήνες/πακέτα (μη-ΙΚΑ) όπου εφαρμόστηκε cap 25 ημερών στην Καταμέτρηση."""
+    required_cols = {'Από', 'Έως', 'Ημέρες', 'Κλάδος/Πακέτο Κάλυψης'}
+    if not required_cols.issubset(set(data_df.columns)):
+        return []
+
+    excluded_packages = {'Α', 'Λ', 'Υ', 'Ο', 'Χ', '899'}
+    monthly_rows: list[dict] = []
+
+    for _, row in data_df.iterrows():
+        try:
+            start_dt = pd.to_datetime(row.get('Από'), format='%d/%m/%Y', errors='coerce')
+            end_dt = pd.to_datetime(row.get('Έως'), format='%d/%m/%Y', errors='coerce')
+            if pd.isna(start_dt) or pd.isna(end_dt):
+                continue
+
+            package = str(row.get('Κλάδος/Πακέτο Κάλυψης', '')).strip()
+            if not package or package.upper() in excluded_packages:
+                continue
+
+            days_val = clean_numeric_value(row.get('Ημέρες')) or 0.0
+            gross_val = clean_numeric_value(row.get('Μικτές αποδοχές'), exclude_drx=True)
+            raw_contrib = str(row.get('Συνολικές εισφορές', ''))
+            if 'ΔΡΧ' in raw_contrib.upper() or 'DRX' in raw_contrib.upper():
+                contrib_val = 0.0
+            else:
+                contrib_val = clean_numeric_value(raw_contrib, exclude_drx=True)
+            gross_val = gross_val if gross_val is not None else 0.0
+            contrib_val = contrib_val if contrib_val is not None else 0.0
+
+            sign = get_negative_amount_sign(gross_val, contrib_val)
+            if sign == -1:
+                days_val = -abs(days_val)
+
+            curr = start_dt.replace(day=1)
+            end_month_dt = end_dt.replace(day=1)
+            months_list = []
+            while curr <= end_month_dt:
+                months_list.append(curr)
+                if curr.month == 12:
+                    curr = curr.replace(year=curr.year + 1, month=1)
+                else:
+                    curr = curr.replace(month=curr.month + 1)
+
+            if not months_list:
+                continue
+
+            days_per_month = days_val / len(months_list)
+            tameio = str(row.get('Ταμείο', '')).strip()
+            for m_dt in months_list:
+                monthly_rows.append({
+                    'Έτος': int(m_dt.year),
+                    'Μήνας': int(m_dt.month),
+                    'Ταμείο': tameio,
+                    'Πακέτο': package,
+                    'Ημέρες': float(days_per_month)
+                })
+        except Exception:
+            continue
+
+    if not monthly_rows:
+        return []
+
+    m_df = pd.DataFrame(monthly_rows)
+    grouped = m_df.groupby(['Έτος', 'Μήνας', 'Ταμείο', 'Πακέτο'], as_index=False)['Ημέρες'].sum()
+    grouped['is_ika'] = grouped['Ταμείο'].astype(str).str.upper().str.contains('ΙΚΑ|IKA', na=False)
+    capped = grouped[(~grouped['is_ika']) & (grouped['Ημέρες'] > 25)].copy()
+    if capped.empty:
+        return []
+
+    capped = capped.sort_values(['Έτος', 'Μήνας', 'Ταμείο', 'Πακέτο'])
+    return capped[['Έτος', 'Μήνας', 'Ταμείο', 'Πακέτο', 'Ημέρες']].to_dict('records')
+
+def compute_summary_capped_days_by_group(
+    summary_df: pd.DataFrame,
+    group_keys: list[str],
+    month_days: int = 25,
+    year_days: int = 300
+) -> pd.DataFrame:
+    """Υπολογίζει capped συνολικές ημέρες (Έτη/Μήνες/Ημέρες) ανά group της Συνοπτικής Αναφοράς."""
+    required_cols = {'Από', 'Έως'}
+    if not required_cols.issubset(set(summary_df.columns)):
+        return pd.DataFrame(columns=group_keys + ['Συνολικές_Ημέρες_cap'])
+
+    # Ρητά: το cap εφαρμόζεται ανά Πακέτο (+Ταμείο), όχι ανά Τύπο Αποδοχών.
+    cap_group_keys = ['Κλάδος/Πακέτο Κάλυψης']
+    if 'Ταμείο' in group_keys and 'Ταμείο' in summary_df.columns:
+        cap_group_keys.append('Ταμείο')
+
+    work_df = summary_df.copy()
+    if 'Κλάδος/Πακέτο Κάλυψης' in work_df.columns:
+        work_df['Κλάδος/Πακέτο Κάλυψης'] = work_df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
+    if 'Ταμείο' in work_df.columns:
+        work_df['Ταμείο'] = work_df['Ταμείο'].astype(str).str.strip()
+
+    monthly_rows: list[dict] = []
+    for _, row in work_df.iterrows():
+        try:
+            start_dt = pd.to_datetime(row.get('Από'), format='%d/%m/%Y', errors='coerce')
+            end_dt = pd.to_datetime(row.get('Έως'), format='%d/%m/%Y', errors='coerce')
+            if pd.isna(start_dt) or pd.isna(end_dt):
+                continue
+
+            years_val = clean_numeric_value(row.get('Έτη')) or 0.0
+            months_val = clean_numeric_value(row.get('Μήνες')) or 0.0
+            days_val = clean_numeric_value(row.get('Ημέρες')) or 0.0
+            total_days_val = (years_val * year_days) + (months_val * month_days) + days_val
+            curr = start_dt.replace(day=1)
+            end_month_dt = end_dt.replace(day=1)
+            months_list = []
+            while curr <= end_month_dt:
+                months_list.append(curr)
+                if curr.month == 12:
+                    curr = curr.replace(year=curr.year + 1, month=1)
+                else:
+                    curr = curr.replace(month=curr.month + 1)
+
+            if not months_list:
+                continue
+
+            days_per_month = total_days_val / len(months_list)
+            base_rec = {k: row.get(k, '') for k in cap_group_keys}
+            for m_dt in months_list:
+                rec = dict(base_rec)
+                rec['Έτος'] = int(m_dt.year)
+                rec['Μήνας'] = int(m_dt.month)
+                rec['Συνολικές_Ημέρες'] = float(days_per_month)
+                monthly_rows.append(rec)
+        except Exception:
+            continue
+
+    if not monthly_rows:
+        return pd.DataFrame(columns=cap_group_keys + ['Συνολικές_Ημέρες_cap'])
+
+    monthly_df = pd.DataFrame(monthly_rows)
+    per_month = monthly_df.groupby(cap_group_keys + ['Έτος', 'Μήνας'], as_index=False)['Συνολικές_Ημέρες'].sum()
+
+    if 'Ταμείο' in per_month.columns:
+        non_ika_mask = ~per_month['Ταμείο'].astype(str).str.upper().str.contains('ΙΚΑ|IKA', na=False)
+    else:
+        non_ika_mask = pd.Series(True, index=per_month.index)
+
+    per_month['Συνολικές_Ημέρες_cap'] = per_month['Συνολικές_Ημέρες']
+    per_month.loc[non_ika_mask, 'Συνολικές_Ημέρες_cap'] = per_month.loc[non_ika_mask, 'Συνολικές_Ημέρες_cap'].clip(upper=25)
+
+    return per_month.groupby(cap_group_keys, as_index=False)['Συνολικές_Ημέρες_cap'].sum()
+
 def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | None = None) -> pd.DataFrame:
     audit_rows = []
 
@@ -1949,6 +2096,39 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
     except Exception:
         pass
 
+    # Check 10: Μήνες/Πακέτα με εφαρμογή ανώτατου ορίου 25 ημερών (μη-ΙΚΑ)
+    try:
+        capped_months = compute_applied_monthly_day_caps(data_df)
+        if capped_months:
+            details = []
+            for rec in capped_months[:30]:
+                mm = int(rec.get('Μήνας', 0))
+                yy = int(rec.get('Έτος', 0))
+                package = str(rec.get('Πακέτο', '')).strip()
+                fund = str(rec.get('Ταμείο', '')).strip() or '-'
+                raw_days = float(rec.get('Ημέρες', 0))
+                details.append(f"{mm:02d}/{yy} - {fund} - Πακέτο {package} ({raw_days:.1f} -> 25)")
+            if len(capped_months) > 30:
+                details.append("...")
+
+            audit_rows.append({
+                'A/A': 10,
+                'Έλεγχος': 'Εφαρμογή ορίου 25 ημερών',
+                'Εύρημα': f"{len(capped_months)} μήνες/πακέτα",
+                'Λεπτομέρειες': "<br>".join(details),
+                'Ενέργειες': 'Εφαρμόστηκε ανώτατο όριο 25 ημερών ανά μήνα στην Καταμέτρηση για μη-ΙΚΑ ταμεία'
+            })
+        else:
+            audit_rows.append({
+                'A/A': 10,
+                'Έλεγχος': 'Εφαρμογή ορίου 25 ημερών',
+                'Εύρημα': 'Καμία',
+                'Λεπτομέρειες': '-',
+                'Ενέργειες': '-'
+            })
+    except Exception:
+        pass
+
     return pd.DataFrame(audit_rows)
 
 def build_summary_grouped_display(summary_df: pd.DataFrame, source_df: pd.DataFrame, basis_label: str | None = None) -> pd.DataFrame:
@@ -1974,20 +2154,6 @@ def build_summary_grouped_display(summary_df: pd.DataFrame, source_df: pd.DataFr
     if 'Ταμείο' in summary_df.columns:
         group_keys.append('Ταμείο')
 
-    grouped = summary_df.groupby(group_keys).agg({
-        'Από_dt': 'min',
-        'Έως_dt': 'max',
-        'Έτη': 'sum',
-        'Μήνες': 'sum',
-        'Ημέρες': 'sum',
-        'Μικτές αποδοχές': 'sum',
-        'Συνολικές εισφορές': 'sum'
-    }).reset_index()
-
-    grouped['Από'] = grouped['Από_dt'].dt.strftime('%d/%m/%Y')
-    grouped['Έως'] = grouped['Έως_dt'].dt.strftime('%d/%m/%Y')
-    grouped = grouped.drop(columns=['Από_dt', 'Έως_dt'])
-
     if basis_label is None:
         try:
             basis_label = st.session_state.get('ins_days_basis', 'Μήνας = 25, Έτος = 300')
@@ -1999,11 +2165,42 @@ def build_summary_grouped_display(summary_df: pd.DataFrame, source_df: pd.DataFr
     else:
         month_days, year_days = 25, 300
 
-    grouped['Συνολικές ημέρες'] = (
+    grouped = summary_df.groupby(group_keys).agg({
+        'Από_dt': 'min',
+        'Έως_dt': 'max',
+        'Έτη': 'sum',
+        'Μήνες': 'sum',
+        'Ημέρες': 'sum',
+        'Μικτές αποδοχές': 'sum',
+        'Συνολικές εισφορές': 'sum'
+    }).reset_index()
+
+    # Cap μήνα-μήνα πάνω στο ισοδύναμο ημερών (Έτη/Μήνες/Ημέρες), χωρίς διάκριση Τύπου Αποδοχών.
+    raw_total_days = (
         grouped['Ημέρες'].fillna(0) +
         grouped['Μήνες'].fillna(0) * month_days +
         grouped['Έτη'].fillna(0) * year_days
-    ).round(0).astype(int)
+    )
+    capped_days = compute_summary_capped_days_by_group(summary_df, group_keys, month_days=month_days, year_days=year_days)
+    if not capped_days.empty:
+        grouped = grouped.merge(capped_days, on=group_keys, how='left')
+        total_days = grouped['Συνολικές_Ημέρες_cap'].fillna(raw_total_days)
+        grouped = grouped.drop(columns=['Συνολικές_Ημέρες_cap'])
+    else:
+        total_days = raw_total_days
+
+    grouped['Συνολικές ημέρες'] = total_days.round(0).astype(int)
+    years_series = (grouped['Συνολικές ημέρες'].astype(float) // year_days)
+    remaining_after_years = grouped['Συνολικές ημέρες'].astype(float) - (years_series * year_days)
+    months_series = (remaining_after_years // month_days)
+    days_series = remaining_after_years - (months_series * month_days)
+    grouped['Έτη'] = years_series
+    grouped['Μήνες'] = months_series
+    grouped['Ημέρες'] = days_series
+
+    grouped['Από'] = grouped['Από_dt'].dt.strftime('%d/%m/%Y')
+    grouped['Έως'] = grouped['Έως_dt'].dt.strftime('%d/%m/%Y')
+    grouped = grouped.drop(columns=['Από_dt', 'Έως_dt'])
 
     record_counts = summary_df.groupby(group_keys).size().reset_index(name='Αριθμός Εγγραφών')
     summary_final = grouped.merge(record_counts, on=group_keys, how='left')
@@ -2214,6 +2411,13 @@ def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] |
 
     month_cols_int = sorted([c for c in final_val.columns if isinstance(c, int)])
     final_val = final_val[['ΣΥΝΟΛΟ'] + month_cols_int + ['ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ']]
+
+    # Ανώτατο 25 ημέρες/μήνα ανά κλάδο-πακέτο, εκτός ΙΚΑ
+    tameio_level = final_val.index.get_level_values('ΤΑΜΕΙΟ').astype(str).str.upper()
+    is_ika = tameio_level.str.contains('ΙΚΑ', na=False)
+    for m in month_cols_int:
+        final_val.loc[~is_ika, m] = final_val.loc[~is_ika, m].clip(upper=25)
+    final_val['ΣΥΝΟΛΟ'] = final_val[month_cols_int].sum(axis=1)
 
     if 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ' in final_val.columns and 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ' in final_val.columns:
         final_val['ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ'] = pd.NA
@@ -3393,6 +3597,39 @@ def show_results_page(df, filename):
                             audit_rows.append({'A/A': 9, 'Έλεγχος': 'Ενοποιημένα διαστήματα', 'Εύρημα': 'Κανένα', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
                 except Exception: pass
 
+                # Check 10: Μήνες/Πακέτα με εφαρμογή ανώτατου ορίου 25 ημερών (μη-ΙΚΑ)
+                try:
+                    capped_months = compute_applied_monthly_day_caps(data_df)
+                    if capped_months:
+                        details = []
+                        for rec in capped_months[:30]:
+                            mm = int(rec.get('Μήνας', 0))
+                            yy = int(rec.get('Έτος', 0))
+                            package = str(rec.get('Πακέτο', '')).strip()
+                            fund = str(rec.get('Ταμείο', '')).strip() or '-'
+                            raw_days = float(rec.get('Ημέρες', 0))
+                            details.append(f"{mm:02d}/{yy} - {fund} - Πακέτο {package} ({raw_days:.1f} -> 25)")
+                        if len(capped_months) > 30:
+                            details.append("...")
+
+                        audit_rows.append({
+                            'A/A': 10,
+                            'Έλεγχος': 'Εφαρμογή ορίου 25 ημερών',
+                            'Εύρημα': f"{len(capped_months)} μήνες/πακέτα",
+                            'Λεπτομέρειες': "<br>".join(details),
+                            'Ενέργειες': 'Εφαρμόστηκε ανώτατο όριο 25 ημερών ανά μήνα στην Καταμέτρηση για μη-ΙΚΑ ταμεία'
+                        })
+                    else:
+                        audit_rows.append({
+                            'A/A': 10,
+                            'Έλεγχος': 'Εφαρμογή ορίου 25 ημερών',
+                            'Εύρημα': 'Καμία',
+                            'Λεπτομέρειες': '-',
+                            'Ενέργειες': '-'
+                        })
+                except Exception:
+                    pass
+
                 return pd.DataFrame(audit_rows)
 
             st.markdown("### Βασικοί έλεγχοι δεδομένων")
@@ -3413,7 +3650,7 @@ def show_results_page(df, filename):
                 
                 details_val = row['Λεπτομέρειες'] if row['Λεπτομέρειες'] != '-' else ""
                 if details_val:
-                    if row['A/A'] == 9:
+                    if row['A/A'] in [9, 10]:
                         details_html = f'<div style="margin-top: 4px; color: #555; font-size: 0.95rem; columns: 2; -webkit-columns: 2; column-gap: 16px;">{details_val}</div>'
                     else:
                         details_html = f'<div style="margin-top: 4px; color: #555; font-size: 0.95rem;">{details_val}</div>'
@@ -3469,7 +3706,7 @@ def show_results_page(df, filename):
 
             # Column 3: 9
             with ac3:
-                for aa in [9]:
+                for aa in [9, 10]:
                     r = audit_df[audit_df['A/A'] == aa]
                     if not r.empty: render_check(r.iloc[0])
             
@@ -3578,22 +3815,39 @@ def show_results_page(df, filename):
                 'Μικτές αποδοχές': 'sum',
                 'Συνολικές εισφορές': 'sum'
             }).reset_index()
-            # Μορφοποίηση ημερομηνιών ξανά σε dd/mm/yyyy
-            grouped['Από'] = grouped['Από_dt'].dt.strftime('%d/%m/%Y')
-            grouped['Έως'] = grouped['Έως_dt'].dt.strftime('%d/%m/%Y')
-            grouped = grouped.drop(columns=['Από_dt', 'Έως_dt'])
 
-            # Υπολογισμός «Συνολικές ημέρες» βάσει παραμέτρων από την αναφορά ημερών
             basis_label = st.session_state.get('ins_days_basis', 'Μήνας = 25, Έτος = 300')
             if str(basis_label).startswith('Μήνας = 30'):
                 month_days, year_days = 30, 360
             else:
                 month_days, year_days = 25, 300
-            grouped['Συνολικές ημέρες'] = (
+
+            raw_total_days = (
                 grouped['Ημέρες'].fillna(0) +
                 grouped['Μήνες'].fillna(0) * month_days +
                 grouped['Έτη'].fillna(0) * year_days
-            ).round(0).astype(int)
+            )
+            capped_days = compute_summary_capped_days_by_group(summary_df, group_keys, month_days=month_days, year_days=year_days)
+            if not capped_days.empty:
+                grouped = grouped.merge(capped_days, on=group_keys, how='left')
+                total_days = grouped['Συνολικές_Ημέρες_cap'].fillna(raw_total_days)
+                grouped = grouped.drop(columns=['Συνολικές_Ημέρες_cap'])
+            else:
+                total_days = raw_total_days
+
+            grouped['Συνολικές ημέρες'] = total_days.round(0).astype(int)
+            years_series = (grouped['Συνολικές ημέρες'].astype(float) // year_days)
+            remaining_after_years = grouped['Συνολικές ημέρες'].astype(float) - (years_series * year_days)
+            months_series = (remaining_after_years // month_days)
+            days_series = remaining_after_years - (months_series * month_days)
+            grouped['Έτη'] = years_series
+            grouped['Μήνες'] = months_series
+            grouped['Ημέρες'] = days_series
+
+            # Μορφοποίηση ημερομηνιών ξανά σε dd/mm/yyyy
+            grouped['Από'] = grouped['Από_dt'].dt.strftime('%d/%m/%Y')
+            grouped['Έως'] = grouped['Έως_dt'].dt.strftime('%d/%m/%Y')
+            grouped = grouped.drop(columns=['Από_dt', 'Έως_dt'])
             
             # Μετράμε τις εγγραφές για κάθε συνδυασμό (Κλάδος, Ταμείο)
             record_counts = summary_df.groupby(group_keys).size().reset_index(name='Αριθμός Εγγραφών')
@@ -5518,6 +5772,13 @@ def show_results_page(df, filename):
                 # Reorder columns: Keys | ΣΥΝΟΛΟ | 1..12 | MIKTES | EISFORES
                 month_cols_int = sorted([c for c in final_val.columns if isinstance(c, int)])
                 final_val = final_val[['ΣΥΝΟΛΟ'] + month_cols_int + ['ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ']]
+
+                # Ανώτατο 25 ημέρες/μήνα ανά κλάδο-πακέτο, εκτός ΙΚΑ
+                tameio_level = final_val.index.get_level_values('ΤΑΜΕΙΟ').astype(str).str.upper()
+                is_ika = tameio_level.str.contains('ΙΚΑ', na=False)
+                for m in month_cols_int:
+                    final_val.loc[~is_ika, m] = final_val.loc[~is_ika, m].clip(upper=25)
+                final_val['ΣΥΝΟΛΟ'] = final_val[month_cols_int].sum(axis=1)
                 
                 # Calculate contribution percentage (per row)
                 if 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ' in final_val.columns and 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ' in final_val.columns:

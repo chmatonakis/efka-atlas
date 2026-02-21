@@ -424,13 +424,19 @@ if st.session_state.get("lite_show_disclaimer"):
     show_disclaimer_dialog()
 
 description_map = build_description_map(df)
+excluded_packages = {"Α", "Λ", "Υ", "Ο", "Χ", "899"}
+if 'Κλάδος/Πακέτο Κάλυψης' in df.columns:
+    pkg_series = df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
+    count_df = df[~pkg_series.isin(excluded_packages)].copy()
+else:
+    count_df = df.copy()
 
 # --- FULL WIDTH REPORT OUTPUT ---
 if section == "all":
     audit_df = generate_audit_report(df)
     display_summary = build_summary_grouped_display(df, df) if 'Κλάδος/Πακέτο Κάλυψης' in df.columns else pd.DataFrame()
     final_display_df, _, _, _, print_style_rows = build_count_report(
-        df,
+        count_df,
         description_map=description_map,
         show_count_totals_only=False
     )
