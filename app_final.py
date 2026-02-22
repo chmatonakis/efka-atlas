@@ -48,6 +48,23 @@ def get_last_update_date():
         # Fallback to current date if git command fails
         return ""
 
+def parse_birthdate_and_age(birthdate_str: str) -> tuple[str, int | None]:
+    """Επιστρέφει κανονικοποιημένη ημ/νία γέννησης (dd/mm/yyyy) και ηλικία σήμερα."""
+    raw = str(birthdate_str or "").strip()
+    if not raw:
+        return "", None
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            bdt = datetime.datetime.strptime(raw, fmt).date()
+            today = datetime.date.today()
+            if bdt > today:
+                return raw, None
+            age = today.year - bdt.year - ((today.month, today.day) < (bdt.month, bdt.day))
+            return bdt.strftime("%d/%m/%Y"), age
+        except Exception:
+            continue
+    return raw, None
+
 # Ρύθμιση σελίδας
 if not os.environ.get("ATLAS_LITE"):
     st.set_page_config(
@@ -234,11 +251,14 @@ st.markdown("""
         box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
     .header-content {
+        position: relative;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        max-width: 1200px;
-        margin: 0 auto;
+        max-width: none;
+        margin: 0;
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
     }
     .header-left {
         display: flex;
@@ -253,15 +273,21 @@ st.markdown("""
     }
     .header-text h1 {
         margin: 0;
-        font-size: 1.5rem;
+        font-size: 1.35rem;
         font-weight: 700;
         letter-spacing: 0.2px;
     }
-    .header-text p {
-        margin: 0.25rem 0 0 0;
-        font-size: 1rem;
-        opacity: 0.9;
+    .header-center {
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 1.25rem;
+        font-weight: 800;
+        letter-spacing: 0.2px;
         color: #ffffff !important;
+        text-align: center;
+        white-space: nowrap;
+        pointer-events: none;
     }
     .header-right { display: flex; gap: 1.5rem; }
     .nav-link { 
@@ -281,6 +307,10 @@ st.markdown("""
         color: #ffffff !important;
         transform: translateY(-1px);
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    div[data-testid="stExpander"] details summary p {
+        font-size: 1.25rem !important;
+        font-weight: 700 !important;
     }
     .upload-section {
         background-color: transparent;
@@ -332,27 +362,20 @@ st.markdown("""
     }
     
     
-    /* EFKA Button Style - Secondary Action */
-    .efka-btn-wrapper {
+    /* Σύνδεσμος κατεβάσματος ΑΤΛΑΣ - απλό κείμενο, όχι κουμπί */
+    .efka-link-wrapper {
         text-align: center;
-        margin: 2rem 0;
+        margin: 1.5rem 0;
     }
-    .efka-btn {
-        display: inline-block;
-        background-color: transparent;
+    .efka-link {
         color: #0056b3 !important;
-        border: 2px solid #0056b3;
-        padding: 0.6rem 1.5rem;
-        border-radius: 50px;
-        text-decoration: none !important;
-        font-weight: 600;
-        font-size: 0.95rem;
-        transition: all 0.2s ease;
+        text-decoration: none;
+        font-weight: 400;
+        font-size: 1rem;
     }
-    .efka-btn:hover {
-        background-color: #eef6fc;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 8px rgba(0, 86, 179, 0.1);
+    .efka-link:hover {
+        text-decoration: underline;
+        color: #003d82 !important;
     }
     
     /* Οδηγίες Box - Modern Style */
@@ -615,6 +638,7 @@ def wrap_print_html(title: str, body_html: str, auto_print: bool = True, scale: 
     .page-break {{ page-break-after: always; }}
     .print-client-name {{ font-size: 28px; font-weight: 700; text-align: center; margin: 0; color: #111827; }}
     .print-client-amka {{ font-size: 15px; text-align: center; margin: 2px 0 10px 0; color: #4b5563; }}
+    .print-client-birthdate {{ font-size: 15px; text-align: center; margin: 2px 0 10px 0; color: #4b5563; }}
     .print-description {{ font-size: 15px; text-align: center; color: #4b5563; margin: 0 0 8px 0; }}
     .print-filters {{ font-size: 12px; margin: 0 0 10px 0; color: #374151; }}
     .print-filters-label {{ font-weight: 600; margin-bottom: 2px; }}
@@ -651,14 +675,17 @@ def build_print_html(
     style_rows: list[dict[str, str]] | None = None,
     client_name: str | None = None,
     client_amka: str | None = None,
+    client_birthdate: str | None = None,
     auto_print: bool = True,
     scale: float = 1.0,
     wrap_cells: bool = False,
 ) -> str:
     client_name = (client_name or '').strip()
     client_amka = (client_amka or '').strip()
+    client_birthdate = (client_birthdate or '').strip()
     name_html = f"<div class='print-client-name'>{html.escape(client_name)}</div>" if client_name else ''
     amka_html = f"<div class='print-client-amka'>ΑΜΚΑ: {html.escape(client_amka)}</div>" if client_amka else ''
+    birthdate_html = f"<div class='print-client-birthdate'>Ημ/νία γέννησης: {html.escape(client_birthdate)}</div>" if client_birthdate else ''
     description_html = f"<p class='print-description'>{html.escape(description)}</p>" if description else ''
     filters_html = build_print_filters_html(filters)
     table_html = build_print_table_html(dataframe, style_rows, wrap_cells=wrap_cells)
@@ -667,6 +694,7 @@ def build_print_html(
     body_html = (
         f"{name_html}"
         f"{amka_html}"
+        f"{birthdate_html}"
         f"<h1>{html.escape(title)}</h1>"
         f"{description_html}"
         f"{filters_html}"
@@ -703,6 +731,7 @@ def render_print_button(
             window_name = f"printwin_{button_key}_{nonce}"
             client_name = st.session_state.get('print_client_name', '').strip()
             client_amka = st.session_state.get('print_client_amka', '').strip()
+            client_birthdate = st.session_state.get('print_client_birthdate', '').strip()
             html_content = build_print_html(
                 title=title,
                 dataframe=dataframe,
@@ -711,6 +740,7 @@ def render_print_button(
                 style_rows=style_rows,
                 client_name=client_name,
                 client_amka=client_amka,
+                client_birthdate=client_birthdate,
                 scale=scale
             )
 
@@ -1267,10 +1297,14 @@ def find_gaps_in_insurance_data(df):
         if start > current_end + pd.Timedelta(days=1):
             gap_start = current_end + pd.Timedelta(days=1)
             gap_end = start - pd.Timedelta(days=1)
+            calendar_days = (gap_end - gap_start).days + 1
+            # Εκτίμηση ημερών ασφάλισης: κάθε 30 ημερολογιακές ημέρες -> 25 ημέρες ασφάλισης (στρογγυλοποίηση προς τα κάτω)
+            insured_days_est = int((calendar_days * 25) // 30)
             gaps.append({
                 'Από': gap_start.strftime('%d/%m/%Y'),
                 'Έως': gap_end.strftime('%d/%m/%Y'),
-                'Ημερολογιακές ημέρες': (gap_end - gap_start).days + 1,
+                'Ημερολογιακές ημέρες': calendar_days,
+                'Ημέρες Ασφ.': insured_days_est,
                 'Μήνες': round((gap_end - gap_start).days / 30.44, 1),
                 'Έτη': round((gap_end - gap_start).days / 365.25, 1)
             })
@@ -1705,6 +1739,204 @@ def compute_summary_capped_days_by_group(
 
     return per_month.groupby(cap_group_keys, as_index=False)['Συνολικές_Ημέρες_cap'].sum()
 
+def _get_gemini_api_key() -> str:
+    key = os.getenv("GEMINI_API_KEY", "").strip()
+    if key:
+        return key
+    try:
+        sec = st.secrets.get("GEMINI_API_KEY", "")
+        return str(sec).strip() if sec else ""
+    except Exception:
+        return ""
+
+def _df_to_records_for_ai(df: pd.DataFrame, max_rows: int = 80) -> list[dict]:
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return []
+    safe_df = df.copy()
+    safe_df = safe_df.replace({pd.NA: None})
+    if len(safe_df) > max_rows:
+        safe_df = safe_df.head(max_rows)
+    records = safe_df.to_dict(orient='records')
+    cleaned: list[dict] = []
+    for rec in records:
+        row: dict = {}
+        for k, v in rec.items():
+            key = str(k)
+            if isinstance(v, (pd.Timestamp, datetime.datetime, datetime.date)):
+                row[key] = v.strftime('%d/%m/%Y')
+            elif pd.isna(v):
+                row[key] = None
+            else:
+                row[key] = v
+        cleaned.append(row)
+    return cleaned
+
+def _extract_json_object(text: str) -> dict | None:
+    if not text:
+        return None
+    raw = str(text).strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\s*```$", "", raw)
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(0))
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+def generate_ai_case_summary(
+    audit_df: pd.DataFrame,
+    summary_df: pd.DataFrame,
+    count_df: pd.DataFrame,
+    metadata: dict | None = None,
+    model_name: str = "gemini-2.5-flash"
+) -> dict:
+    """
+    Παράγει AI σύνοψη φακέλου με Gemini.
+    Επιστρέφει dict:
+      - {'ok': True, 'data': {...}, 'raw_text': '...'}
+      - {'ok': False, 'error': '...'}
+    """
+    api_key = _get_gemini_api_key()
+    if not api_key:
+        return {
+            'ok': False,
+            'error': "Δεν βρέθηκε GEMINI_API_KEY. Ορίστε env var ή Streamlit secret."
+        }
+
+    try:
+        import google.generativeai as genai
+    except Exception:
+        return {
+            'ok': False,
+            'error': "Λείπει το package google-generativeai. Προσθέστε το στα requirements."
+        }
+
+    system_prompt = (
+        "Είσαι βοηθός επαγγελματία συμβούλου συντάξεων. "
+        "Αναλύεις μόνο τα δεδομένα που δίνονται και δεν κάνεις νομική κρίση. "
+        "Μην εφευρίσκεις αριθμούς ή γεγονότα. "
+        "Απάντησε αποκλειστικά σε έγκυρο JSON."
+    )
+    def _retry_after_seconds(err_text: str) -> int | None:
+        m = re.search(r"retry_delay[^0-9]*seconds[^0-9]*(\d+)", err_text or "", flags=re.IGNORECASE)
+        if not m:
+            return None
+        try:
+            return int(m.group(1))
+        except Exception:
+            return None
+
+    def _is_quota_error(err_text: str) -> bool:
+        t = (err_text or "").lower()
+        return ("quota" in t) or ("429" in t) or ("rate limit" in t) or ("resource_exhausted" in t)
+
+    def _run_once(run_model: str, audit_rows: int, summary_rows: int, count_rows: int) -> dict:
+        payload = {
+            'metadata': metadata or {},
+            'audit_findings': _df_to_records_for_ai(audit_df, max_rows=audit_rows),
+            'summary_rows': _df_to_records_for_ai(summary_df, max_rows=summary_rows),
+            'count_rows': _df_to_records_for_ai(count_df, max_rows=count_rows),
+        }
+        user_prompt = (
+            "Παράγαγε δομημένη σύνοψη φακέλου στα Ελληνικά. "
+            "Επέστρεψε JSON με ακριβώς τα πεδία: "
+            "executive_summary (string), "
+            "critical_findings (array of strings), "
+            "data_gaps (array of strings), "
+            "recommended_actions (array of strings), "
+            "confidence (object με level: High|Medium|Low και reasons: array), "
+            "disclaimer (string).\n\n"
+            "Δεδομένα φακέλου:\n"
+            f"{json.dumps(payload, ensure_ascii=False)}"
+        )
+        try:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel(model_name=run_model)
+            response = model.generate_content([system_prompt, user_prompt])
+            raw_text = getattr(response, 'text', '') or ''
+            parsed = _extract_json_object(raw_text)
+            return {'ok': bool(parsed), 'raw_text': raw_text, 'parsed': parsed, 'model_used': run_model}
+        except Exception as e:
+            err_text = str(e)
+            return {
+                'ok': False,
+                'error': f"Αποτυχία κλήσης Gemini: {err_text}",
+                'model_used': run_model,
+                'is_quota': _is_quota_error(err_text),
+                'retry_after_seconds': _retry_after_seconds(err_text)
+            }
+
+    # 1η προσπάθεια με το επιλεγμένο μοντέλο (συμπιεσμένο payload)
+    first = _run_once(model_name, audit_rows=20, summary_rows=35, count_rows=45)
+    if first.get('ok') and isinstance(first.get('parsed'), dict):
+        parsed = first['parsed']
+        required = ['executive_summary', 'critical_findings', 'data_gaps', 'recommended_actions', 'confidence', 'disclaimer']
+        missing = [k for k in required if k not in parsed]
+        if not missing:
+            return {'ok': True, 'data': parsed, 'raw_text': first.get('raw_text', ''), 'model_used': first.get('model_used')}
+
+    # Fallback σε Flash όταν το αρχικό ήταν Pro ή όταν η απάντηση δεν ήταν έγκυρη JSON.
+    should_fallback = (model_name != "gemini-2.5-flash")
+    if should_fallback:
+        second = _run_once("gemini-2.5-flash", audit_rows=12, summary_rows=20, count_rows=25)
+        if second.get('ok') and isinstance(second.get('parsed'), dict):
+            parsed = second['parsed']
+            required = ['executive_summary', 'critical_findings', 'data_gaps', 'recommended_actions', 'confidence', 'disclaimer']
+            missing = [k for k in required if k not in parsed]
+            if not missing:
+                return {
+                    'ok': True,
+                    'data': parsed,
+                    'raw_text': second.get('raw_text', ''),
+                    'model_used': second.get('model_used'),
+                    'fallback_used': True
+                }
+        # Αν και η 2η απόπειρα αποτύχει με quota, γύρνα ανθρώπινο μήνυμα.
+        if second.get('is_quota'):
+            retry_s = second.get('retry_after_seconds')
+            user_msg = "Υπέρβαση ορίου (quota) στο Gemini."
+            if retry_s:
+                user_msg += f" Δοκιμάστε ξανά σε περίπου {retry_s} δευτερόλεπτα."
+            return {
+                'ok': False,
+                'error': user_msg,
+                'retry_after_seconds': retry_s,
+                'raw_error': second.get('error', '')
+            }
+        return {
+            'ok': False,
+            'error': second.get('error', "Το AI δεν επέστρεψε έγκυρο JSON."),
+            'raw_text': second.get('raw_text', '')
+        }
+
+    # Χωρίς fallback (ήδη Flash): δώσε καλύτερο μήνυμα quota ή generic.
+    if first.get('is_quota'):
+        retry_s = first.get('retry_after_seconds')
+        user_msg = "Υπέρβαση ορίου (quota) στο Gemini."
+        if retry_s:
+            user_msg += f" Δοκιμάστε ξανά σε περίπου {retry_s} δευτερόλεπτα."
+        return {
+            'ok': False,
+            'error': user_msg,
+            'retry_after_seconds': retry_s,
+            'raw_error': first.get('error', '')
+        }
+
+    return {
+        'ok': False,
+        'error': first.get('error', "Το AI δεν επέστρεψε έγκυρο JSON."),
+        'raw_text': first.get('raw_text', '')
+    }
+
 def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | None = None) -> pd.DataFrame:
     audit_rows = []
 
@@ -1775,11 +2007,16 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
         gaps = find_gaps_in_insurance_data(data_df)
         if not gaps.empty:
             gap_details = []
-            for _, g in gaps.head(3).iterrows():
+            for _, g in gaps.iterrows():
                 duration = g.get('Ημερολογιακές ημέρες', '')
-                gap_details.append(f"Από {g['Από']} έως {g['Έως']} ({duration} ημέρες)")
-            if len(gaps) > 3:
-                gap_details.append("...")
+                insured_days_est = g.get('Ημέρες Ασφ.')
+                if pd.notna(insured_days_est):
+                    gap_details.append(
+                        f"Από {g['Από']} έως {g['Έως']} "
+                        f"({duration} ημερολογιακές ημέρες, εκτίμηση {int(insured_days_est)} ημέρες ασφάλισης)"
+                    )
+                else:
+                    gap_details.append(f"Από {g['Από']} έως {g['Έως']} ({duration} ημερολογιακές ημέρες)")
 
             audit_rows.append({
                 'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης',
@@ -1873,7 +2110,7 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
             audit_rows.append({
                 'A/A': 5, 'Έλεγχος': 'Παράλληλη ασφάλιση',
                 'Εύρημα': 'Πιθανή',
-                'Λεπτομέρειες': 'Βρέθηκαν χρονικά επικαλυπτόμενα διαστήματα ΙΚΑ (01/16/99) & ΟΑΕΕ (Κ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ) ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.',
+                'Λεπτομέρειες': 'Βρέθηκαν χρονικά επικαλυπτόμενα διαστήματα ΙΚΑ (αποδοχές 01, 16, ή 99) & ΟΑΕΕ (Κ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ) ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.',
                 'Ενέργειες': 'Ελέγξτε την καρτέλα "Παράλληλη Ασφάλιση"'
             })
         else:
@@ -1931,7 +2168,7 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
             audit_rows.append({
                 'A/A': 6, 'Έλεγχος': 'Πολλαπλή απασχόληση',
                 'Εύρημα': 'Πιθανή',
-                'Λεπτομέρειες': "Βρέθηκαν μήνες με > 1 εργοδότες για ΙΚΑ (01/16/99).",
+                'Λεπτομέρειες': "Βρέθηκαν μήνες με > 1 εργοδότες για ΙΚΑ (αποδοχές 01, 16, ή 99).",
                 'Ενέργειες': 'Ελέγξτε την καρτέλα "Πολλαπλή"'
             })
         else:
@@ -2793,20 +3030,32 @@ def show_results_page(df, filename):
             description_map[code] = desc
     
     # Professional Header (Compact)
-    st.markdown("""
-    <div class="professional-header">
-        <div class="header-content">
-            <div class="header-left">
-                <div class="header-text">
-                    <h1>Ασφαλιστικό βιογραφικό ΑΤΛΑΣ</h1>
-                </div>
-            </div>
-            <div class="header-right">
-                <a href="." target="_self" class="nav-link">Αρχική</a>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    header_client_name = st.session_state.get('print_client_name', '').strip()
+    header_birthdate = st.session_state.get('print_client_birthdate', '').strip()
+    _, header_age = parse_birthdate_and_age(header_birthdate)
+    header_center_html = ""
+    if header_client_name and header_age is not None:
+        header_center_html = (
+            f"<div class=\"header-center\">{html.escape(header_client_name)} - "
+            f"{int(header_age)} ετών</div>"
+        )
+
+    st.markdown(
+        f"""<div class="professional-header">
+<div class="header-content">
+<div class="header-left">
+<div class="header-text">
+<h1>Ασφαλιστικό βιογραφικό ΑΤΛΑΣ</h1>
+</div>
+</div>
+{header_center_html}
+<div class="header-right">
+<a href="." target="_self" class="nav-link">Αρχική</a>
+</div>
+</div>
+</div>""",
+        unsafe_allow_html=True
+    )
     
     
     
@@ -2943,6 +3192,7 @@ def show_results_page(df, filename):
     # Προ-υπολογισμός ειδοποιήσεων για Tabs
     tab_titles = {
         "summary": "Σύνοψη",
+        "ai_summary": "Σύνοψη AI Beta",
         "count": "Καταμέτρηση",
         "gaps": "Κενά",
         "apd": "Ανάλυση ΑΠΔ",
@@ -2960,7 +3210,7 @@ def show_results_page(df, filename):
                 tab_titles["gaps"] = "❗ Κενά"
         except: pass
 
-        # 2. Πολλαπλή (ίδιος έλεγχος με τη Σύνοψη: ΙΚΑ 01/16/99 & >1 εργοδότες ανά μήνα)
+        # 2. Πολλαπλή (ίδιος έλεγχος με τη Σύνοψη: ΙΚΑ (αποδοχές 01, 16, ή 99) & >1 εργοδότες ανά μήνα)
         try:
             if all(col in df.columns for col in ['Από', 'Έως', 'Α-Μ εργοδότη']):
                 t_df = df.copy()
@@ -3013,7 +3263,7 @@ def show_results_page(df, filename):
         except: pass
 
     # Δημιουργία tabs
-    tab_summary, tab_count, tab_gaps, tab_apd, tab_parallel, tab_multi, tab_main, tab_annex = st.tabs(list(tab_titles.values()))
+    tab_summary, tab_ai_summary, tab_count, tab_gaps, tab_apd, tab_parallel, tab_multi, tab_main, tab_annex = st.tabs(list(tab_titles.values()))
     
     with tab_main:
         # Κύρια δεδομένα (χωρίς τις στήλες από τελευταίες σελίδες)
@@ -3213,6 +3463,75 @@ def show_results_page(df, filename):
             display_df,
             description="Αναλυτική χρονολογική κατάσταση ασφαλιστικών εγγραφών όπως εξήχθησαν από τον e-ΕΦΚΑ και το ασφ. βιογραφικό ΑΤΛΑΣ."
         )
+
+    with tab_ai_summary:
+        st.markdown("### AI Σύνοψη Φακέλου (BETA)")
+        ai_row1, ai_row2, ai_row3 = st.columns([2, 0.7, 1])
+        with ai_row1:
+            st.info("Παράγεται δομημένη σύνοψη φακέλου με βάση τη Σύνοψη, την Καταμέτρηση και τους βασικούς ελέγχους.")
+        with ai_row2:
+            run_ai_main = st.button("Παραγωγή AI Σύνοψης", type="primary", use_container_width=True, key="main_ai_generate")
+        with ai_row3:
+            ai_model_main = st.selectbox(
+                "Μοντέλο Gemini:",
+                options=["gemini-2.5-flash", "gemini-2.5-pro"],
+                index=0,
+                key="main_ai_model"
+            )
+
+        if run_ai_main:
+            with st.spinner("Παραγωγή σύνοψης από AI..."):
+                audit_ai_df = generate_audit_report(df)
+                summary_ai_df = build_summary_grouped_display(df, df) if 'Κλάδος/Πακέτο Κάλυψης' in df.columns else pd.DataFrame()
+                ai_count_df = exclude_unused_packages(df.copy())
+                count_ai_df, _, _, _, _ = build_count_report(
+                    ai_count_df,
+                    description_map=description_map,
+                    show_count_totals_only=False
+                )
+                ai_meta = {
+                    "analysis_date": datetime.date.today().strftime("%d/%m/%Y"),
+                    "source_file": str(filename),
+                    "app": "ATLAS Main"
+                }
+                st.session_state["main_ai_summary_result"] = generate_ai_case_summary(
+                    audit_df=audit_ai_df,
+                    summary_df=summary_ai_df,
+                    count_df=count_ai_df,
+                    metadata=ai_meta,
+                    model_name=ai_model_main
+                )
+
+        ai_main_result = st.session_state.get("main_ai_summary_result")
+        if ai_main_result:
+            if ai_main_result.get("ok"):
+                data = ai_main_result.get("data", {})
+                used_model = ai_main_result.get("model_used", ai_model_main)
+                if ai_main_result.get("fallback_used"):
+                    st.success(f"Η AI σύνοψη δημιουργήθηκε (με fallback σε {used_model}).")
+                else:
+                    st.success(f"Η AI σύνοψη δημιουργήθηκε ({used_model}).")
+                st.markdown(f"**Σύντομη Σύνοψη**: {data.get('executive_summary', '-')}")
+                st.markdown("**Κρίσιμα Ευρήματα**")
+                for item in data.get("critical_findings", []) or []:
+                    st.markdown(f"- {item}")
+                st.markdown("**Κενά / Αβεβαιότητες**")
+                for item in data.get("data_gaps", []) or []:
+                    st.markdown(f"- {item}")
+                st.markdown("**Προτεινόμενες Ενέργειες**")
+                for item in data.get("recommended_actions", []) or []:
+                    st.markdown(f"- {item}")
+                conf = data.get("confidence", {}) if isinstance(data.get("confidence"), dict) else {}
+                st.markdown(f"**Confidence**: {conf.get('level', '-')}")
+                for reason in conf.get("reasons", []) or []:
+                    st.markdown(f"- {reason}")
+                st.info(data.get("disclaimer", "Η σύνοψη είναι υποβοηθητική και απαιτεί επαγγελματικό έλεγχο."))
+            else:
+                st.error(f"Αποτυχία AI σύνοψης: {ai_main_result.get('error', 'Άγνωστο σφάλμα')}")
+                retry_after = ai_main_result.get("retry_after_seconds")
+                if retry_after:
+                    wait_min = max(1, int(round(float(retry_after) / 60)))
+                    st.warning(f"Προτείνεται νέα προσπάθεια σε περίπου {wait_min} λεπτά.")
     
     with tab_annex:
         # Επιπλέον πίνακες (στήλες από τελευταίες σελίδες)
@@ -3247,7 +3566,7 @@ def show_results_page(df, filename):
         
         # --- Audit Report Integration ---
         if not df.empty and 'Από' in df.columns:
-            def generate_audit_report(data_df, extra_data_df=None):
+            def generate_audit_report_local(data_df, extra_data_df=None):
                 audit_rows = []
                 
                 # Check 1: Old/New Insured
@@ -3314,14 +3633,18 @@ def show_results_page(df, filename):
                 try:
                     gaps = find_gaps_in_insurance_data(data_df)
                     if not gaps.empty:
-                        # Format first few gaps
                         gap_details = []
-                        for _, g in gaps.head(3).iterrows():
+                        for _, g in gaps.iterrows():
                             # Fix column name access
                             duration = g.get('Ημερολογιακές ημέρες', '')
-                            gap_details.append(f"Από {g['Από']} έως {g['Έως']} ({duration} ημέρες)")
-                        if len(gaps) > 3:
-                            gap_details.append("...")
+                            insured_days_est = g.get('Ημέρες Ασφ.')
+                            if pd.notna(insured_days_est):
+                                gap_details.append(
+                                    f"Από {g['Από']} έως {g['Έως']} "
+                                    f"({duration} ημερολογιακές ημέρες, εκτίμηση {int(insured_days_est)} ημέρες ασφάλισης)"
+                                )
+                            else:
+                                gap_details.append(f"Από {g['Από']} έως {g['Έως']} ({duration} ημερολογιακές ημέρες)")
                         
                         audit_rows.append({
                             'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης', 
@@ -3387,7 +3710,7 @@ def show_results_page(df, filename):
                          audit_rows.append({
                             'A/A': 5, 'Έλεγχος': 'Παράλληλη ασφάλιση', 
                             'Εύρημα': 'Πιθανή', 
-                            'Λεπτομέρειες': 'Βρέθηκαν χρονικά επικαλυπτόμενα διαστήματα ΙΚΑ (01/16/99) & ΟΑΕΕ (Κ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ) ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.',
+                            'Λεπτομέρειες': 'Βρέθηκαν χρονικά επικαλυπτόμενα διαστήματα ΙΚΑ (αποδοχές 01, 16, ή 99) & ΟΑΕΕ (Κ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ) ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.',
                             'Ενέργειες': 'Ελέγξτε την καρτέλα "Παράλληλη Ασφάλιση"'
                         })
                     else:
@@ -3440,7 +3763,7 @@ def show_results_page(df, filename):
                         audit_rows.append({
                             'A/A': 6, 'Έλεγχος': 'Πολλαπλή απασχόληση', 
                             'Εύρημα': 'Πιθανή', 
-                            'Λεπτομέρειες': f"Βρέθηκαν μήνες με > 1 εργοδότες για ΙΚΑ (01/16/99).",
+                            'Λεπτομέρειες': f"Βρέθηκαν μήνες με > 1 εργοδότες για ΙΚΑ (αποδοχές 01, 16, ή 99).",
                             'Ενέργειες': 'Ελέγξτε την καρτέλα "Πολλαπλή"'
                         })
                     else:
@@ -3633,7 +3956,7 @@ def show_results_page(df, filename):
                 return pd.DataFrame(audit_rows)
 
             st.markdown("### Βασικοί έλεγχοι δεδομένων")
-            audit_df = generate_audit_report(df, extra_df)
+            audit_df = generate_audit_report_local(df, extra_df)
             
             # Custom 3-Column Layout
             ac1, ac2, ac3 = st.columns(3)
@@ -4516,16 +4839,19 @@ def show_results_page(df, filename):
                 st.markdown("#### Εντοπισμένα Κενά Διαστήματα")
                 
                 # Στατιστικά
-                col1, col2, col3, col4 = st.columns(4)
+                col1, col2, col3, col4, col5 = st.columns(5)
                 with col1:
                     st.metric("Συνολικά Κενά", len(gaps_df))
                 with col2:
                     total_days = gaps_df['Ημερολογιακές ημέρες'].sum()
                     st.metric("Συνολικές Ημερολογιακές Ημέρες", format_number_greek(total_days, decimals=0))
                 with col3:
+                    total_insured_days = gaps_df['Ημέρες Ασφ.'].sum() if 'Ημέρες Ασφ.' in gaps_df.columns else 0
+                    st.metric("Εκτίμηση Ημερών Ασφάλισης", format_number_greek(total_insured_days, decimals=0))
+                with col4:
                     total_months = gaps_df['Μήνες'].sum()
                     st.metric("Συνολικοί Μήνες", format_number_greek(total_months, decimals=1))
-                with col4:
+                with col5:
                     total_years = gaps_df['Έτη'].sum()
                     st.metric("Συνολικά Έτη", format_number_greek(total_years, decimals=1))
                 
@@ -4533,7 +4859,7 @@ def show_results_page(df, filename):
                 display_gaps = gaps_df.copy()
                 
                 # Εφαρμόζουμε ελληνική μορφοποίηση για αριθμητικές στήλες
-                numeric_cols_gaps = ['Ημερολογιακές ημέρες', 'Μήνες', 'Έτη']
+                numeric_cols_gaps = ['Ημερολογιακές ημέρες', 'Ημέρες Ασφ.', 'Μήνες', 'Έτη']
                 for col in numeric_cols_gaps:
                     if col in display_gaps.columns:
                         # Μήνες και Έτη με 1 δεκαδικό, ημέρες χωρίς δεκαδικά
@@ -4554,15 +4880,6 @@ def show_results_page(df, filename):
                     gaps_df,
                     description="Χρονικές περίοδοι όπου δεν βρέθηκε ασφαλιστική κάλυψη μεταξύ των δηλωμένων εγγραφών."
                 )
-                
-                # Συμβουλές
-                st.markdown("#### Συμβουλές")
-                if len(gaps_df) > 0:
-                    st.warning("Σημαντικό: Τα εντοπισμένα κενά διαστήματα μπορεί να επηρεάσουν τη θεμελίωση δικαιώματος για σύνταξη (εξαγορά, ασφαλιστικός δεσμός για μειωμένη σύνταξη).")
-                    
-                    # Εμφάνιση του μεγαλύτερου κενού
-                    max_gap = gaps_df.loc[gaps_df['Ημερολογιακές ημέρες'].idxmax()]
-                    st.info(f"Μεγαλύτερο κενό: {max_gap['Από']} - {max_gap['Έως']} ({max_gap['Ημερολογιακές ημέρες']} ημερολογιακές ημέρες)")
             else:
                 st.success("Καμία κενή περίοδος δεν εντοπίστηκε. Όλα τα διαστήματα είναι συνεχή.")
                 st.info("Σημείωση: Αυτό σημαίνει ότι δεν υπάρχουν κενά μεταξύ των ασφαλιστικών σας περιόδων.")
@@ -6359,9 +6676,13 @@ def show_results_page(df, filename):
                 
                 for (year, month), group in month_groups:
                     ika_days = group.loc[group['is_ika'], 'Ημέρες'].sum()
-                    oaee_days = group.loc[group['is_oaee'], 'Ημέρες'].sum()
-                    tsm_days = group.loc[group['is_tsm'], 'Ημέρες'].sum()
-                    oga_days = group.loc[group['is_oga'], 'Ημέρες'].sum()
+                    oaee_days_raw = group.loc[group['is_oaee'], 'Ημέρες'].sum()
+                    tsm_days_raw = group.loc[group['is_tsm'], 'Ημέρες'].sum()
+                    oga_days_raw = group.loc[group['is_oga'], 'Ημέρες'].sum()
+                    # Cap 25/μήνα για μη-ΙΚΑ στην Παράλληλη (συνολικά ανά μήνα, ταμείο/κλάδο).
+                    oaee_days = min(oaee_days_raw, 25)
+                    tsm_days = min(tsm_days_raw, 25)
+                    oga_days = min(oga_days_raw, 25)
 
                     has_ika = ika_days > 0
                     has_oaee = oaee_days > 0
@@ -6406,7 +6727,12 @@ def show_results_page(df, filename):
                 with info_col1:
                     st.info("Εμφάνιση διαστημάτων όπου συνυπάρχουν στον ίδιο μήνα: ΙΚΑ (Τύπος Αποδοχών 01, 16 ή 99) & ΟΑΕΕ (Κλάδος/Πακέτο Κ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.")
                 with info_col2:
-                    st.success(f"Βρέθηκαν {len(valid_months)} μήνες παράλληλης ασφάλισης (ΙΚΑ 01/16/99 & ΟΑΕΕ Κ ή ΟΑΕΕ Κ & ΤΣΜΕΔΕ ΚΣ/ΠΚΣ ή ΟΓΑ Κ & ΙΚΑ/ΟΑΕΕ) έως 31/12/2016. Σύνολο παράλληλων ημερών: {parallel_days_total}.")
+                    met_col1, met_col2 = st.columns(2)
+                    with met_col1:
+                        st.metric("Μήνες Παράλληλης", format_number_greek(len(valid_months), decimals=0))
+                    with met_col2:
+                        st.metric("Ημέρες Παράλληλης", format_number_greek(parallel_days_total, decimals=0))
+                    st.caption("Κριτήρια: ΙΚΑ (αποδοχές 01, 16, ή 99) & ΟΑΕΕ Κ, ΟΑΕΕ Κ & ΤΣΜΕΔΕ ΚΣ/ΠΚΣ, ή ΟΓΑ Κ & ΙΚΑ/ΟΑΕΕ (έως 31/12/2016).")
                 with info_col3:
                     st.warning("Διαστήματα που καλύπτουν πολλαπλούς μήνες επιμερίζονται και επισημαίνονται με κίτρινο χρώμα.")
 
@@ -6448,6 +6774,13 @@ def show_results_page(df, filename):
                     
                     month_cols_int = sorted([c for c in final_val_p.columns if isinstance(c, int)])
                     final_val_p = final_val_p[['ΣΥΝΟΛΟ'] + month_cols_int + ['ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ']]
+
+                    # Ανώτατο 25 ημέρες/μήνα για μη-ΙΚΑ και στην Παράλληλη Ασφάλιση.
+                    tameio_level_p = final_val_p.index.get_level_values('ΤΑΜΕΙΟ').astype(str).str.upper()
+                    is_ika_p = tameio_level_p.str.contains('ΙΚΑ', na=False)
+                    for m in month_cols_int:
+                        final_val_p.loc[~is_ika_p, m] = final_val_p.loc[~is_ika_p, m].clip(upper=25)
+                    final_val_p['ΣΥΝΟΛΟ'] = final_val_p[month_cols_int].sum(axis=1)
                     
                     # Contribution Ratio
                     if 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ' in final_val_p.columns and 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ' in final_val_p.columns:
@@ -6785,7 +7118,7 @@ def show_results_page(df, filename):
                         multi_employer_months.append((year, month))
                 
                 if multi_employer_months:
-                    st.success(f"Βρέθηκαν {len(multi_employer_months)} μήνες πολλαπλής απασχόλησης (ΙΚΑ 01/16/99 με >1 εργοδότες).")
+                    st.success(f"Βρέθηκαν {len(multi_employer_months)} μήνες πολλαπλής απασχόλησης (ΙΚΑ (αποδοχές 01, 16, ή 99) με >1 εργοδότες).")
                     
                     valid_months_df = pd.DataFrame(multi_employer_months, columns=['ΕΤΟΣ', 'Μήνας_Num'])
                     
@@ -6995,7 +7328,7 @@ def show_results_page(df, filename):
                         description="Πίνακας Πολλαπλής Απασχόλησης (ΙΚΑ & Πολλαπλοί Εργοδότες)"
                     )
                 else:
-                    st.warning("Δεν βρέθηκαν μήνες με πολλαπλούς εργοδότες για ΙΚΑ (01/16/99).")
+                    st.warning("Δεν βρέθηκαν μήνες με πολλαπλούς εργοδότες για ΙΚΑ (αποδοχές 01, 16, ή 99).")
             else:
                  st.warning("Δεν βρέθηκαν δεδομένα.")
         else:
@@ -7003,113 +7336,94 @@ def show_results_page(df, filename):
     
     # Download section
     st.markdown("---")
-    st.markdown("### Επιλογές εκτύπωσης")
-    name_col, amka_col = st.columns([1, 1])
-    with name_col:
-        st.session_state['print_client_name'] = st.text_input(
-            "Ονοματεπώνυμο ασφαλισμένου:",
-            value=st.session_state.get('print_client_name', ''),
-            placeholder="Π.χ. Ιωάννης Παπαδόπουλος"
-        )
-    with amka_col:
-        st.session_state['print_client_amka'] = st.text_input(
-            "ΑΜΚΑ:",
-            value=st.session_state.get('print_client_amka', ''),
-            placeholder="Π.χ. 01017012345"
-        )
+    with st.expander("Εκτύπωση, Εξαγωγή και Πληροφορίες", expanded=False):
+        st.markdown("### Επιλογές εκτύπωσης")
+        name_col, amka_col, birth_col = st.columns([1, 1, 1])
+        with name_col:
+            st.text_input(
+                "Ονοματεπώνυμο ασφαλισμένου:",
+                value=st.session_state.get('print_client_name', ''),
+                placeholder="Π.χ. Ιωάννης Παπαδόπουλος",
+                key="print_client_name"
+            )
+        with amka_col:
+            st.text_input(
+                "ΑΜΚΑ:",
+                value=st.session_state.get('print_client_amka', ''),
+                placeholder="Π.χ. 01017012345",
+                key="print_client_amka"
+            )
+        with birth_col:
+            st.text_input(
+                "Ημερομηνία γέννησης:",
+                value=st.session_state.get('print_client_birthdate', ''),
+                placeholder="Π.χ. 01/01/1970",
+                key="print_client_birthdate"
+            )
+            normalized_birthdate, birth_age = parse_birthdate_and_age(st.session_state.get('print_client_birthdate', ''))
+            if normalized_birthdate and birth_age is not None:
+                st.caption(f"Σημερινή ηλικία: {birth_age} ετών")
+            elif normalized_birthdate:
+                st.caption("Μη έγκυρη ημερομηνία γέννησης")
 
-    st.markdown("### Επιλογές εξαγωγής")
-    
-    col1, col2, col3, col4 = st.columns([1, 1, 1.2, 1])
-    
-    with col1:
-        # Download για κύρια δεδομένα (μόνο με ημερομηνίες, ταξινομημένα χρονολογικά)
-        main_output = io.BytesIO()
-        with pd.ExcelWriter(main_output, engine='openpyxl') as writer:
-            main_df.to_excel(writer, sheet_name='Κύρια_Δεδομένα', index=False)
+        st.markdown("### Επιλογές εξαγωγής")
         
-        main_output.seek(0)
+        col1, col2, col3, col4 = st.columns([1, 1, 1.2, 1])
         
-        if filename.endswith('.pdf'):
-            main_filename = filename[:-4] + '_κύρια_δεδομένα.xlsx'
-        else:
-            main_filename = 'efka_κύρια_δεδομένα.xlsx'
-        
-        st.download_button(
-            label="Κύρια Δεδομένα (Excel)",
-            data=main_output.getvalue(),
-            file_name=main_filename,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-    
-    with col2:
-        # Download για όλα τα δεδομένα
-        all_output = io.BytesIO()
-        with pd.ExcelWriter(all_output, engine='openpyxl') as writer:
-            # Φιλτράρουμε και ταξινομούμε όλα τα δεδομένα
-            all_df_sorted = df.copy()
-            if 'Από' in all_df_sorted.columns:
-                all_df_sorted['Από_DateTime'] = pd.to_datetime(all_df_sorted['Από'], format='%d/%m/%Y', errors='coerce')
-                # Φιλτράρουμε μόνο τις γραμμές με έγκυρη ημερομηνία
-                all_df_sorted = all_df_sorted.dropna(subset=['Από_DateTime'])
-                all_df_sorted = all_df_sorted.sort_values('Από_DateTime', na_position='last')
-                all_df_sorted = all_df_sorted.drop('Από_DateTime', axis=1)
+        with col1:
+            # Download για κύρια δεδομένα (μόνο με ημερομηνίες, ταξινομημένα χρονολογικά)
+            main_output = io.BytesIO()
+            with pd.ExcelWriter(main_output, engine='openpyxl') as writer:
+                main_df.to_excel(writer, sheet_name='Κύρια_Δεδομένα', index=False)
             
-            all_df_sorted.to_excel(writer, sheet_name='Όλα_Δεδομένα', index=False)
-            if extra_columns and not extra_df.empty:
-                extra_df.to_excel(writer, sheet_name='Επιπλέον_Πίνακες', index=False)
+            main_output.seek(0)
             
-            # Προσθήκη Συνοπτικής Αναφοράς
-            if 'Κλάδος/Πακέτο Κάλυψης' in df.columns:
-                summary_df = df.copy()
-                if 'Από' in summary_df.columns:
-                    summary_df['Από_DateTime'] = pd.to_datetime(summary_df['Από'], format='%d/%m/%Y', errors='coerce')
-                    summary_df = summary_df.dropna(subset=['Από_DateTime'])
+            if filename.endswith('.pdf'):
+                main_filename = filename[:-4] + '_κύρια_δεδομένα.xlsx'
+            else:
+                main_filename = 'efka_κύρια_δεδομένα.xlsx'
+            
+            st.download_button(
+                label="Κύρια Δεδομένα (Excel)",
+                data=main_output.getvalue(),
+                file_name=main_filename,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        
+        with col2:
+            # Download για όλα τα δεδομένα
+            all_output = io.BytesIO()
+            with pd.ExcelWriter(all_output, engine='openpyxl') as writer:
+                # Φιλτράρουμε και ταξινομούμε όλα τα δεδομένα
+                all_df_sorted = df.copy()
+                if 'Από' in all_df_sorted.columns:
+                    all_df_sorted['Από_DateTime'] = pd.to_datetime(all_df_sorted['Από'], format='%d/%m/%Y', errors='coerce')
+                    # Φιλτράρουμε μόνο τις γραμμές με έγκυρη ημερομηνία
+                    all_df_sorted = all_df_sorted.dropna(subset=['Από_DateTime'])
+                    all_df_sorted = all_df_sorted.sort_values('Από_DateTime', na_position='last')
+                    all_df_sorted = all_df_sorted.drop('Από_DateTime', axis=1)
+                
+                all_df_sorted.to_excel(writer, sheet_name='Όλα_Δεδομένα', index=False)
+                if extra_columns and not extra_df.empty:
+                    extra_df.to_excel(writer, sheet_name='Επιπλέον_Πίνακες', index=False)
+                
+                # Προσθήκη Συνοπτικής Αναφοράς
+                if 'Κλάδος/Πακέτο Κάλυψης' in df.columns:
+                    summary_df = df.copy()
+                    if 'Από' in summary_df.columns:
+                        summary_df['Από_DateTime'] = pd.to_datetime(summary_df['Από'], format='%d/%m/%Y', errors='coerce')
+                        summary_df = summary_df.dropna(subset=['Από_DateTime'])
 
-                for col in ['Έτη', 'Μήνες', 'Ημέρες']:
-                    if col in summary_df.columns:
-                        summary_df[col] = summary_df[col].apply(clean_numeric_value)
-                for col in ['Μικτές αποδοχές', 'Συνολικές εισφορές']:
-                    if col in summary_df.columns:
-                        summary_df[col] = summary_df[col].apply(lambda x: clean_numeric_value(x, exclude_drx=True))
-                summary_df = apply_negative_time_sign(summary_df)
-                
-                grouped = summary_df.groupby('Κλάδος/Πακέτο Κάλυψης').agg({
-                    'Από': 'min',
-                    'Έως': 'max',
-                    'Έτη': 'sum',
-                    'Μήνες': 'sum',
-                    'Ημέρες': 'sum',
-                    'Μικτές αποδοχές': 'sum',
-                    'Συνολικές εισφορές': 'sum'
-                }).reset_index()
-                
-                record_counts = summary_df['Κλάδος/Πακέτο Κάλυψης'].value_counts().reset_index()
-                record_counts.columns = ['Κλάδος/Πακέτο Κάλυψης', 'Αριθμός Εγγραφών']
-                
-                summary_final = grouped.merge(record_counts, on='Κλάδος/Πακέτο Κάλυψης', how='left')
-                summary_final = summary_final[['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως', 'Έτη', 'Μήνες', 'Ημέρες', 
-                                             'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']]
-                
-                summary_final.to_excel(writer, sheet_name='Συνοπτική_Αναφορά', index=False)
-                
-                # Προσθήκη ετήσιας αναφοράς στο Excel (με νέα δομή: Έτος, Ταμείο, Κλάδος/Πακέτο)
-                if 'Από' in df.columns and 'Ταμείο' in df.columns:
-                    yearly_df = df.copy()
-                    yearly_df['Από_DateTime'] = pd.to_datetime(yearly_df['Από'], format='%d/%m/%Y', errors='coerce')
-                    yearly_df = yearly_df.dropna(subset=['Από_DateTime'])
-                    yearly_df['Έτος'] = yearly_df['Από_DateTime'].dt.year
+                    for col in ['Έτη', 'Μήνες', 'Ημέρες']:
+                        if col in summary_df.columns:
+                            summary_df[col] = summary_df[col].apply(clean_numeric_value)
+                    for col in ['Μικτές αποδοχές', 'Συνολικές εισφορές']:
+                        if col in summary_df.columns:
+                            summary_df[col] = summary_df[col].apply(lambda x: clean_numeric_value(x, exclude_drx=True))
+                    summary_df = apply_negative_time_sign(summary_df)
                     
-                    # Καθαρισμός αριθμητικών στηλών
-                    numeric_columns = ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές']
-                    for col in numeric_columns:
-                        if col in yearly_df.columns:
-                            yearly_df[col] = yearly_df[col].apply(clean_numeric_value)
-                    yearly_df = apply_negative_time_sign(yearly_df)
-                    
-                    # Ομαδοποίηση με βάση έτος, ταμείο και κλάδο/πακέτο κάλυψης
-                    yearly_grouped = yearly_df.groupby(['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης']).agg({
+                    grouped = summary_df.groupby('Κλάδος/Πακέτο Κάλυψης').agg({
                         'Από': 'min',
                         'Έως': 'max',
                         'Έτη': 'sum',
@@ -7119,94 +7433,127 @@ def show_results_page(df, filename):
                         'Συνολικές εισφορές': 'sum'
                     }).reset_index()
                     
-                    # Μετράμε τις εγγραφές για κάθε έτος, ταμείο και κλάδο
-                    yearly_counts = yearly_df.groupby(['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης']).size().reset_index()
-                    yearly_counts.columns = ['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης', 'Αριθμός Εγγραφών']
+                    record_counts = summary_df['Κλάδος/Πακέτο Κάλυψης'].value_counts().reset_index()
+                    record_counts.columns = ['Κλάδος/Πακέτο Κάλυψης', 'Αριθμός Εγγραφών']
                     
-                    # Συνδυάζουμε τα δεδομένα
-                    yearly_final = yearly_grouped.merge(yearly_counts, on=['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης'], how='left')
+                    summary_final = grouped.merge(record_counts, on='Κλάδος/Πακέτο Κάλυψης', how='left')
+                    summary_final = summary_final[['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως', 'Έτη', 'Μήνες', 'Ημέρες', 
+                                                 'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']]
                     
-                    # Αναδιατάσσουμε τις στήλες (πρώτα Έτος, μετά Ταμείο, μετά Κλάδος/Πακέτο)
-                    yearly_final = yearly_final[['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως', 'Έτη', 'Μήνες', 'Ημέρες', 
-                                               'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']]
+                    summary_final.to_excel(writer, sheet_name='Συνοπτική_Αναφορά', index=False)
                     
-                    # Ταξινομούμε πρώτα ανά έτος, μετά ανά ταμείο, μετά ανά κλάδο
-                    yearly_final = yearly_final.sort_values(['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης'])
+                    # Προσθήκη ετήσιας αναφοράς στο Excel (με νέα δομή: Έτος, Ταμείο, Κλάδος/Πακέτο)
+                    if 'Από' in df.columns and 'Ταμείο' in df.columns:
+                        yearly_df = df.copy()
+                        yearly_df['Από_DateTime'] = pd.to_datetime(yearly_df['Από'], format='%d/%m/%Y', errors='coerce')
+                        yearly_df = yearly_df.dropna(subset=['Από_DateTime'])
+                        yearly_df['Έτος'] = yearly_df['Από_DateTime'].dt.year
+                        
+                        # Καθαρισμός αριθμητικών στηλών
+                        numeric_columns = ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές']
+                        for col in numeric_columns:
+                            if col in yearly_df.columns:
+                                yearly_df[col] = yearly_df[col].apply(clean_numeric_value)
+                        yearly_df = apply_negative_time_sign(yearly_df)
+                        
+                        # Ομαδοποίηση με βάση έτος, ταμείο και κλάδο/πακέτο κάλυψης
+                        yearly_grouped = yearly_df.groupby(['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης']).agg({
+                            'Από': 'min',
+                            'Έως': 'max',
+                            'Έτη': 'sum',
+                            'Μήνες': 'sum',
+                            'Ημέρες': 'sum',
+                            'Μικτές αποδοχές': 'sum',
+                            'Συνολικές εισφορές': 'sum'
+                        }).reset_index()
+                        
+                        # Μετράμε τις εγγραφές για κάθε έτος, ταμείο και κλάδο
+                        yearly_counts = yearly_df.groupby(['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης']).size().reset_index()
+                        yearly_counts.columns = ['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης', 'Αριθμός Εγγραφών']
+                        
+                        # Συνδυάζουμε τα δεδομένα
+                        yearly_final = yearly_grouped.merge(yearly_counts, on=['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης'], how='left')
+                        
+                        # Αναδιατάσσουμε τις στήλες (πρώτα Έτος, μετά Ταμείο, μετά Κλάδος/Πακέτο)
+                        yearly_final = yearly_final[['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως', 'Έτη', 'Μήνες', 'Ημέρες', 
+                                                   'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']]
+                        
+                        # Ταξινομούμε πρώτα ανά έτος, μετά ανά ταμείο, μετά ανά κλάδο
+                        yearly_final = yearly_final.sort_values(['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης'])
+                        
+                        yearly_final.to_excel(writer, sheet_name='Ετήσια_Αναφορά', index=False)
                     
-                    yearly_final.to_excel(writer, sheet_name='Ετήσια_Αναφορά', index=False)
-                
-                # Προσθήκη αναφοράς κενών διαστημάτων στο Excel
-                gaps_df = find_gaps_in_insurance_data(df)
-                if not gaps_df.empty:
-                    gaps_df.to_excel(writer, sheet_name='Κενά_Διαστήματα', index=False)
+                    # Προσθήκη αναφοράς κενών διαστημάτων στο Excel
+                    gaps_df = find_gaps_in_insurance_data(df)
+                    if not gaps_df.empty:
+                        gaps_df.to_excel(writer, sheet_name='Κενά_Διαστήματα', index=False)
 
-            # Προσθήκη Ανάλυσης ΑΠΔ (με τα τρέχοντα φίλτρα)
-            if 'apd_export_df' in locals():
-                try:
-                    apd_export_df.to_excel(writer, sheet_name='Ανάλυση_ΑΠΔ', index=False)
-                except Exception:
-                    pass
-        
-        all_output.seek(0)
-        
-        if filename.endswith('.pdf'):
-            all_filename = filename[:-4] + '_όλα_δεδομένα.xlsx'
-        else:
-            all_filename = 'efka_όλα_δεδομένα.xlsx'
-        
-        st.download_button(
-            label="Όλα τα Δεδομένα (Excel)",
-            data=all_output.getvalue(),
-            file_name=all_filename,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-
-    with col3:
-        if view_exports:
-            view_options = list(view_exports.keys())
-            label_col, dropdown_col = st.columns([0.8, 2])
-            with label_col:
-                st.markdown('<div style="font-size:0.9rem; color:#4b5563; padding-top:0.45rem;">Επιλέξτε μεμονωμένο πίνακα:</div>', unsafe_allow_html=True)
-            with dropdown_col:
-                selected_view = st.selectbox(
-                    "",
-                    options=view_options,
-                    key="view_export_selection",
-                    label_visibility="collapsed"
-                )
-            view_df = view_exports[selected_view]
-            view_buffer = io.BytesIO()
-            with pd.ExcelWriter(view_buffer, engine='openpyxl') as writer:
-                sheet_label = re.sub(r'[\\/*?:\\[\\]]', '_', selected_view)[:31]
-                view_df.to_excel(writer, sheet_name=sheet_label or "Προβολή", index=False)
-            view_buffer.seek(0)
-            base_name = filename[:-4] if filename.endswith('.pdf') else 'efka'
-            sanitized_label = re.sub(r'[\\/*?:<>|"]', '_', selected_view)
-            view_filename = f"{base_name}_{sanitized_label}_προβολή.xlsx"
-        else:
-            st.info("Δεν υπάρχει διαθέσιμος πίνακας για εξαγωγή.")
-
-    with col4:
-        if view_exports:
+                # Προσθήκη Ανάλυσης ΑΠΔ (με τα τρέχοντα φίλτρα)
+                if 'apd_export_df' in locals():
+                    try:
+                        apd_export_df.to_excel(writer, sheet_name='Ανάλυση_ΑΠΔ', index=False)
+                    except Exception:
+                        pass
+            
+            all_output.seek(0)
+            
+            if filename.endswith('.pdf'):
+                all_filename = filename[:-4] + '_όλα_δεδομένα.xlsx'
+            else:
+                all_filename = 'efka_όλα_δεδομένα.xlsx'
+            
             st.download_button(
-                label="Εξαγωγή πίνακα",
-                data=view_buffer.getvalue() if 'view_buffer' in locals() else b'',
-                file_name=view_filename if 'view_filename' in locals() else 'view.xlsx',
+                label="Όλα τα Δεδομένα (Excel)",
+                data=all_output.getvalue(),
+                file_name=all_filename,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-                disabled='view_buffer' not in locals()
-        )
-    
-    # Footer
-    st.markdown("---")
-    st.markdown("### Πληροφορίες")
-    st.info("""
-    **Σύντομος οδηγός:**
-    - *Κύρια Δεδομένα*: Κατεβάζει τα φιλτραρισμένα κύρια δεδομένα που εμφανίζονται στο Tab 1.
-    - *Όλα τα Δεδομένα*: Πλήρες Excel με κάθε πίνακα, τις επιπλέον αναφορές (Συνοπτική, Ετήσια, Κενά, Ανάλυση ΑΠΔ) και ακατέργαστες γραμμές όπως προήλθαν από το PDF.
-    - *Εξαγωγή πίνακα*: Επιλέγεις ένα συγκεκριμένο πίνακα (μαζί με φίλτρα, ταξινομήσεις κ.λπ.) και τον εξάγεις όπως ακριβώς εμφανίζεται.
-    """)
+                use_container_width=True
+            )
+
+        with col3:
+            if view_exports:
+                view_options = list(view_exports.keys())
+                label_col, dropdown_col = st.columns([0.8, 2])
+                with label_col:
+                    st.markdown('<div style="font-size:0.9rem; color:#4b5563; padding-top:0.45rem;">Επιλέξτε μεμονωμένο πίνακα:</div>', unsafe_allow_html=True)
+                with dropdown_col:
+                    selected_view = st.selectbox(
+                        "",
+                        options=view_options,
+                        key="view_export_selection",
+                        label_visibility="collapsed"
+                    )
+                view_df = view_exports[selected_view]
+                view_buffer = io.BytesIO()
+                with pd.ExcelWriter(view_buffer, engine='openpyxl') as writer:
+                    sheet_label = re.sub(r'[\\/*?:\\[\\]]', '_', selected_view)[:31]
+                    view_df.to_excel(writer, sheet_name=sheet_label or "Προβολή", index=False)
+                view_buffer.seek(0)
+                base_name = filename[:-4] if filename.endswith('.pdf') else 'efka'
+                sanitized_label = re.sub(r'[\\/*?:<>|"]', '_', selected_view)
+                view_filename = f"{base_name}_{sanitized_label}_προβολή.xlsx"
+            else:
+                st.info("Δεν υπάρχει διαθέσιμος πίνακας για εξαγωγή.")
+
+        with col4:
+            if view_exports:
+                st.download_button(
+                    label="Εξαγωγή πίνακα",
+                    data=view_buffer.getvalue() if 'view_buffer' in locals() else b'',
+                    file_name=view_filename if 'view_filename' in locals() else 'view.xlsx',
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    disabled='view_buffer' not in locals()
+            )
+        
+        st.markdown("---")
+        st.markdown("### Πληροφορίες")
+        st.info("""
+        **Σύντομος οδηγός:**
+        - *Κύρια Δεδομένα*: Κατεβάζει τα φιλτραρισμένα κύρια δεδομένα που εμφανίζονται στο Tab 1.
+        - *Όλα τα Δεδομένα*: Πλήρες Excel με κάθε πίνακα, τις επιπλέον αναφορές (Συνοπτική, Ετήσια, Κενά, Ανάλυση ΑΠΔ) και ακατέργαστες γραμμές όπως προήλθαν από το PDF.
+        - *Εξαγωγή πίνακα*: Επιλέγεις ένα συγκεκριμένο πίνακα (μαζί με φίλτρα, ταξινομήσεις κ.λπ.) και τον εξάγεις όπως ακριβώς εμφανίζεται.
+        """)
     
     # JavaScript για τα menu links
     st.markdown("""
@@ -7259,17 +7606,8 @@ def main():
     
     # Εμφάνιση ανεβάσματος αρχείου
     if not st.session_state['file_uploaded']:
-        # Κουμπί για κατέβασμα αρχείου από ΕΦΚΑ
-        st.markdown('''
-            <div class="efka-btn-wrapper">
-                <a href="https://www.e-efka.gov.gr/el/elektronikes-yperesies/synoptiko-kai-analytiko-istoriko-asphalises" target="_blank" class="efka-btn">
-                    Κατεβάστε το αρχείο ΑΤΛΑΣ
-                </a>
-            </div>
-        ''', unsafe_allow_html=True)
-
-        # Προτροπή και Upload Button - Card Style
-        st.markdown('<div class="upload-prompt-text">Στη συνέχεια ανεβάστε το αρχείο εδώ για ανάλυση</div>', unsafe_allow_html=True)
+        # Προτροπή και Upload - τίτλος
+        st.markdown('<div class="upload-prompt-text">Ανεβάστε το αρχείο ΑΤΛΑΣ για ανάλυση</div>', unsafe_allow_html=True)
         
         uploaded_file = st.file_uploader(
             "Επιλέξτε PDF αρχείο",
@@ -7289,7 +7627,7 @@ def main():
             <div class="instructions-box">
                 <div class="instructions-title">Γενικές Οδηγίες Χρήσης</div>
                 <div class="instructions-list">
-                    1. Μεταβείτε στην υπηρεσία του e-ΕΦΚΑ πατώντας το μπλε κουμπί παραπάνω.<br>
+                    1. Μεταβείτε στην υπηρεσία του e-ΕΦΚΑ πατώντας <a href="https://www.e-efka.gov.gr/el/elektronikes-yperesies/synoptiko-kai-analytiko-istoriko-asphalises" target="_blank" class="efka-link">εδώ</a>.<br>
                     2. Συνδεθείτε με τους κωδικούς Taxisnet.<br>
                     3. Επιλέξτε "Συνοπτικό και Αναλυτικό Ιστορικό Ασφάλισης".<br>
                     4. Κατεβάστε το αρχείο σε μορφή PDF στον υπολογιστή σας.<br>
@@ -7311,7 +7649,7 @@ def main():
                     Για επίσημη πληροφόρηση και θέματα συνταξιοδότησης, απευθυνθείτε αποκλειστικά στον e-ΕΦΚΑ.
                 </div>
                 <div class="footer-copyright">
-                    © 2025 Χαράλαμπος Ματωνάκης - myadvisor 
+                    © 2026 Χαράλαμπος Ματωνάκης - myadvisor 
                 </div>
             </div>
         ''', unsafe_allow_html=True)

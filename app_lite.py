@@ -126,26 +126,15 @@ st.markdown(
         width: 100%;
         display: block;
     }
-    .efka-btn-wrapper {
-        text-align: center;
-        margin: 2rem 0;
-    }
-    .efka-btn {
-        display: inline-block;
-        background-color: transparent;
+    .efka-link {
         color: #0056b3 !important;
-        border: 2px solid #0056b3;
-        padding: 0.6rem 1.5rem;
-        border-radius: 50px;
-        text-decoration: none !important;
-        font-weight: 600;
-        font-size: 0.95rem;
-        transition: all 0.2s ease;
+        text-decoration: none;
+        font-weight: 400;
+        font-size: 1rem;
     }
-    .efka-btn:hover {
-        background-color: #eef6fc;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 8px rgba(0, 86, 179, 0.1);
+    .efka-link:hover {
+        text-decoration: underline;
+        color: #003d82 !important;
     }
     .instructions-box {
         max-width: 800px;
@@ -257,15 +246,7 @@ st.markdown(
 )
 
 if not st.session_state["lite_file_uploaded"]:
-    st.markdown('''
-        <div class="efka-btn-wrapper">
-            <a href="https://www.e-efka.gov.gr/el/elektronikes-yperesies/synoptiko-kai-analytiko-istoriko-asphalises" target="_blank" class="efka-btn">
-                Κατεβάστε το αρχείο ΑΤΛΑΣ
-            </a>
-        </div>
-    ''', unsafe_allow_html=True)
-
-    st.markdown('<div class="upload-prompt-text">Στη συνέχεια ανεβάστε το αρχείο εδώ για ανάλυση</div>', unsafe_allow_html=True)
+    st.markdown('<div class="upload-prompt-text">Ανεβάστε το αρχείο ΑΤΛΑΣ για ανάλυση</div>', unsafe_allow_html=True)
 
     uploaded_file = st.file_uploader(
         "Επιλέξτε PDF αρχείο",
@@ -284,7 +265,7 @@ if not st.session_state["lite_file_uploaded"]:
         <div class="instructions-box">
             <div class="instructions-title">Γενικές Οδηγίες Χρήσης</div>
             <div class="instructions-list">
-                1. Μεταβείτε στην υπηρεσία του e-ΕΦΚΑ πατώντας το μπλε κουμπί παραπάνω.<br>
+                1. Μεταβείτε στην υπηρεσία του e-ΕΦΚΑ πατώντας <a href="https://www.e-efka.gov.gr/el/elektronikes-yperesies/synoptiko-kai-analytiko-istoriko-asphalises" target="_blank" class="efka-link">εδώ</a>.<br>
                 2. Συνδεθείτε με τους κωδικούς Taxisnet.<br>
                 3. Επιλέξτε "Συνοπτικό και Αναλυτικό Ιστορικό Ασφάλισης".<br>
                 4. Κατεβάστε το αρχείο σε μορφή PDF στον υπολογιστή σας.<br>
@@ -304,7 +285,7 @@ if not st.session_state["lite_file_uploaded"]:
                 Για επίσημη πληροφόρηση και θέματα συνταξιοδότησης, απευθυνθείτε αποκλειστικά στον e-ΕΦΚΑ.
             </div>
             <div class="footer-copyright">
-                © 2025 Χαράλαμπος Ματωνάκης - myadvisor 
+                © 2026 Χαράλαμπος Ματωνάκης - myadvisor 
             </div>
         </div>
     ''', unsafe_allow_html=True)
@@ -440,6 +421,7 @@ if section == "all":
         description_map=description_map,
         show_count_totals_only=False
     )
+
     sections = []
     sections.append(
         build_print_section_html(
