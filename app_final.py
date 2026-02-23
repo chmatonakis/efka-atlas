@@ -1592,6 +1592,115 @@ def compute_parallel_months(base_df: pd.DataFrame) -> list[tuple[int, int]]:
 
     return valid_months
 
+def compute_parallel_months_2017(base_df: pd.DataFrame) -> list[tuple[int, int]]:
+    """Μήνες πιθανής παράλληλης απασχόλησης από 01/2017 και μετά.
+    Κριτήρια:
+    - ΙΚΑ (αποδοχές 01/16/99) + ΕΦΚΑ μη μισθωτή
+    - ΕΦΚΑ μισθωτή + ΕΦΚΑ μη μισθωτή
+    """
+    if base_df.empty or not all(col in base_df.columns for col in ['Από', 'Έως']):
+        return []
+
+    parallel_rows = []
+    for _, row in base_df.iterrows():
+        try:
+            if pd.isna(row['Από']) or pd.isna(row['Έως']):
+                continue
+
+            start_dt = pd.to_datetime(row['Από'], format='%d/%m/%Y', errors='coerce')
+            end_dt = pd.to_datetime(row['Έως'], format='%d/%m/%Y', errors='coerce')
+            if pd.isna(start_dt) or pd.isna(end_dt):
+                continue
+
+            days_val = 0
+            if 'Ημέρες' in row and pd.notna(row['Ημέρες']) and str(row['Ημέρες']).strip() != '':
+                d = clean_numeric_value(row['Ημέρες'])
+                if d is not None and d != 0:
+                    days_val += d
+            if 'Έτη' in row and pd.notna(row['Έτη']):
+                y = clean_numeric_value(row['Έτη'])
+                if y is not None and y != 0:
+                    days_val += y * 300
+            if 'Μήνες' in row and pd.notna(row['Μήνες']):
+                m = clean_numeric_value(row['Μήνες'])
+                if m is not None and m != 0:
+                    days_val += m * 25
+
+            curr = start_dt.replace(day=1)
+            end_month_dt = end_dt.replace(day=1)
+            months_list = []
+            while curr <= end_month_dt:
+                months_list.append(curr)
+                if curr.month == 12:
+                    curr = curr.replace(year=curr.year + 1, month=1)
+                else:
+                    curr = curr.replace(month=curr.month + 1)
+
+            num_months = len(months_list)
+            if num_months == 0:
+                continue
+            days_per_month = days_val / num_months
+
+            for m_dt in months_list:
+                parallel_rows.append({
+                    'ΕΤΟΣ': m_dt.year,
+                    'Μήνας_Num': m_dt.month,
+                    'ΤΑΜΕΙΟ': str(row.get('Ταμείο', '')).strip(),
+                    'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ': str(row.get('Τύπος Ασφάλισης', '')).strip(),
+                    'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': str(row.get('Τύπος Αποδοχών', '')).strip(),
+                    'Ημέρες': days_per_month
+                })
+        except Exception:
+            continue
+
+    if not parallel_rows:
+        return []
+
+    p_df = pd.DataFrame(parallel_rows)
+
+    def _is_ika(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+        et = str(row.get('ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ', '')).strip()
+        is_ika_tameio = 'IKA' in t or 'ΙΚΑ' in t
+        is_misthoti = 'ΜΙΣΘΩΤΗ' in i_type and 'ΜΗ' not in i_type
+        is_et_ika = et in ['01', '1', '16', '99']
+        return (is_ika_tameio or is_misthoti) and is_et_ika
+
+    def _is_efka_misthoti(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+        is_efka = 'ΕΦΚΑ' in t or 'EFKA' in t
+        is_misthoti = 'ΜΙΣΘΩΤΗ' in i_type and 'ΜΗ' not in i_type
+        return is_efka and is_misthoti
+
+    def _is_efka_non_misthoti(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+        is_efka = 'ΕΦΚΑ' in t or 'EFKA' in t
+        is_non_misthoti = ('ΜΗ' in i_type and 'ΜΙΣΘΩΤΗ' in i_type) or ('NON' in i_type and 'SAL' in i_type)
+        return is_efka and is_non_misthoti
+
+    p_df['is_ika'] = p_df.apply(_is_ika, axis=1)
+    p_df['is_efka_mis'] = p_df.apply(_is_efka_misthoti, axis=1)
+    p_df['is_efka_non'] = p_df.apply(_is_efka_non_misthoti, axis=1)
+
+    valid_months = []
+    month_groups = p_df.groupby(['ΕΤΟΣ', 'Μήνας_Num'])
+    for (year, month), group in month_groups:
+        if year < 2017:
+            continue
+        ika_days = group.loc[group['is_ika'], 'Ημέρες'].sum()
+        efka_mis_days = group.loc[group['is_efka_mis'], 'Ημέρες'].sum()
+        efka_non_days = group.loc[group['is_efka_non'], 'Ημέρες'].sum()
+
+        has_ika_non = ika_days > 0 and efka_non_days > 0
+        has_efka_mix = efka_mis_days > 0 and efka_non_days > 0
+        if has_ika_non or has_efka_mix:
+            valid_months.append((year, month))
+
+    return valid_months
+
 def compute_applied_monthly_day_caps(data_df: pd.DataFrame) -> list[dict]:
     """Μήνες/πακέτα (μη-ΙΚΑ) όπου εφαρμόστηκε cap 25 ημερών στην Καταμέτρηση."""
     required_cols = {'Από', 'Έως', 'Ημέρες', 'Κλάδος/Πακέτο Κάλυψης'}
@@ -1749,12 +1858,12 @@ def _get_gemini_api_key() -> str:
     except Exception:
         return ""
 
-def _df_to_records_for_ai(df: pd.DataFrame, max_rows: int = 80) -> list[dict]:
+def _df_to_records_for_ai(df: pd.DataFrame, max_rows: int | None = None) -> list[dict]:
     if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         return []
     safe_df = df.copy()
     safe_df = safe_df.replace({pd.NA: None})
-    if len(safe_df) > max_rows:
+    if max_rows is not None and max_rows > 0 and len(safe_df) > max_rows:
         safe_df = safe_df.head(max_rows)
     records = safe_df.to_dict(orient='records')
     cleaned: list[dict] = []
@@ -1792,33 +1901,155 @@ def _extract_json_object(text: str) -> dict | None:
     except Exception:
         return None
 
+def _default_ai_prompt_template() -> str:
+    return (
+        "Παράγαγε μία ενιαία δομημένη απάντηση στα Ελληνικά.\n"
+        "Επέστρεψε αυστηρά έγκυρο JSON, χωρίς markdown και χωρίς επιπλέον πεδία.\n"
+        "Τα πεδία που ΠΡΕΠΕΙ να επιστραφούν είναι: {required_fields}.\n\n"
+        "Οδηγίες ανά τομέα:\n"
+        "1) executive_summary (string)\n"
+        "- 2-4 προτάσεις, ουδέτερο και επαγγελματικό ύφος.\n"
+        "- Να αναφέρει μόνο τα πιο ουσιώδη στοιχεία του φακέλου.\n"
+        "- Χωρίς νομική κρίση ή συμπέρασμα θεμελίωσης.\n"
+        "Παράδειγμα: \"Ο φάκελος δείχνει κυρίως συνεχή ασφαλιστική πορεία με επιμέρους ελέγχους που απαιτούν επιβεβαίωση.\"\n\n"
+        "2) critical_findings (array[string])\n"
+        "- 3-8 σύντομα bullets.\n"
+        "- Να περιγράφει σημαντικά ευρήματα με σαφήνεια.\n"
+        "- Να αποφεύγει αόριστες γενικότητες.\n"
+        "Παράδειγμα: [\"Εντοπίστηκαν κενά ασφάλισης σε συγκεκριμένα διαστήματα.\", \"Υπάρχουν περίοδοι που χρειάζονται διασταύρωση με πρωτογενή στοιχεία.\"]\n\n"
+        "3) data_gaps (array[string])\n"
+        "- 2-8 σύντομα bullets.\n"
+        "- Να καταγράφει ρητά ελλείψεις και αβεβαιότητες δεδομένων.\n"
+        "- Να μην εφευρίσκει τιμές που δεν υπάρχουν.\n"
+        "Παράδειγμα: [\"Λείπουν επαρκή στοιχεία για πλήρη επαλήθευση ορισμένων περιόδων.\", \"Δεν υπάρχουν βοηθητικά έγγραφα για διασταύρωση συγκεκριμένων εγγραφών.\"]\n\n"
+        "4) recommended_actions (array[string])\n"
+        "- 3-8 πρακτικά επόμενα βήματα.\n"
+        "- Οι ενέργειες να είναι εφαρμόσιμες και συγκεκριμένες.\n"
+        "- Να εστιάζει σε επαλήθευση/τεκμηρίωση.\n"
+        "Παράδειγμα: [\"Διασταύρωση των περιόδων με τα πρωτογενή δεδομένα e-ΕΦΚΑ.\", \"Συγκέντρωση δικαιολογητικών για τα αμφισβητούμενα διαστήματα.\"]\n\n"
+        "5) confidence (object)\n"
+        "- level: High|Medium|Low.\n"
+        "- reasons: array από 2-5 σύντομους λόγους.\n"
+        "- Τα reasons να βασίζονται αποκλειστικά στα παρεχόμενα δεδομένα.\n"
+        "Παράδειγμα: {\"level\": \"Medium\", \"reasons\": [\"Υπάρχουν ενδείξεις που χρειάζονται περαιτέρω τεκμηρίωση.\", \"Η ανάλυση βασίζεται μόνο στα διαθέσιμα στοιχεία ΑΤΛΑΣ.\"]}\n\n"
+        "6) disclaimer (string)\n"
+        "- Μία σύντομη αποποίηση ευθύνης.\n"
+        "- Να δηλώνει ότι η σύνοψη είναι υποβοηθητική.\n"
+        "- Να δηλώνει ότι δεν υποκαθιστά επίσημη ή νομική γνωμοδότηση.\n"
+        "Παράδειγμα: \"Η παρούσα σύνοψη είναι υποβοηθητική και δεν αποτελεί επίσημη ή νομική γνωμοδότηση.\"\n\n"
+        "Δεδομένα φακέλου:\n"
+        "{payload_json}\n"
+    )
+
+def _load_ai_prompt_template() -> str:
+    template_path = Path(__file__).parent / "ai_summary_prompt.txt"
+    try:
+        if template_path.exists():
+            content = template_path.read_text(encoding="utf-8").strip()
+            if content:
+                return content
+    except Exception:
+        pass
+    return _default_ai_prompt_template()
+
+def _get_anthropic_api_key() -> str:
+    key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if key:
+        return key
+    try:
+        sec = st.secrets.get("ANTHROPIC_API_KEY", "")
+        return str(sec).strip() if sec else ""
+    except Exception:
+        return ""
+
+AI_MODEL_OPTIONS = {
+    "Gemini 2.5 Flash": {"provider": "gemini", "model": "gemini-2.5-flash"},
+    "Gemini 2.5 Pro": {"provider": "gemini", "model": "gemini-2.5-pro"},
+    "Claude Sonnet 4": {
+        "provider": "claude",
+        "model": "claude-sonnet-4-20250514",
+        "fallback_models": [],
+    },
+}
+
+def _call_gemini(system_prompt: str, user_prompt: str, model_name: str, api_key: str) -> str:
+    import google.generativeai as genai
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(model_name=model_name)
+    response = model.generate_content([system_prompt, user_prompt])
+    return getattr(response, 'text', '') or ''
+
+def _call_claude(
+    system_prompt: str,
+    user_prompt: str,
+    model_name: str,
+    api_key: str,
+    fallback_models: list[str] | None = None
+) -> tuple[str, str]:
+    import anthropic
+    client = anthropic.Anthropic(api_key=api_key)
+    candidates = [model_name] + (fallback_models or [])
+    seen = set()
+    ordered = []
+    for m in candidates:
+        if m and m not in seen:
+            seen.add(m)
+            ordered.append(m)
+
+    last_error = None
+    for cand in ordered:
+        try:
+            response = client.messages.create(
+                model=cand,
+                max_tokens=4096,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}]
+            )
+            text = response.content[0].text if response.content else ''
+            return text, cand
+        except Exception as e:
+            last_error = e
+            e_text = str(e).lower()
+            if "not_found_error" in e_text or "model:" in e_text:
+                continue
+            raise
+    if last_error:
+        raise last_error
+    raise RuntimeError("No Claude model available.")
+
 def generate_ai_case_summary(
     audit_df: pd.DataFrame,
     summary_df: pd.DataFrame,
     count_df: pd.DataFrame,
+    gaps_df: pd.DataFrame | None = None,
+    parallel_rows: list[dict] | None = None,
     metadata: dict | None = None,
-    model_name: str = "gemini-2.5-flash"
+    model_name: str = "gemini-2.5-flash",
+    provider: str = "gemini",
+    fallback_models: list[str] | None = None
 ) -> dict:
     """
-    Παράγει AI σύνοψη φακέλου με Gemini.
+    Παράγει AI σύνοψη φακέλου με Gemini ή Claude.
     Επιστρέφει dict:
       - {'ok': True, 'data': {...}, 'raw_text': '...'}
       - {'ok': False, 'error': '...'}
     """
-    api_key = _get_gemini_api_key()
-    if not api_key:
-        return {
-            'ok': False,
-            'error': "Δεν βρέθηκε GEMINI_API_KEY. Ορίστε env var ή Streamlit secret."
-        }
-
-    try:
-        import google.generativeai as genai
-    except Exception:
-        return {
-            'ok': False,
-            'error': "Λείπει το package google-generativeai. Προσθέστε το στα requirements."
-        }
+    if provider == "claude":
+        api_key = _get_anthropic_api_key()
+        if not api_key:
+            return {'ok': False, 'error': "Δεν βρέθηκε ANTHROPIC_API_KEY. Ορίστε env var ή Streamlit secret."}
+        try:
+            import anthropic  # noqa: F401
+        except Exception:
+            return {'ok': False, 'error': "Λείπει το package anthropic. Προσθέστε το στα requirements."}
+    else:
+        api_key = _get_gemini_api_key()
+        if not api_key:
+            return {'ok': False, 'error': "Δεν βρέθηκε GEMINI_API_KEY. Ορίστε env var ή Streamlit secret."}
+        try:
+            import google.generativeai  # noqa: F401
+        except Exception:
+            return {'ok': False, 'error': "Λείπει το package google-generativeai. Προσθέστε το στα requirements."}
 
     system_prompt = (
         "Είσαι βοηθός επαγγελματία συμβούλου συντάξεων. "
@@ -1839,89 +2070,116 @@ def generate_ai_case_summary(
         t = (err_text or "").lower()
         return ("quota" in t) or ("429" in t) or ("rate limit" in t) or ("resource_exhausted" in t)
 
-    def _run_once(run_model: str, audit_rows: int, summary_rows: int, count_rows: int) -> dict:
-        payload = {
-            'metadata': metadata or {},
-            'audit_findings': _df_to_records_for_ai(audit_df, max_rows=audit_rows),
-            'summary_rows': _df_to_records_for_ai(summary_df, max_rows=summary_rows),
-            'count_rows': _df_to_records_for_ai(count_df, max_rows=count_rows),
-        }
-        user_prompt = (
-            "Παράγαγε δομημένη σύνοψη φακέλου στα Ελληνικά. "
-            "Επέστρεψε JSON με ακριβώς τα πεδία: "
-            "executive_summary (string), "
-            "critical_findings (array of strings), "
-            "data_gaps (array of strings), "
-            "recommended_actions (array of strings), "
-            "confidence (object με level: High|Medium|Low και reasons: array), "
-            "disclaimer (string).\n\n"
-            "Δεδομένα φακέλου:\n"
-            f"{json.dumps(payload, ensure_ascii=False)}"
-        )
+    payload = {
+        'metadata': metadata or {},
+        'audit_findings': _df_to_records_for_ai(audit_df),
+        'summary_rows': _df_to_records_for_ai(summary_df),
+        'count_rows': _df_to_records_for_ai(count_df),
+        'gaps_rows': _df_to_records_for_ai(gaps_df if isinstance(gaps_df, pd.DataFrame) else pd.DataFrame()),
+        'parallel_rows': parallel_rows if isinstance(parallel_rows, list) else [],
+    }
+
+    required_fields = ['executive_summary', 'critical_findings', 'data_gaps', 'recommended_actions', 'confidence', 'disclaimer']
+
+    def _build_structured_prompt() -> str:
+        template = _load_ai_prompt_template()
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        prompt_text = template.replace("{required_fields}", ", ".join(required_fields))
+        prompt_text = prompt_text.replace("{payload_json}", payload_json)
+        if "{payload_json}" in template:
+            return prompt_text
+        return f"{prompt_text}\n\nΔεδομένα φακέλου:\n{payload_json}"
+
+    def _validate_section_value(section_key: str, value) -> bool:
+        if section_key in ('executive_summary', 'disclaimer'):
+            return isinstance(value, str) and bool(value.strip())
+        if section_key in ('critical_findings', 'data_gaps', 'recommended_actions'):
+            return isinstance(value, list) and all(isinstance(x, str) for x in value)
+        if section_key == 'confidence':
+            if not isinstance(value, dict):
+                return False
+            lvl = value.get('level')
+            reasons = value.get('reasons')
+            return (lvl in {'High', 'Medium', 'Low'}) and isinstance(reasons, list) and all(isinstance(x, str) for x in reasons)
+        return False
+
+    def _run_once(run_model: str, run_provider: str, run_fallback_models: list[str] | None = None) -> dict:
+        user_prompt = _build_structured_prompt()
         try:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(model_name=run_model)
-            response = model.generate_content([system_prompt, user_prompt])
-            raw_text = getattr(response, 'text', '') or ''
+            if run_provider == "claude":
+                run_key = _get_anthropic_api_key()
+                if not run_key:
+                    return {'ok': False, 'error': "Δεν βρέθηκε ANTHROPIC_API_KEY.", 'model_used': run_model}
+                raw_text, used_model = _call_claude(system_prompt, user_prompt, run_model, run_key, run_fallback_models)
+            else:
+                run_key = _get_gemini_api_key()
+                if not run_key:
+                    return {'ok': False, 'error': "Δεν βρέθηκε GEMINI_API_KEY.", 'model_used': run_model}
+                raw_text = _call_gemini(system_prompt, user_prompt, run_model, run_key)
+                used_model = run_model
             parsed = _extract_json_object(raw_text)
-            return {'ok': bool(parsed), 'raw_text': raw_text, 'parsed': parsed, 'model_used': run_model}
+            if not isinstance(parsed, dict):
+                return {
+                    'ok': False,
+                    'error': "Το AI δεν επέστρεψε έγκυρο JSON object.",
+                    'raw_text': raw_text,
+                    'model_used': used_model
+                }
+            missing = [k for k in required_fields if k not in parsed]
+            if missing:
+                return {
+                    'ok': False,
+                    'error': f"Λείπουν πεδία από το JSON: {', '.join(missing)}",
+                    'raw_text': raw_text,
+                    'model_used': used_model
+                }
+            for k in required_fields:
+                if not _validate_section_value(k, parsed.get(k)):
+                    return {
+                        'ok': False,
+                        'error': f"Μη έγκυρο schema για το πεδίο {k}.",
+                        'raw_text': raw_text,
+                        'model_used': used_model
+                    }
+            return {'ok': True, 'parsed': parsed, 'raw_text': raw_text, 'model_used': used_model}
         except Exception as e:
             err_text = str(e)
             return {
                 'ok': False,
-                'error': f"Αποτυχία κλήσης Gemini: {err_text}",
+                'error': f"Αποτυχία κλήσης AI ({run_model}): {err_text}",
                 'model_used': run_model,
                 'is_quota': _is_quota_error(err_text),
                 'retry_after_seconds': _retry_after_seconds(err_text)
             }
 
-    # 1η προσπάθεια με το επιλεγμένο μοντέλο (συμπιεσμένο payload)
-    first = _run_once(model_name, audit_rows=20, summary_rows=35, count_rows=45)
+    first = _run_once(model_name, provider, fallback_models)
     if first.get('ok') and isinstance(first.get('parsed'), dict):
-        parsed = first['parsed']
-        required = ['executive_summary', 'critical_findings', 'data_gaps', 'recommended_actions', 'confidence', 'disclaimer']
-        missing = [k for k in required if k not in parsed]
-        if not missing:
-            return {'ok': True, 'data': parsed, 'raw_text': first.get('raw_text', ''), 'model_used': first.get('model_used')}
+        return {
+            'ok': True,
+            'data': first.get('parsed'),
+            'raw_text': first.get('raw_text', ''),
+            'model_used': first.get('model_used')
+        }
 
-    # Fallback σε Flash όταν το αρχικό ήταν Pro ή όταν η απάντηση δεν ήταν έγκυρη JSON.
-    should_fallback = (model_name != "gemini-2.5-flash")
-    if should_fallback:
-        second = _run_once("gemini-2.5-flash", audit_rows=12, summary_rows=20, count_rows=25)
-        if second.get('ok') and isinstance(second.get('parsed'), dict):
-            parsed = second['parsed']
-            required = ['executive_summary', 'critical_findings', 'data_gaps', 'recommended_actions', 'confidence', 'disclaimer']
-            missing = [k for k in required if k not in parsed]
-            if not missing:
+    # Fallback σε Gemini Flash μόνο όταν ο αρχικός provider είναι Gemini.
+    # Αν επιλέχθηκε Claude, επιστρέφουμε το πραγματικό σφάλμα χωρίς αυτόματο fallback.
+    is_already_gemini_flash = (provider == "gemini" and model_name == "gemini-2.5-flash")
+    if provider == "gemini" and not is_already_gemini_flash:
+        fb_key = _get_gemini_api_key()
+        if fb_key:
+            second = _run_once("gemini-2.5-flash", "gemini")
+            if second.get('ok') and isinstance(second.get('parsed'), dict):
                 return {
                     'ok': True,
-                    'data': parsed,
+                    'data': second.get('parsed'),
                     'raw_text': second.get('raw_text', ''),
                     'model_used': second.get('model_used'),
                     'fallback_used': True
                 }
-        # Αν και η 2η απόπειρα αποτύχει με quota, γύρνα ανθρώπινο μήνυμα.
-        if second.get('is_quota'):
-            retry_s = second.get('retry_after_seconds')
-            user_msg = "Υπέρβαση ορίου (quota) στο Gemini."
-            if retry_s:
-                user_msg += f" Δοκιμάστε ξανά σε περίπου {retry_s} δευτερόλεπτα."
-            return {
-                'ok': False,
-                'error': user_msg,
-                'retry_after_seconds': retry_s,
-                'raw_error': second.get('error', '')
-            }
-        return {
-            'ok': False,
-            'error': second.get('error', "Το AI δεν επέστρεψε έγκυρο JSON."),
-            'raw_text': second.get('raw_text', '')
-        }
 
-    # Χωρίς fallback (ήδη Flash): δώσε καλύτερο μήνυμα quota ή generic.
     if first.get('is_quota'):
         retry_s = first.get('retry_after_seconds')
-        user_msg = "Υπέρβαση ορίου (quota) στο Gemini."
+        user_msg = "Υπέρβαση ορίου (quota)."
         if retry_s:
             user_msg += f" Δοκιμάστε ξανά σε περίπου {retry_s} δευτερόλεπτα."
         return {
@@ -1930,12 +2188,95 @@ def generate_ai_case_summary(
             'retry_after_seconds': retry_s,
             'raw_error': first.get('error', '')
         }
-
     return {
         'ok': False,
         'error': first.get('error', "Το AI δεν επέστρεψε έγκυρο JSON."),
         'raw_text': first.get('raw_text', '')
     }
+
+def ai_chat_response(
+    user_message: str,
+    chat_history: list[dict],
+    case_context: str,
+    model_name: str = "gemini-2.5-flash",
+    provider: str = "gemini",
+    fallback_models: list[str] | None = None
+) -> str:
+    """
+    Απαντά σε ερώτηση χρήστη βασισμένη στα δεδομένα φακέλου.
+    chat_history: list of {"role": "user"|"assistant", "content": "..."}
+    case_context: JSON string με τα δεδομένα φακέλου (audit/summary/count).
+    Επιστρέφει string απάντηση.
+    """
+    system_prompt = (
+        "Είσαι βοηθός επαγγελματία συμβούλου συντάξεων. "
+        "Απαντάς σε ερωτήσεις βασισμένες ΑΠΟΚΛΕΙΣΤΙΚΑ στα δεδομένα φακέλου που σου δίνονται. "
+        "Μην εφευρίσκεις αριθμούς, ημερομηνίες ή γεγονότα που δεν υπάρχουν στα δεδομένα. "
+        "Αν δεν μπορείς να απαντήσεις από τα δεδομένα, πες το ξεκάθαρα. "
+        "Απάντησε πάντα στα Ελληνικά, σύντομα και ουσιαστικά."
+    )
+
+    context_message = f"Δεδομένα φακέλου:\n{case_context}"
+
+    if provider == "claude":
+        api_key = _get_anthropic_api_key()
+        if not api_key:
+            return "Δεν βρέθηκε ANTHROPIC_API_KEY."
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            messages = [{"role": "user", "content": context_message}]
+            messages.append({"role": "assistant", "content": "Κατάλαβα τα δεδομένα. Ρωτήστε ό,τι θέλετε."})
+            for msg in chat_history:
+                messages.append({"role": msg["role"], "content": msg["content"]})
+            messages.append({"role": "user", "content": user_message})
+
+            candidates = [model_name] + (fallback_models or [])
+            seen = set()
+            ordered = []
+            for m in candidates:
+                if m and m not in seen:
+                    seen.add(m)
+                    ordered.append(m)
+
+            last_err = None
+            for cand in ordered:
+                try:
+                    response = client.messages.create(
+                        model=cand,
+                        max_tokens=2048,
+                        system=system_prompt,
+                        messages=messages
+                    )
+                    return response.content[0].text if response.content else "Δεν ελήφθη απάντηση."
+                except Exception as e:
+                    last_err = e
+                    e_text = str(e).lower()
+                    if "not_found_error" in e_text or "model:" in e_text:
+                        continue
+                    return f"Σφάλμα Claude: {e}"
+            return f"Σφάλμα Claude: {last_err}" if last_err else "Σφάλμα Claude: Δεν βρέθηκε διαθέσιμο μοντέλο."
+        except Exception as e:
+            return f"Σφάλμα Claude: {e}"
+    else:
+        api_key = _get_gemini_api_key()
+        if not api_key:
+            return "Δεν βρέθηκε GEMINI_API_KEY."
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel(model_name=model_name)
+            prompt_parts = [system_prompt, context_message]
+            for msg in chat_history:
+                prefix = "Χρήστης: " if msg["role"] == "user" else "Βοηθός: "
+                prompt_parts.append(f"{prefix}{msg['content']}")
+            prompt_parts.append(f"Χρήστης: {user_message}")
+            prompt_parts.append("Βοηθός:")
+            response = model.generate_content("\n\n".join(prompt_parts))
+            return getattr(response, 'text', '') or "Δεν ελήφθη απάντηση."
+        except Exception as e:
+            return f"Σφάλμα Gemini: {e}"
+
 
 def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | None = None) -> pd.DataFrame:
     audit_rows = []
@@ -2115,6 +2456,22 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
             })
         else:
             audit_rows.append({'A/A': 5, 'Έλεγχος': 'Παράλληλη ασφάλιση', 'Εύρημα': 'Όχι', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+    except Exception:
+        pass
+
+    # Check 5B: Parallel Employment 2017+ (ΙΚΑ + ΕΦΚΑ ΜΗ ΜΙΣΘΩΤΗ / ΕΦΚΑ ΜΙΣΘΩΤΗ + ΕΦΚΑ ΜΗ ΜΙΣΘΩΤΗ)
+    try:
+        valid_months_2017 = compute_parallel_months_2017(data_df)
+        p2017_found = bool(valid_months_2017)
+        if p2017_found:
+            audit_rows.append({
+                'A/A': 11, 'Έλεγχος': 'Παράλληλη απασχόληση 2017+',
+                'Εύρημα': 'Πιθανή',
+                'Λεπτομέρειες': 'Βρέθηκαν χρονικά επικαλυπτόμενα διαστήματα από 01/2017 και μετά: ΙΚΑ (αποδοχές 01, 16, ή 99) & ΕΦΚΑ μη μισθωτή ή ΕΦΚΑ μισθωτή & ΕΦΚΑ μη μισθωτή.',
+                'Ενέργειες': 'Ελέγξτε την καρτέλα "Παράλληλη Απασχόληση 2017+"'
+            })
+        else:
+            audit_rows.append({'A/A': 11, 'Έλεγχος': 'Παράλληλη απασχόληση 2017+', 'Εύρημα': 'Όχι', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
     except Exception:
         pass
 
@@ -3197,6 +3554,7 @@ def show_results_page(df, filename):
         "gaps": "Κενά",
         "apd": "Ανάλυση ΑΠΔ",
         "parallel": "Παράλληλη",
+        "parallel_2017": "Παράλληλη Απασχόληση 2017+",
         "multi": "Πολλαπλή",
         "main": "Κύρια Δεδομένα",
         "annex": "Παράρτημα"
@@ -3262,8 +3620,16 @@ def show_results_page(df, filename):
                 tab_titles["parallel"] = "❗ Παράλληλη"
         except: pass
 
+        # 4. Παράλληλη Απασχόληση 2017+
+        try:
+            valid_months_2017 = compute_parallel_months_2017(df)
+            if valid_months_2017:
+                tab_titles["parallel_2017"] = "❗ Παράλληλη 2017+"
+        except:
+            pass
+
     # Δημιουργία tabs
-    tab_summary, tab_ai_summary, tab_count, tab_gaps, tab_apd, tab_parallel, tab_multi, tab_main, tab_annex = st.tabs(list(tab_titles.values()))
+    tab_summary, tab_ai_summary, tab_count, tab_gaps, tab_apd, tab_parallel, tab_parallel_2017, tab_multi, tab_main, tab_annex = st.tabs(list(tab_titles.values()))
     
     with tab_main:
         # Κύρια δεδομένα (χωρίς τις στήλες από τελευταίες σελίδες)
@@ -3468,19 +3834,21 @@ def show_results_page(df, filename):
         st.markdown("### AI Σύνοψη Φακέλου (BETA)")
         ai_row1, ai_row2, ai_row3 = st.columns([2, 0.7, 1])
         with ai_row1:
-            st.info("Παράγεται δομημένη σύνοψη φακέλου με βάση τη Σύνοψη, την Καταμέτρηση και τους βασικούς ελέγχους.")
+            st.info("Παράγεται δομημένη σύνοψη φακέλου με βάση τη Σύνοψη, τις καρτέλες και τους βασικούς ελέγχους. Επιπλέον, μπορείτε να κάνετε συγκεκριμένες ερωτήσεις για τα στοιχεία του φακέλου.")
         with ai_row2:
             run_ai_main = st.button("Παραγωγή AI Σύνοψης", type="primary", use_container_width=True, key="main_ai_generate")
         with ai_row3:
-            ai_model_main = st.selectbox(
-                "Μοντέλο Gemini:",
-                options=["gemini-2.5-flash", "gemini-2.5-pro"],
+            ai_model_labels = list(AI_MODEL_OPTIONS.keys())
+            ai_model_choice = st.selectbox(
+                "Μοντέλο AI:",
+                options=ai_model_labels,
                 index=0,
                 key="main_ai_model"
             )
 
         if run_ai_main:
-            with st.spinner("Παραγωγή σύνοψης από AI..."):
+            selected = AI_MODEL_OPTIONS.get(ai_model_choice, AI_MODEL_OPTIONS[ai_model_labels[0]])
+            with st.spinner(f"Παραγωγή σύνοψης ({ai_model_choice})..."):
                 audit_ai_df = generate_audit_report(df)
                 summary_ai_df = build_summary_grouped_display(df, df) if 'Κλάδος/Πακέτο Κάλυψης' in df.columns else pd.DataFrame()
                 ai_count_df = exclude_unused_packages(df.copy())
@@ -3489,6 +3857,11 @@ def show_results_page(df, filename):
                     description_map=description_map,
                     show_count_totals_only=False
                 )
+                gaps_ai_df = find_gaps_in_insurance_data(df)
+                parallel_ai_rows = [
+                    {'ΕΤΟΣ': int(y), 'Μήνας': int(m)}
+                    for (y, m) in compute_parallel_months(df)
+                ]
                 ai_meta = {
                     "analysis_date": datetime.date.today().strftime("%d/%m/%Y"),
                     "source_file": str(filename),
@@ -3498,15 +3871,19 @@ def show_results_page(df, filename):
                     audit_df=audit_ai_df,
                     summary_df=summary_ai_df,
                     count_df=count_ai_df,
+                    gaps_df=gaps_ai_df,
+                    parallel_rows=parallel_ai_rows,
                     metadata=ai_meta,
-                    model_name=ai_model_main
+                    model_name=selected["model"],
+                    provider=selected["provider"],
+                    fallback_models=selected.get("fallback_models")
                 )
 
         ai_main_result = st.session_state.get("main_ai_summary_result")
         if ai_main_result:
             if ai_main_result.get("ok"):
                 data = ai_main_result.get("data", {})
-                used_model = ai_main_result.get("model_used", ai_model_main)
+                used_model = ai_main_result.get("model_used", ai_model_choice)
                 if ai_main_result.get("fallback_used"):
                     st.success(f"Η AI σύνοψη δημιουργήθηκε (με fallback σε {used_model}).")
                 else:
@@ -3532,7 +3909,60 @@ def show_results_page(df, filename):
                 if retry_after:
                     wait_min = max(1, int(round(float(retry_after) / 60)))
                     st.warning(f"Προτείνεται νέα προσπάθεια σε περίπου {wait_min} λεπτά.")
-    
+
+        # --- AI Chat ---
+        st.markdown("---")
+        st.markdown("### Ρωτήστε για τον φάκελο")
+        st.caption("Κάντε ερωτήσεις σχετικά με τα δεδομένα του φακέλου. Η AI απαντά βασισμένη αποκλειστικά στα στοιχεία που αναλύθηκαν.")
+
+        if "ai_chat_history" not in st.session_state:
+            st.session_state["ai_chat_history"] = []
+
+        if "ai_chat_context" not in st.session_state:
+            chat_audit = generate_audit_report(df)
+            chat_summary = build_summary_grouped_display(df, df) if 'Κλάδος/Πακέτο Κάλυψης' in df.columns else pd.DataFrame()
+            chat_count_df = exclude_unused_packages(df.copy())
+            chat_count, _, _, _, _ = build_count_report(
+                chat_count_df,
+                description_map=description_map,
+                show_count_totals_only=False
+            )
+            chat_gaps = find_gaps_in_insurance_data(df)
+            chat_parallel_rows = [
+                {'ΕΤΟΣ': int(y), 'Μήνας': int(m)}
+                for (y, m) in compute_parallel_months(df)
+            ]
+            st.session_state["ai_chat_context"] = json.dumps({
+                'audit_findings': _df_to_records_for_ai(chat_audit),
+                'summary_rows': _df_to_records_for_ai(chat_summary),
+                'count_rows': _df_to_records_for_ai(chat_count),
+                'gaps_rows': _df_to_records_for_ai(chat_gaps),
+                'parallel_rows': chat_parallel_rows,
+            }, ensure_ascii=False)
+
+        for msg in st.session_state["ai_chat_history"]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        if chat_input := st.chat_input("Γράψτε την ερώτησή σας...", key="ai_chat_input"):
+            st.session_state["ai_chat_history"].append({"role": "user", "content": chat_input})
+            with st.chat_message("user"):
+                st.markdown(chat_input)
+
+            selected_chat = AI_MODEL_OPTIONS.get(ai_model_choice, AI_MODEL_OPTIONS[ai_model_labels[0]])
+            with st.chat_message("assistant"):
+                with st.spinner("Σκέφτομαι..."):
+                    answer = ai_chat_response(
+                        user_message=chat_input,
+                        chat_history=st.session_state["ai_chat_history"][:-1],
+                        case_context=st.session_state["ai_chat_context"],
+                        model_name=selected_chat["model"],
+                        provider=selected_chat["provider"],
+                        fallback_models=selected_chat.get("fallback_models")
+                    )
+                st.markdown(answer)
+            st.session_state["ai_chat_history"].append({"role": "assistant", "content": answer})
+
     with tab_annex:
         # Επιπλέον πίνακες (στήλες από τελευταίες σελίδες)
         extra_columns = [col for col in df.columns if col in ['Φορέας', 'Κωδικός Κλάδων / Πακέτων Κάλυψης', 'Περιγραφή']]
@@ -3716,6 +4146,22 @@ def show_results_page(df, filename):
                     else:
                         audit_rows.append({'A/A': 5, 'Έλεγχος': 'Παράλληλη ασφάλιση', 'Εύρημα': 'Όχι', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
                 except Exception: pass
+
+                # Check 5B: Parallel Employment 2017+
+                try:
+                    valid_months_2017 = compute_parallel_months_2017(data_df)
+                    p2017_found = bool(valid_months_2017)
+                    if p2017_found:
+                        audit_rows.append({
+                            'A/A': 11, 'Έλεγχος': 'Παράλληλη απασχόληση 2017+',
+                            'Εύρημα': 'Πιθανή',
+                            'Λεπτομέρειες': 'Βρέθηκαν χρονικά επικαλυπτόμενα διαστήματα από 01/2017 και μετά: ΙΚΑ (αποδοχές 01, 16, ή 99) & ΕΦΚΑ μη μισθωτή ή ΕΦΚΑ μισθωτή & ΕΦΚΑ μη μισθωτή.',
+                            'Ενέργειες': 'Ελέγξτε την καρτέλα "Παράλληλη Απασχόληση 2017+"'
+                        })
+                    else:
+                        audit_rows.append({'A/A': 11, 'Έλεγχος': 'Παράλληλη απασχόληση 2017+', 'Εύρημα': 'Όχι', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                except Exception:
+                    pass
 
                 # Check 6: Multiple Employers (Month-based Logic)
                 try:
@@ -4015,9 +4461,9 @@ def show_results_page(df, filename):
                     unsafe_allow_html=True
                 )
 
-            # Column 1: 1, 2, 5, 6
+            # Column 1: 1, 2, 5, 11, 6
             with ac1:
-                for aa in [1, 2, 5, 6]:
+                for aa in [1, 2, 5, 11, 6]:
                     r = audit_df[audit_df['A/A'] == aa]
                     if not r.empty: render_check(r.iloc[0])
 
@@ -6981,6 +7427,258 @@ def show_results_page(df, filename):
                     st.warning("Δεν βρέθηκαν διαστήματα παράλληλης ασφάλισης με τα συγκεκριμένα κριτήρια.")
             else:
                  st.warning("Δεν βρέθηκαν δεδομένα.")
+        else:
+            st.warning("Λείπουν απαραίτητες στήλες.")
+
+    with tab_parallel_2017:
+        st.markdown("### Παράλληλη Απασχόληση 2017+ (ΙΚΑ & ΕΦΚΑ ΜΗ ΜΙΣΘΩΤΗ / ΕΦΚΑ ΜΙΣΘΩΤΗ & ΕΦΚΑ ΜΗ ΜΙΣΘΩΤΗ)")
+        parallel_df = df.copy()
+        required_cols = ['Από', 'Έως', 'Ημέρες']
+
+        if all(col in parallel_df.columns for col in required_cols):
+            parallel_rows = []
+
+            with st.spinner("Υπολογισμός παράλληλης απασχόλησης 2017+..."):
+                for _, row in parallel_df.iterrows():
+                    try:
+                        if pd.isna(row['Από']) or pd.isna(row['Έως']):
+                            continue
+
+                        start_dt = pd.to_datetime(row['Από'], format='%d/%m/%Y', errors='coerce')
+                        end_dt = pd.to_datetime(row['Έως'], format='%d/%m/%Y', errors='coerce')
+                        if pd.isna(start_dt) or pd.isna(end_dt):
+                            continue
+
+                        days_val = 0
+                        if 'Ημέρες' in row and pd.notna(row['Ημέρες']) and str(row['Ημέρες']).strip() != '':
+                            d = clean_numeric_value(row['Ημέρες'])
+                            if d is not None and d != 0:
+                                days_val += d
+                        if 'Έτη' in row and pd.notna(row['Έτη']):
+                            y = clean_numeric_value(row['Έτη'])
+                            if y is not None and y != 0:
+                                days_val += y * 300
+                        if 'Μήνες' in row and pd.notna(row['Μήνες']):
+                            m = clean_numeric_value(row['Μήνες'])
+                            if m is not None and m != 0:
+                                days_val += m * 25
+
+                        raw_gross = str(row.get('Μικτές αποδοχές', ''))
+                        gross_val = 0.0 if ('ΔΡΧ' in raw_gross.upper() or 'DRX' in raw_gross.upper()) else (clean_numeric_value(raw_gross, exclude_drx=True) or 0.0)
+                        raw_contrib = str(row.get('Συνολικές εισφορές', ''))
+                        contrib_val = 0.0 if ('ΔΡΧ' in raw_contrib.upper() or 'DRX' in raw_contrib.upper()) else (clean_numeric_value(raw_contrib, exclude_drx=True) or 0.0)
+                        sign = get_negative_amount_sign(gross_val, contrib_val)
+                        if sign == -1:
+                            days_val = -abs(days_val)
+
+                        tameio = str(row.get('Ταμείο', '')).strip()
+                        insurance_type = str(row.get('Τύπος Ασφάλισης', '')).strip()
+                        employer = str(row.get('Α-Μ εργοδότη', '')).strip()
+                        klados = str(row.get('Κλάδος/Πακέτο Κάλυψης', '')).strip()
+                        klados_desc = description_map.get(klados, '') if 'description_map' in locals() else ''
+                        earnings_type = str(row.get('Τύπος Αποδοχών', '')).strip()
+                        foreas = str(row.get('Φορέας', '')).strip()
+
+                        curr = start_dt.replace(day=1)
+                        end_month_dt = end_dt.replace(day=1)
+                        months_list = []
+                        while curr <= end_month_dt:
+                            months_list.append(curr)
+                            if curr.month == 12:
+                                curr = curr.replace(year=curr.year + 1, month=1)
+                            else:
+                                curr = curr.replace(month=curr.month + 1)
+                        num_months = len(months_list)
+                        if num_months == 0:
+                            continue
+
+                        days_per_month = days_val / num_months
+                        gross_per_month = gross_val / num_months
+                        contrib_per_month = contrib_val / num_months
+                        is_aggregate = num_months > 1
+
+                        for m_dt in months_list:
+                            parallel_rows.append({
+                                'ΕΤΟΣ': m_dt.year,
+                                'ΤΑΜΕΙΟ': tameio,
+                                'ΦΟΡΕΑΣ': foreas,
+                                'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ': insurance_type,
+                                'ΕΡΓΟΔΟΤΗΣ': employer,
+                                'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ': klados,
+                                'ΠΕΡΙΓΡΑΦΗ': klados_desc,
+                                'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': earnings_type,
+                                'Μήνας_Num': m_dt.month,
+                                'Ημέρες': days_per_month,
+                                'Μικτές_Part': gross_per_month,
+                                'Εισφορές_Part': contrib_per_month,
+                                'Is_Aggregate': is_aggregate
+                            })
+                    except Exception:
+                        continue
+
+            if parallel_rows:
+                p_df = pd.DataFrame(parallel_rows)
+
+                def is_ika_match_2017(row):
+                    t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+                    i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+                    et = str(row.get('ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ', '')).strip()
+                    is_ika_tameio = 'IKA' in t or 'ΙΚΑ' in t
+                    is_misthoti = 'ΜΙΣΘΩΤΗ' in i_type and 'ΜΗ' not in i_type
+                    is_et_ika = et in ['01', '1', '16', '99']
+                    return (is_ika_tameio or is_misthoti) and is_et_ika
+
+                def is_efka_mis_match_2017(row):
+                    t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+                    i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+                    is_efka = 'ΕΦΚΑ' in t or 'EFKA' in t
+                    is_misthoti = 'ΜΙΣΘΩΤΗ' in i_type and 'ΜΗ' not in i_type
+                    return is_efka and is_misthoti
+
+                def is_efka_non_match_2017(row):
+                    t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+                    i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+                    is_efka = 'ΕΦΚΑ' in t or 'EFKA' in t
+                    is_non_misthoti = ('ΜΗ' in i_type and 'ΜΙΣΘΩΤΗ' in i_type) or ('NON' in i_type and 'SAL' in i_type)
+                    return is_efka and is_non_misthoti
+
+                p_df['is_ika'] = p_df.apply(is_ika_match_2017, axis=1)
+                p_df['is_efka_mis'] = p_df.apply(is_efka_mis_match_2017, axis=1)
+                p_df['is_efka_non'] = p_df.apply(is_efka_non_match_2017, axis=1)
+                p_df['ΕΤΟΣ'] = p_df['ΕΤΟΣ'].astype(int)
+                p_df['Μήνας_Num'] = p_df['Μήνας_Num'].astype(int)
+
+                month_groups = p_df.groupby(['ΕΤΟΣ', 'Μήνας_Num'])
+                valid_months = []
+                for (year, month), group in month_groups:
+                    if year < 2017:
+                        continue
+                    ika_days = group.loc[group['is_ika'], 'Ημέρες'].sum()
+                    efka_mis_days = group.loc[group['is_efka_mis'], 'Ημέρες'].sum()
+                    efka_non_days = group.loc[group['is_efka_non'], 'Ημέρες'].sum()
+
+                    has_ika_non = ika_days > 0 and efka_non_days > 0
+                    has_efka_mix = efka_mis_days > 0 and efka_non_days > 0
+                    if has_ika_non or has_efka_mix:
+                        valid_months.append((year, month))
+
+                parallel_days_total = 0
+                for (year, month) in valid_months:
+                    try:
+                        g = month_groups.get_group((year, month))
+                    except KeyError:
+                        continue
+                    ika_cap = min(g.loc[g['is_ika'], 'Ημέρες'].sum(), 25)
+                    efka_mis_cap = min(g.loc[g['is_efka_mis'], 'Ημέρες'].sum(), 25)
+                    efka_non_cap = min(g.loc[g['is_efka_non'], 'Ημέρες'].sum(), 25)
+                    cands = []
+                    if ika_cap > 0 and efka_non_cap > 0:
+                        cands.append(max(ika_cap + efka_non_cap - 25, 0))
+                    if efka_mis_cap > 0 and efka_non_cap > 0:
+                        cands.append(max(efka_mis_cap + efka_non_cap - 25, 0))
+                    parallel_days_total += max(cands) if cands else 0
+                parallel_days_total = int(round(parallel_days_total))
+
+                info_col1, info_col2, info_col3 = st.columns([3, 3, 2])
+                with info_col1:
+                    st.info("Εμφάνιση διαστημάτων από 01/2017 και μετά όπου συνυπάρχουν στον ίδιο μήνα: ΙΚΑ (αποδοχές 01, 16 ή 99) & ΕΦΚΑ μη μισθωτή ή ΕΦΚΑ μισθωτή & ΕΦΚΑ μη μισθωτή.")
+                with info_col2:
+                    met_col1, met_col2 = st.columns(2)
+                    with met_col1:
+                        st.metric("Μήνες Παράλληλης 2017+", format_number_greek(len(valid_months), decimals=0))
+                    with met_col2:
+                        st.metric("Ημέρες Παράλληλης 2017+", format_number_greek(parallel_days_total, decimals=0))
+                    st.caption("Κριτήρια: ΙΚΑ (αποδοχές 01, 16, ή 99) + ΕΦΚΑ μη μισθωτή ή ΕΦΚΑ μισθωτή + ΕΦΚΑ μη μισθωτή. Εφαρμόζεται όριο 25 ημερών/μήνα.")
+                with info_col3:
+                    st.warning("Διαστήματα που καλύπτουν πολλαπλούς μήνες επιμερίζονται και επισημαίνονται με κίτρινο χρώμα.")
+
+                if valid_months:
+                    valid_months_df = pd.DataFrame(valid_months, columns=['ΕΤΟΣ', 'Μήνας_Num'])
+                    p_df_filtered = p_df.merge(valid_months_df, on=['ΕΤΟΣ', 'Μήνας_Num'], how='inner')
+                    p_df_filtered = p_df_filtered[p_df_filtered['is_ika'] | p_df_filtered['is_efka_mis'] | p_df_filtered['is_efka_non']]
+
+                    annual_totals = p_df_filtered.groupby(['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'])[['Ημέρες', 'Μικτές_Part', 'Εισφορές_Part']].sum().reset_index()
+                    annual_totals.rename(columns={'Ημέρες': 'ΣΥΝΟΛΟ', 'Μικτές_Part': 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'Εισφορές_Part': 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ'}, inplace=True)
+
+                    pivot_df = p_df_filtered.groupby(['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ', 'Μήνας_Num'])['Ημέρες'].sum().reset_index()
+                    pivot_df = pivot_df.pivot_table(
+                        index=['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'],
+                        columns='Μήνας_Num',
+                        values='Ημέρες',
+                        fill_value=0
+                    ).reset_index()
+
+                    month_mapping = {1: 'ΙΑΝ', 2: 'ΦΕΒ', 3: 'ΜΑΡ', 4: 'ΑΠΡ', 5: 'ΜΑΙ', 6: 'ΙΟΥΝ', 7: 'ΙΟΥΛ', 8: 'ΑΥΓ', 9: 'ΣΕΠ', 10: 'ΟΚΤ', 11: 'ΝΟΕ', 12: 'ΔΕΚ'}
+                    pivot_df.rename(columns=month_mapping, inplace=True)
+                    display_df = annual_totals.merge(pivot_df, on=['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'], how='left')
+
+                    month_cols = [month_mapping[m] for m in range(1, 13) if month_mapping[m] in display_df.columns]
+                    for c in month_cols:
+                        display_df[c] = pd.to_numeric(display_df[c], errors='coerce').fillna(0)
+
+                    # Ίδιο ανώτατο όριο: 25 ημέρες/μήνα για μη-ΙΚΑ σειρές.
+                    tameio_level = display_df['ΤΑΜΕΙΟ'].astype(str).str.upper()
+                    is_ika_row = tameio_level.str.contains('ΙΚΑ|IKA', na=False)
+                    for m_col in month_cols:
+                        display_df.loc[~is_ika_row, m_col] = display_df.loc[~is_ika_row, m_col].clip(upper=25)
+                    display_df['ΣΥΝΟΛΟ'] = display_df[month_cols].sum(axis=1)
+
+                    display_df.rename(columns={
+                        'ΕΤΟΣ': 'Έτος',
+                        'ΤΑΜΕΙΟ': 'Ταμείο',
+                        'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ': 'Τύπος Ασφάλισης',
+                        'ΕΡΓΟΔΟΤΗΣ': 'Εργοδότης',
+                        'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ': 'Κλάδος/Πακέτο',
+                        'ΠΕΡΙΓΡΑΦΗ': 'Περιγραφή',
+                        'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': 'Τύπος Αποδοχών',
+                        'ΣΥΝΟΛΟ': 'Σύνολο',
+                        'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ': 'Μικτές Αποδοχές',
+                        'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ': 'Συνολικές Εισφορές'
+                    }, inplace=True)
+
+                    # Μορφοποίηση και επισήμανση γραμμών επιμερισμού
+                    agg_mask = p_df_filtered.groupby(
+                        ['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ']
+                    )['Is_Aggregate'].max().reset_index()
+                    agg_mask.rename(columns={
+                        'ΕΤΟΣ': 'Έτος', 'ΤΑΜΕΙΟ': 'Ταμείο', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ': 'Τύπος Ασφάλισης',
+                        'ΕΡΓΟΔΟΤΗΣ': 'Εργοδότης', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ': 'Κλάδος/Πακέτο',
+                        'ΠΕΡΙΓΡΑΦΗ': 'Περιγραφή', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': 'Τύπος Αποδοχών'
+                    }, inplace=True)
+                    display_df = display_df.merge(
+                        agg_mask,
+                        on=['Έτος', 'Ταμείο', 'Τύπος Ασφάλισης', 'Εργοδότης', 'Κλάδος/Πακέτο', 'Περιγραφή', 'Τύπος Αποδοχών'],
+                        how='left'
+                    )
+
+                    for c in month_cols + ['Σύνολο']:
+                        if c in display_df.columns:
+                            display_df[c] = display_df[c].apply(lambda x: format_number_greek(x, decimals=0) if pd.notna(x) and x != 0 else '')
+                    for c in ['Μικτές Αποδοχές', 'Συνολικές Εισφορές']:
+                        if c in display_df.columns:
+                            display_df[c] = display_df[c].apply(format_currency)
+
+                    def style_parallel_2017(row):
+                        is_agg = row.get('Is_Aggregate', False)
+                        styles = []
+                        for _ in row.index:
+                            styles.append('background-color: #fff9c4' if is_agg else '')
+                        return styles
+
+                    styler = display_df.drop(columns=['Is_Aggregate']).style.apply(style_parallel_2017, axis=1)
+                    st.dataframe(styler, use_container_width=True, hide_index=True)
+                    st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
+                    register_view("Παράλληλη_Απασχόληση_2017+", display_df.drop(columns=['Is_Aggregate']))
+                    render_print_button(
+                        "print_parallel_2017",
+                        "Παράλληλη Απασχόληση 2017+",
+                        display_df.drop(columns=['Is_Aggregate']),
+                        description="Πίνακας Παράλληλης Απασχόλησης 2017+ (ΙΚΑ/ΕΦΚΑ Μισθωτή & ΕΦΚΑ Μη Μισθωτή)."
+                    )
+                else:
+                    st.warning("Δεν βρέθηκαν διαστήματα παράλληλης απασχόλησης 2017+ με τα συγκεκριμένα κριτήρια.")
+            else:
+                st.warning("Δεν βρέθηκαν δεδομένα.")
         else:
             st.warning("Λείπουν απαραίτητες στήλες.")
 
