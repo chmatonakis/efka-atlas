@@ -472,12 +472,18 @@ def build_print_table_html(
     dataframe: pd.DataFrame,
     style_rows: list[dict[str, str]] | None = None,
     wrap_cells: bool = False,
+    bold_columns: list[str] | None = None,
+    col_width_overrides: dict[str, str] | None = None,
 ) -> str:
+    _bold_cols = set(bold_columns or [])
+    _width_ov = col_width_overrides or {}
+
     colgroup_html = '<colgroup>'
     for col in dataframe.columns:
         c_name = str(col).upper().strip()
-        width = 'auto'
-        if c_name in ['A/A', 'Α/Α', 'AA']:
+        if col in _width_ov:
+            width = _width_ov[col]
+        elif c_name in ['A/A', 'Α/Α', 'AA']:
             width = '20px'
         elif c_name in ['ΕΤΟΣ', 'ETOS', 'ΈΤΟΣ']:
             width = '28px'
@@ -503,6 +509,8 @@ def build_print_table_html(
             width = '52px'
         elif 'ΠΟΣΟΣΤΟ' in c_name:
             width = '30px'
+        else:
+            width = 'auto'
         colgroup_html += f'<col style="width:{width}">'
     colgroup_html += '</colgroup>'
 
@@ -516,6 +524,8 @@ def build_print_table_html(
         for cidx, v in enumerate(row.values):
             col_name = dataframe.columns[cidx]
             cell_style = row_styles.get(col_name, '')
+            if col_name in _bold_cols:
+                cell_style = (cell_style + '; ' if cell_style else '') + 'font-weight:700'
             style_attr = f' style="{cell_style}"' if cell_style else ''
             tds_list.append(f"<td{style_attr}>{'' if pd.isna(v) else v}</td>")
         tds = ''.join(tds_list)
@@ -565,14 +575,17 @@ def build_yearly_print_html(
     year_column: str = 'ΕΤΟΣ',
     style_rows: list[dict[str, str]] | None = None,
     wrap_cells: bool = False,
+    extra_group_cols: list[str] | None = None,
+    bold_columns: list[str] | None = None,
+    col_width_overrides: dict[str, str] | None = None,
 ) -> str:
-    """Σπάει DataFrame ανά έτος σε ξεχωριστούς πίνακες με heading ανά έτος.
-    Αφαιρεί τη στήλη έτους από τον πίνακα. Κρατά total-rows μέσα στο έτος τους.
+    """Σπάει DataFrame ανά έτος (+ extra_group_cols) σε ξεχωριστούς πίνακες.
+    Αφαιρεί τις στήλες ομαδοποίησης από τον πίνακα. Κρατά total-rows μέσα στο group τους.
     """
     if year_column not in dataframe.columns:
-        return build_print_table_html(dataframe, style_rows, wrap_cells=wrap_cells)
+        return build_print_table_html(dataframe, style_rows, wrap_cells=wrap_cells,
+                                       bold_columns=bold_columns, col_width_overrides=col_width_overrides)
 
-    col_name_map = {c: c for c in dataframe.columns}
     year_alt = None
     for c in dataframe.columns:
         if c.strip().upper() in ('ΕΤΟΣ', 'ΈΤΟΣ', 'YEAR', 'Έτος'):
@@ -581,13 +594,18 @@ def build_yearly_print_html(
     if year_alt:
         year_column = year_alt
 
+    _extra = extra_group_cols or []
+    all_group_cols = [year_column] + [c for c in _extra if c in dataframe.columns]
+
+    def _group_key(row_idx: int) -> str:
+        vals = [str(dataframe.iloc[row_idx].get(c, '')).strip() for c in all_group_cols]
+        return ' | '.join(v for v in vals if v)
+
     sections: list[str] = []
-    current_year = None
+    current_key: str | None = None
     current_rows: list[int] = []
 
     for idx in range(len(dataframe)):
-        row_year_val = str(dataframe.iloc[idx].get(year_column, '')).strip()
-
         is_empty_row = all(
             str(dataframe.iloc[idx].get(c, '')).strip() == ''
             for c in dataframe.columns
@@ -595,19 +613,22 @@ def build_yearly_print_html(
         if is_empty_row:
             continue
 
-        if row_year_val and row_year_val != current_year and row_year_val != '':
-            if current_rows and current_year:
+        row_key = _group_key(idx)
+        if row_key and row_key != current_key:
+            if current_rows and current_key:
                 sections.append(_render_year_section(
-                    dataframe, current_rows, current_year, year_column, style_rows, wrap_cells
+                    dataframe, current_rows, current_key, all_group_cols,
+                    style_rows, wrap_cells, bold_columns, col_width_overrides
                 ))
-            current_year = row_year_val
+            current_key = row_key
             current_rows = [idx]
         else:
             current_rows.append(idx)
 
-    if current_rows and current_year:
+    if current_rows and current_key:
         sections.append(_render_year_section(
-            dataframe, current_rows, current_year, year_column, style_rows, wrap_cells
+            dataframe, current_rows, current_key, all_group_cols,
+            style_rows, wrap_cells, bold_columns, col_width_overrides
         ))
 
     return "\n".join(sections)
@@ -616,14 +637,17 @@ def build_yearly_print_html(
 def _render_year_section(
     dataframe: pd.DataFrame,
     row_indices: list[int],
-    year_label: str,
-    year_column: str,
+    heading_label: str,
+    drop_columns: list[str],
     style_rows: list[dict[str, str]] | None,
     wrap_cells: bool,
+    bold_columns: list[str] | None = None,
+    col_width_overrides: dict[str, str] | None = None,
 ) -> str:
     subset = dataframe.iloc[row_indices].copy()
-    if year_column in subset.columns:
-        subset = subset.drop(columns=[year_column])
+    for col in drop_columns:
+        if col in subset.columns:
+            subset = subset.drop(columns=[col])
 
     sub_styles = None
     if style_rows:
@@ -631,17 +655,19 @@ def _render_year_section(
         for idx in row_indices:
             if idx < len(style_rows):
                 row_style = dict(style_rows[idx])
-                row_style.pop(year_column, None)
-                row_style.pop('ΕΤΟΣ', None)
-                row_style.pop('Έτος', None)
+                for col in drop_columns:
+                    row_style.pop(col, None)
                 sub_styles.append(row_style)
             else:
                 sub_styles.append({})
 
-    table_html = build_print_table_html(subset.reset_index(drop=True), sub_styles, wrap_cells=wrap_cells)
+    table_html = build_print_table_html(
+        subset.reset_index(drop=True), sub_styles, wrap_cells=wrap_cells,
+        bold_columns=bold_columns, col_width_overrides=col_width_overrides
+    )
     return (
         f"<div class='year-section'>"
-        f"<div class='year-heading'>{html.escape(str(year_label))}</div>"
+        f"<div class='year-heading'>{html.escape(str(heading_label))}</div>"
         f"{table_html}"
         f"</div>"
     )
@@ -751,6 +777,9 @@ def build_print_html(
     wrap_cells: bool = False,
     yearly: bool = False,
     year_column: str = 'ΕΤΟΣ',
+    extra_group_cols: list[str] | None = None,
+    bold_columns: list[str] | None = None,
+    col_width_overrides: dict[str, str] | None = None,
 ) -> str:
     client_name = (client_name or '').strip()
     client_amka = (client_amka or '').strip()
@@ -761,9 +790,15 @@ def build_print_html(
     description_html = f"<p class='print-description'>{html.escape(description)}</p>" if description else ''
     filters_html = build_print_filters_html(filters)
     if yearly:
-        table_html = build_yearly_print_html(dataframe, year_column=year_column, style_rows=style_rows, wrap_cells=wrap_cells)
+        table_html = build_yearly_print_html(
+            dataframe, year_column=year_column, style_rows=style_rows, wrap_cells=wrap_cells,
+            extra_group_cols=extra_group_cols, bold_columns=bold_columns, col_width_overrides=col_width_overrides
+        )
     else:
-        table_html = build_print_table_html(dataframe, style_rows, wrap_cells=wrap_cells)
+        table_html = build_print_table_html(
+            dataframe, style_rows, wrap_cells=wrap_cells,
+            bold_columns=bold_columns, col_width_overrides=col_width_overrides
+        )
     disclaimer_html = get_print_disclaimer_html()
 
     body_html = (
@@ -788,16 +823,10 @@ def render_print_button(
     scale: float = 1.0,
     yearly: bool = False,
     year_column: str = 'ΕΤΟΣ',
+    extra_group_cols: list[str] | None = None,
+    bold_columns: list[str] | None = None,
+    col_width_overrides: dict[str, str] | None = None,
 ) -> None:
-    """Εμφανίζει κουμπί εκτύπωσης που ανοίγει νέο παράθυρο με καλαίσθητη εκτύπωση του πίνακα.
-
-    Args:
-        button_key: Μοναδικό key για το κουμπί
-        title: Τίτλος που θα εμφανιστεί στην εκτύπωση
-        dataframe: Τα δεδομένα προς εκτύπωση (όπως εμφανίζονται)
-        description: Προαιρετική περιγραφή που θα εμφανιστεί κάτω από τον τίτλο
-        filters: Προαιρετική λίστα με περιγραφές φίλτρων που εφαρμόστηκαν
-    """
     col_spacer, col_btn = st.columns([1, 0.12])
     with col_btn:
         if st.button("Εκτύπωση", key=button_key, use_container_width=True):
@@ -821,6 +850,9 @@ def render_print_button(
                 scale=scale,
                 yearly=yearly,
                 year_column=year_column,
+                extra_group_cols=extra_group_cols,
+                bold_columns=bold_columns,
+                col_width_overrides=col_width_overrides,
             )
 
             # Δημιουργία JavaScript που θα ανοίξει νέο tab με auto-print
@@ -1779,6 +1811,302 @@ def compute_parallel_months_2017(base_df: pd.DataFrame) -> list[tuple[int, int]]
             valid_months.append((year, month))
 
     return valid_months
+
+
+def _build_monthly_rows_for_parallel(df: pd.DataFrame, description_map: dict | None = None) -> list[dict]:
+    """Κοινή λογική ανάλυσης ανά μήνα για Παράλληλη Ασφάλιση / Απασχόληση."""
+    rows: list[dict] = []
+    for _, row in df.iterrows():
+        try:
+            if pd.isna(row.get('Από')) or pd.isna(row.get('Έως')):
+                continue
+            start_dt = pd.to_datetime(row['Από'], format='%d/%m/%Y', errors='coerce')
+            end_dt = pd.to_datetime(row['Έως'], format='%d/%m/%Y', errors='coerce')
+            if pd.isna(start_dt) or pd.isna(end_dt):
+                continue
+
+            days_val = 0.0
+            if 'Ημέρες' in row and pd.notna(row.get('Ημέρες')) and str(row.get('Ημέρες', '')).strip() != '':
+                d = clean_numeric_value(row.get('Ημέρες'))
+                if d is not None and d != 0:
+                    days_val += float(d)
+            if 'Έτη' in row and pd.notna(row.get('Έτη')):
+                y = clean_numeric_value(row.get('Έτη'))
+                if y is not None and y != 0:
+                    days_val += float(y) * 300
+            if 'Μήνες' in row and pd.notna(row.get('Μήνες')):
+                m = clean_numeric_value(row.get('Μήνες'))
+                if m is not None and m != 0:
+                    days_val += float(m) * 25
+
+            raw_gross = str(row.get('Μικτές αποδοχές', ''))
+            gross_val = 0.0 if ('ΔΡΧ' in raw_gross.upper() or 'DRX' in raw_gross.upper()) else (clean_numeric_value(raw_gross, exclude_drx=True) or 0.0)
+            raw_contrib = str(row.get('Συνολικές εισφορές', ''))
+            contrib_val = 0.0 if ('ΔΡΧ' in raw_contrib.upper() or 'DRX' in raw_contrib.upper()) else (clean_numeric_value(raw_contrib, exclude_drx=True) or 0.0)
+            sign = get_negative_amount_sign(gross_val, contrib_val)
+            if sign == -1:
+                days_val = -abs(days_val)
+
+            tameio = str(row.get('Ταμείο', '')).strip()
+            insurance_type = str(row.get('Τύπος Ασφάλισης', '')).strip()
+            employer = str(row.get('Α-Μ εργοδότη', '')).strip()
+            klados = str(row.get('Κλάδος/Πακέτο Κάλυψης', '')).strip()
+            klados_desc = description_map.get(klados, '') if isinstance(description_map, dict) else ''
+            earnings_type = str(row.get('Τύπος Αποδοχών', '')).strip()
+
+            curr = start_dt.replace(day=1)
+            end_month_dt = end_dt.replace(day=1)
+            months_list = []
+            while curr <= end_month_dt:
+                months_list.append(curr)
+                if curr.month == 12:
+                    curr = curr.replace(year=curr.year + 1, month=1)
+                else:
+                    curr = curr.replace(month=curr.month + 1)
+            num_months = len(months_list)
+            if num_months == 0:
+                continue
+
+            days_per_month = days_val / num_months
+            gross_per_month = gross_val / num_months
+            contrib_per_month = contrib_val / num_months
+
+            for m_dt in months_list:
+                rows.append({
+                    'ΕΤΟΣ': m_dt.year,
+                    'ΤΑΜΕΙΟ': tameio,
+                    'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ': insurance_type,
+                    'ΕΡΓΟΔΟΤΗΣ': employer,
+                    'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ': klados,
+                    'ΠΕΡΙΓΡΑΦΗ': klados_desc,
+                    'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': earnings_type,
+                    'Μήνας_Num': m_dt.month,
+                    'Ημέρες': days_per_month,
+                    'Μικτές_Part': gross_per_month,
+                    'Εισφορές_Part': contrib_per_month,
+                })
+        except Exception:
+            continue
+    return rows
+
+
+def _pivot_parallel_df(p_df_filtered: pd.DataFrame, month_map: dict) -> pd.DataFrame:
+    """Pivot + cap + μορφοποίηση DataFrame παράλληλης για εκτύπωση."""
+    idx_cols = ['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ']
+    annual = p_df_filtered.groupby(idx_cols)[['Ημέρες', 'Μικτές_Part', 'Εισφορές_Part']].sum().reset_index()
+    annual.rename(columns={'Ημέρες': 'ΣΥΝΟΛΟ', 'Μικτές_Part': 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'Εισφορές_Part': 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ'}, inplace=True)
+
+    piv = p_df_filtered.groupby(idx_cols + ['Μήνας_Num'])['Ημέρες'].sum().reset_index()
+    piv = piv.pivot_table(index=idx_cols, columns='Μήνας_Num', values='Ημέρες', fill_value=0).reset_index()
+    piv.rename(columns=month_map, inplace=True)
+
+    out = annual.merge(piv, on=idx_cols, how='left')
+    m_cols = [month_map[m] for m in sorted(month_map) if month_map[m] in out.columns]
+    for c in m_cols:
+        out[c] = pd.to_numeric(out[c], errors='coerce').fillna(0)
+
+    tameio_upper = out['ΤΑΜΕΙΟ'].astype(str).str.upper()
+    is_ika = tameio_upper.str.contains('ΙΚΑ|IKA', na=False)
+    for c in m_cols:
+        out.loc[~is_ika, c] = out.loc[~is_ika, c].clip(upper=25)
+    out['ΣΥΝΟΛΟ'] = out[m_cols].sum(axis=1)
+
+    out.rename(columns={
+        'ΕΤΟΣ': 'Έτος', 'ΤΑΜΕΙΟ': 'Ταμείο', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ': 'Τύπος Ασφάλισης',
+        'ΕΡΓΟΔΟΤΗΣ': 'Εργοδότης', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ': 'Κλάδος/Πακέτο', 'ΠΕΡΙΓΡΑΦΗ': 'Περιγραφή',
+        'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': 'Τύπος Αποδοχών', 'ΣΥΝΟΛΟ': 'Σύνολο',
+        'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ': 'Μικτές Αποδοχές', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ': 'Συνολικές Εισφορές'
+    }, inplace=True)
+
+    renamed_m_cols = [out.columns[out.columns.get_loc(c)] if c in out.columns else c for c in m_cols]
+    for c in renamed_m_cols + ['Σύνολο']:
+        if c in out.columns:
+            out[c] = out[c].apply(lambda x: format_number_greek(x, decimals=0) if pd.notna(x) and x != 0 else '')
+    for c in ['Μικτές Αποδοχές', 'Συνολικές Εισφορές']:
+        if c in out.columns:
+            out[c] = out[c].apply(format_currency)
+
+    out = out.sort_values('Έτος')
+    return out
+
+
+def build_parallel_print_df(df: pd.DataFrame, description_map: dict | None = None) -> pd.DataFrame | None:
+    """Παράγει το DataFrame Παράλληλης Ασφάλισης (≤2016) έτοιμο για εκτύπωση."""
+    if df.empty or not all(c in df.columns for c in ['Από', 'Έως']):
+        return None
+
+    monthly_rows = _build_monthly_rows_for_parallel(df, description_map)
+    if not monthly_rows:
+        return None
+
+    p_df = pd.DataFrame(monthly_rows)
+    p_df['ΕΤΟΣ'] = p_df['ΕΤΟΣ'].astype(int)
+    p_df['Μήνας_Num'] = p_df['Μήνας_Num'].astype(int)
+
+    def _is_ika_match(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+        et = str(row.get('ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ', '')).strip()
+        return (('IKA' in t or 'ΙΚΑ' in t) or ('ΜΙΣΘΩΤΗ' in i_type and 'ΜΗ' not in i_type)) and et in ['01', '1', '16', '99']
+
+    def _is_oaee_match(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        kl = str(row.get('ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', '')).strip().upper()
+        return ('OAEE' in t or 'ΟΑΕΕ' in t or 'TEBE' in t or 'ΤΕΒΕ' in t or 'TAE' in t or 'ΤΑΕ' in t) and kl in ['K', 'Κ']
+
+    def _is_tsm_match(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        kl = str(row.get('ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', '')).strip().upper()
+        return ('ΤΣΜΕΔΕ' in t or 'TSMEDE' in t) and kl in ['ΚΣ', 'ΠΚΣ', 'KS', 'PKS']
+
+    def _is_oga_match(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        kl = str(row.get('ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', '')).strip().upper()
+        return ('ΟΓΑ' in t or 'OGA' in t) and kl in ['K', 'Κ']
+
+    def _is_ika_general(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+        return ('IKA' in t or 'ΙΚΑ' in t) or ('ΜΙΣΘΩΤΗ' in i_type and 'ΜΗ' not in i_type)
+
+    p_df['is_ika'] = p_df.apply(_is_ika_match, axis=1)
+    p_df['is_oaee'] = p_df.apply(_is_oaee_match, axis=1)
+    p_df['is_tsm'] = p_df.apply(_is_tsm_match, axis=1)
+    p_df['is_oga'] = p_df.apply(_is_oga_match, axis=1)
+    p_df['is_ika_general'] = p_df.apply(_is_ika_general, axis=1)
+
+    month_groups = p_df.groupby(['ΕΤΟΣ', 'Μήνας_Num'])
+    valid_months = []
+    for (year, month), group in month_groups:
+        if year > 2016:
+            continue
+        ika_d = group.loc[group['is_ika'], 'Ημέρες'].sum()
+        oaee_d = min(group.loc[group['is_oaee'], 'Ημέρες'].sum(), 25)
+        tsm_d = min(group.loc[group['is_tsm'], 'Ημέρες'].sum(), 25)
+        oga_d = min(group.loc[group['is_oga'], 'Ημέρες'].sum(), 25)
+        if (ika_d > 0 and oaee_d > 0) or (oaee_d > 0 and tsm_d > 0) or (oga_d > 0 and (ika_d > 0 or oaee_d > 0)):
+            valid_months.append((year, month))
+
+    if not valid_months:
+        return None
+
+    valid_df = pd.DataFrame(valid_months, columns=['ΕΤΟΣ', 'Μήνας_Num'])
+    filtered = p_df.merge(valid_df, on=['ΕΤΟΣ', 'Μήνας_Num'], how='inner')
+    filtered = filtered[filtered['is_ika_general'] | filtered['is_oaee'] | filtered['is_tsm'] | filtered['is_oga']]
+    filtered = filtered.drop(columns=['is_ika', 'is_oaee', 'is_tsm', 'is_oga', 'is_ika_general'])
+
+    if filtered.empty:
+        return None
+
+    month_map = {m: f"{m}ος" for m in range(1, 13)}
+    return _pivot_parallel_df(filtered, month_map)
+
+
+def build_parallel_2017_print_df(df: pd.DataFrame, description_map: dict | None = None) -> pd.DataFrame | None:
+    """Παράγει το DataFrame Παράλληλης Απασχόλησης 2017+ έτοιμο για εκτύπωση."""
+    if df.empty or not all(c in df.columns for c in ['Από', 'Έως']):
+        return None
+
+    monthly_rows = _build_monthly_rows_for_parallel(df, description_map)
+    if not monthly_rows:
+        return None
+
+    p_df = pd.DataFrame(monthly_rows)
+    p_df['ΕΤΟΣ'] = p_df['ΕΤΟΣ'].astype(int)
+    p_df['Μήνας_Num'] = p_df['Μήνας_Num'].astype(int)
+
+    def _is_ika(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+        et = str(row.get('ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ', '')).strip()
+        return (('IKA' in t or 'ΙΚΑ' in t) or ('ΜΙΣΘΩΤΗ' in i_type and 'ΜΗ' not in i_type)) and et in ['01', '1', '16', '99']
+
+    def _is_efka_mis(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+        return ('ΕΦΚΑ' in t or 'EFKA' in t) and ('ΜΙΣΘΩΤΗ' in i_type and 'ΜΗ' not in i_type)
+
+    def _is_efka_non(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+        return ('ΕΦΚΑ' in t or 'EFKA' in t) and (('ΜΗ' in i_type and 'ΜΙΣΘΩΤΗ' in i_type) or ('NON' in i_type and 'SAL' in i_type))
+
+    p_df['is_ika'] = p_df.apply(_is_ika, axis=1)
+    p_df['is_efka_mis'] = p_df.apply(_is_efka_mis, axis=1)
+    p_df['is_efka_non'] = p_df.apply(_is_efka_non, axis=1)
+
+    month_groups = p_df.groupby(['ΕΤΟΣ', 'Μήνας_Num'])
+    valid_months = []
+    for (year, month), group in month_groups:
+        if year < 2017:
+            continue
+        ika_d = group.loc[group['is_ika'], 'Ημέρες'].sum()
+        efka_mis_d = group.loc[group['is_efka_mis'], 'Ημέρες'].sum()
+        efka_non_d = group.loc[group['is_efka_non'], 'Ημέρες'].sum()
+        if (ika_d > 0 and efka_non_d > 0) or (efka_mis_d > 0 and efka_non_d > 0):
+            valid_months.append((year, month))
+
+    if not valid_months:
+        return None
+
+    valid_df = pd.DataFrame(valid_months, columns=['ΕΤΟΣ', 'Μήνας_Num'])
+    filtered = p_df.merge(valid_df, on=['ΕΤΟΣ', 'Μήνας_Num'], how='inner')
+    filtered = filtered[filtered['is_ika'] | filtered['is_efka_mis'] | filtered['is_efka_non']]
+    filtered = filtered.drop(columns=['is_ika', 'is_efka_mis', 'is_efka_non'])
+
+    if filtered.empty:
+        return None
+
+    month_map = {1: 'ΙΑΝ', 2: 'ΦΕΒ', 3: 'ΜΑΡ', 4: 'ΑΠΡ', 5: 'ΜΑΙ', 6: 'ΙΟΥΝ', 7: 'ΙΟΥΛ', 8: 'ΑΥΓ', 9: 'ΣΕΠ', 10: 'ΟΚΤ', 11: 'ΝΟΕ', 12: 'ΔΕΚ'}
+    return _pivot_parallel_df(filtered, month_map)
+
+
+def build_multi_employment_print_df(df: pd.DataFrame, description_map: dict | None = None) -> pd.DataFrame | None:
+    """Παράγει το DataFrame Πολλαπλής Απασχόλησης (ΙΚΑ, >1 εργοδότες) έτοιμο για εκτύπωση."""
+    if df.empty or not all(c in df.columns for c in ['Από', 'Έως']):
+        return None
+
+    monthly_rows = _build_monthly_rows_for_parallel(df, description_map)
+    if not monthly_rows:
+        return None
+
+    p_df = pd.DataFrame(monthly_rows)
+    p_df['ΕΤΟΣ'] = p_df['ΕΤΟΣ'].astype(int)
+    p_df['Μήνας_Num'] = p_df['Μήνας_Num'].astype(int)
+
+    def _is_ika_match(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+        et = str(row.get('ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ', '')).strip()
+        return (('IKA' in t or 'ΙΚΑ' in t) or ('ΜΙΣΘΩΤΗ' in i_type and 'ΜΗ' not in i_type)) and et in ['01', '1', '16', '99']
+
+    p_df['is_ika'] = p_df.apply(_is_ika_match, axis=1)
+    ika_rows = p_df[p_df['is_ika']].copy()
+    ika_rows['ΕΡΓΟΔΟΤΗΣ_Clean'] = ika_rows['ΕΡΓΟΔΟΤΗΣ'].replace(['', 'nan', 'NaN', 'None'], pd.NA)
+    ika_rows = ika_rows.dropna(subset=['ΕΡΓΟΔΟΤΗΣ_Clean'])
+
+    if ika_rows.empty:
+        return None
+
+    multi_months = []
+    for (year, month), group in ika_rows.groupby(['ΕΤΟΣ', 'Μήνας_Num']):
+        if group['ΕΡΓΟΔΟΤΗΣ_Clean'].nunique() > 1:
+            multi_months.append((year, month))
+
+    if not multi_months:
+        return None
+
+    valid_df = pd.DataFrame(multi_months, columns=['ΕΤΟΣ', 'Μήνας_Num'])
+    filtered = p_df.merge(valid_df, on=['ΕΤΟΣ', 'Μήνας_Num'], how='inner')
+    filtered = filtered[filtered['is_ika']]
+    filtered = filtered.drop(columns=['is_ika'])
+
+    if filtered.empty:
+        return None
+
+    month_map = {m: f"{m}ος" for m in range(1, 13)}
+    return _pivot_parallel_df(filtered, month_map)
+
 
 def compute_applied_monthly_day_caps(data_df: pd.DataFrame) -> list[dict]:
     """Μήνες/πακέτα (μη-ΙΚΑ) όπου εφαρμόστηκε cap 25 ημερών στην Καταμέτρηση."""
@@ -8128,11 +8456,17 @@ def show_results_page(df, filename):
                     
                     st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
                     
+                    multi_print_df = build_multi_employment_print_df(df, description_map)
                     render_print_button(
                         "print_multi",
                         "Πολλαπλή Απασχόληση",
-                        display_final_df,
-                        description="Πίνακας Πολλαπλής Απασχόλησης (ΙΚΑ & Πολλαπλοί Εργοδότες)"
+                        multi_print_df if multi_print_df is not None else display_final_df,
+                        description="Πίνακας Πολλαπλής Απασχόλησης (ΙΚΑ & Πολλαπλοί Εργοδότες)",
+                        yearly=True,
+                        year_column='Έτος',
+                        extra_group_cols=['Ταμείο', 'Τύπος Ασφάλισης'],
+                        bold_columns=['Εργοδότης'],
+                        col_width_overrides={'Εργοδότης': '90px'},
                     )
                 else:
                     st.warning("Δεν βρέθηκαν μήνες με πολλαπλούς εργοδότες για ΙΚΑ (αποδοχές 01, 16, ή 99).")

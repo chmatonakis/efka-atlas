@@ -22,6 +22,10 @@ from app_final import (
     generate_audit_report,
     build_description_map,
     get_last_update_date,
+    find_gaps_in_insurance_data,
+    build_parallel_print_df,
+    build_parallel_2017_print_df,
+    build_multi_employment_print_df,
 )
 
 st.set_page_config(
@@ -448,6 +452,83 @@ if section == "all":
     else:
         sections.append("<section class='print-section'><h2>Πίνακας Καταμέτρησης</h2><p class='print-description'>Δεν βρέθηκαν δεδομένα.</p></section>")
 
+    # --- Κενά Διαστήματα ---
+    sections.append("<div class='page-break'></div>")
+    try:
+        gaps_df = find_gaps_in_insurance_data(df)
+        if gaps_df is not None and not gaps_df.empty:
+            sections.append(
+                build_print_section_html(
+                    "Κενά Διαστήματα",
+                    gaps_df,
+                    description="Χρονικές περίοδοι όπου δεν βρέθηκε ασφαλιστική κάλυψη μεταξύ των δηλωμένων εγγραφών.",
+                    heading_tag="h2"
+                )
+            )
+        else:
+            sections.append("<section class='print-section'><h2>Κενά Διαστήματα</h2><p class='print-description'>Δεν εντοπίστηκαν κενά.</p></section>")
+    except Exception:
+        sections.append("<section class='print-section'><h2>Κενά Διαστήματα</h2><p class='print-description'>Δεν ήταν δυνατός ο υπολογισμός.</p></section>")
+
+    # --- Παράλληλη Ασφάλιση ---
+    sections.append("<div class='page-break'></div>")
+    try:
+        parallel_df = build_parallel_print_df(df, description_map)
+        if parallel_df is not None and not parallel_df.empty:
+            par_html = build_yearly_print_html(parallel_df, year_column='Έτος')
+            sections.append(
+                f"<section class='print-section'>"
+                f"<h2>Παράλληλη Ασφάλιση</h2>"
+                f"<p class='print-description'>Διαστήματα παράλληλης ασφάλισης (ΙΚΑ & ΟΑΕΕ / ΟΑΕΕ & ΤΣΜΕΔΕ / ΟΓΑ & ΙΚΑ/ΟΑΕΕ, έως 31/12/2016).</p>"
+                f"{par_html}"
+                f"</section>"
+            )
+        else:
+            sections.append("<section class='print-section'><h2>Παράλληλη Ασφάλιση</h2><p class='print-description'>Δεν εντοπίστηκαν διαστήματα παράλληλης ασφάλισης.</p></section>")
+    except Exception:
+        sections.append("<section class='print-section'><h2>Παράλληλη Ασφάλιση</h2><p class='print-description'>Δεν ήταν δυνατός ο υπολογισμός.</p></section>")
+
+    # --- Παράλληλη Απασχόληση 2017+ ---
+    sections.append("<div class='page-break'></div>")
+    try:
+        parallel_2017_df = build_parallel_2017_print_df(df, description_map)
+        if parallel_2017_df is not None and not parallel_2017_df.empty:
+            par2017_html = build_yearly_print_html(parallel_2017_df, year_column='Έτος')
+            sections.append(
+                f"<section class='print-section'>"
+                f"<h2>Παράλληλη Απασχόληση 2017+</h2>"
+                f"<p class='print-description'>Διαστήματα παράλληλης απασχόλησης από 01/2017 (ΙΚΑ & ΕΦΚΑ μη μισθωτή / ΕΦΚΑ μισθωτή & ΕΦΚΑ μη μισθωτή).</p>"
+                f"{par2017_html}"
+                f"</section>"
+            )
+        else:
+            sections.append("<section class='print-section'><h2>Παράλληλη Απασχόληση 2017+</h2><p class='print-description'>Δεν εντοπίστηκαν διαστήματα.</p></section>")
+    except Exception:
+        sections.append("<section class='print-section'><h2>Παράλληλη Απασχόληση 2017+</h2><p class='print-description'>Δεν ήταν δυνατός ο υπολογισμός.</p></section>")
+
+    # --- Πολλαπλή Απασχόληση ---
+    sections.append("<div class='page-break'></div>")
+    try:
+        multi_df = build_multi_employment_print_df(df, description_map)
+        if multi_df is not None and not multi_df.empty:
+            multi_html = build_yearly_print_html(
+                multi_df, year_column='Έτος',
+                extra_group_cols=['Ταμείο', 'Τύπος Ασφάλισης'],
+                bold_columns=['Εργοδότης'],
+                col_width_overrides={'Εργοδότης': '90px'},
+            )
+            sections.append(
+                f"<section class='print-section'>"
+                f"<h2>Πολλαπλή Απασχόληση</h2>"
+                f"<p class='print-description'>Μήνες με πολλαπλούς εργοδότες ΙΚΑ (αποδοχές 01, 16, ή 99).</p>"
+                f"{multi_html}"
+                f"</section>"
+            )
+        else:
+            sections.append("<section class='print-section'><h2>Πολλαπλή Απασχόληση</h2><p class='print-description'>Δεν εντοπίστηκαν μήνες πολλαπλής απασχόλησης.</p></section>")
+    except Exception:
+        sections.append("<section class='print-section'><h2>Πολλαπλή Απασχόληση</h2><p class='print-description'>Δεν ήταν δυνατός ο υπολογισμός.</p></section>")
+
     client_name_html = f"<div class='print-client-name'>{client_name.strip()}</div>" if client_name.strip() else ""
     body_html = (
         f"{client_name_html}"
@@ -457,4 +538,5 @@ if section == "all":
     )
     html_doc = wrap_print_html("Συνολική Εκτύπωση", body_html, auto_print=True)
     html_doc += f"\n<!-- nonce: {uuid.uuid4()} -->"
-    components.html(html_doc, height=900, scrolling=True)
+    with st.expander("Ενοποιημένη προβολή εκτύπωσης", expanded=False):
+        components.html(html_doc, height=900, scrolling=True)
