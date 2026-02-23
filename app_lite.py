@@ -13,6 +13,8 @@ from app_final import (
     extract_efka_data,
     build_print_html,
     build_print_section_html,
+    build_print_table_html,
+    build_yearly_print_html,
     wrap_print_html,
     get_print_disclaimer_html,
     build_summary_grouped_display,
@@ -32,159 +34,144 @@ st.set_page_config(
 st.markdown(
     """
 <style>
-    /* Hide Streamlit Main Menu and Footer */
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
-    div[data-testid="stToolbar"] {visibility: hidden;}
-    div[data-testid="stDecoration"] {visibility: hidden;}
-    div[data-testid="stStatusWidget"] {visibility: hidden;}
+@import url('https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700;800&display=swap');
 
-    /* Reset default padding/margin issues */
-    .stApp {
-        background-color: #f8f9fa;
-    }
-    
-    html, body, [data-testid="stAppViewContainer"], .block-container {
-        font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif !important;
-        font-size: 17px;
-    }
+:root {
+    --font-main: "Fira Sans", -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    --color-bg: #f5f6f7;
+    --color-surface: #ffffff;
+    --color-border: #e1e4e8;
+    --color-text: #111827;
+    --color-text-muted: #6c757d;
+    --color-text-subtle: #4a5568;
+    --color-primary: #6f42c1;
+    --color-primary-dark: #5a189a;
+    --color-accent: #e88e10;
+    --color-success: #00b050;
+    --color-info: #0666ba;
+    --color-link: #0056b3;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
+    --shadow-lg: 0 10px 30px rgba(0,0,0,0.08);
+    --transition: all 0.2s ease;
+}
 
-    /* Primary Action Button (Red) - Προβολή επεξεργασίας */
-    div.stButton > button[kind="primary"] {
-        background-color: #ee1d23 !important;
-        color: white !important;
-        border: 1px solid #ee1d23 !important;
-        font-weight: 700 !important;
-        font-size: 18px !important;
-        padding: 0.6rem 2rem !important;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1) !important;
-        border-radius: 8px !important;
-        width: 100%;
-    }
-    div.stButton > button[kind="primary"]:hover {
-        background-color: #cc181e !important;
-        border-color: #cc181e !important;
-        color: white !important;
-        box-shadow: 0 6px 8px rgba(0,0,0,0.15) !important;
-        transform: translateY(-1px);
-    }
-    
-    /* Secondary Action Button (White) - Νέο αρχείο */
-    div.stButton > button[kind="secondary"] {
-        background-color: white !important;
-        color: #333 !important;
-        border: 1px solid #ddd !important;
-        font-weight: 600 !important;
-        font-size: 18px !important;
-        padding: 0.6rem 2rem !important;
-        border-radius: 8px !important;
-        width: 100%;
-    }
-    div.stButton > button[kind="secondary"]:hover {
-        background-color: #f1f1f1 !important;
-        border-color: #ccc !important;
-        color: #000 !important;
-    }
-    
-    /* Purple Header Full Width */
-    .purple-header {
-        background: linear-gradient(135deg, #7b2cbf 0%, #5a189a 100%);
-        color: white;
-        text-align: center;
-        padding: 2rem 1rem;
-        margin: -4rem -5rem 2rem -5rem; /* Negative margins to span full width in wide mode */
-        font-size: 2rem;
-        font-weight: 700;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    }
+#MainMenu {visibility: hidden;}
+header {visibility: hidden;}
+footer {visibility: hidden;}
+div[data-testid="stToolbar"] {visibility: hidden;}
+div[data-testid="stDecoration"] {visibility: hidden;}
+div[data-testid="stStatusWidget"] {visibility: hidden;}
 
-    /* Initial Upload Styles */
-    .upload-section {
-        background-color: transparent;
-        padding: 1.5rem 1rem;
-        border-radius: 10px;
-        border: 0;
-        text-align: center;
-        margin: 1rem 0 2rem 0;
-    }
-    [data-testid="stFileUploader"] {
-        background-color: #f8fbff;
-        padding: 3rem;
-        border-radius: 16px;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.08);
-        border: 2px dashed #3b82f6;
-        max-width: 800px;
-        margin: 0 auto;
-    }
-    .upload-prompt-text {
-        font-size: 1.2rem;
-        font-weight: 600;
-        color: #1a1a1a;
-        margin-bottom: 1rem;
-        text-align: center !important;
-        width: 100%;
-        display: block;
-    }
-    .efka-link {
-        color: #0056b3 !important;
-        text-decoration: none;
-        font-weight: 400;
-        font-size: 1rem;
-    }
-    .efka-link:hover {
-        text-decoration: underline;
-        color: #003d82 !important;
-    }
-    .instructions-box {
-        max-width: 800px;
-        margin: 0 auto 4rem auto;
-        background: #ffffff;
-        border: 1px solid #e1e4e8;
-        border-radius: 12px;
-        padding: 3rem;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.05);
-    }
-    .instructions-title {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: #2c3e50;
-        margin-bottom: 2rem;
-        text-align: center;
-        border-bottom: 2px solid #f0f2f5;
-        padding-bottom: 1rem;
-    }
-    .instructions-list {
-        text-align: left;
-        color: #4a5568;
-        font-size: 1.1rem;
-        line-height: 1.8;
-    }
-    .main-footer {
-        margin-top: 5rem;
-        padding: 3rem 1rem;
-        background-color: #f8f9fa;
-        border-top: 1px solid #e1e4e8;
-        text-align: center;
-        color: #6c757d;
-        margin-left: -5rem;
-        margin-right: -5rem;
-        margin-bottom: -5rem;
-    }
-    .footer-disclaimer {
-        font-size: 0.85rem;
-        color: #6c757d;
-        margin-bottom: 1.5rem;
-        line-height: 1.6;
-        max-width: 800px;
-        margin-left: auto;
-        margin-right: auto;
-    }
-    .footer-copyright {
-        font-weight: 600;
-        color: #2c3e50;
-        font-size: 0.95rem;
-    }
+.stApp { background-color: var(--color-bg); }
+html, body, [data-testid="stAppViewContainer"], .block-container {
+    font-family: var(--font-main) !important;
+    font-size: 17px;
+    color: var(--color-text);
+}
+
+div.stButton > button[kind="primary"] {
+    background-color: #ee1d23 !important; color: white !important;
+    border: 1px solid #ee1d23 !important; font-weight: 700 !important;
+    font-size: 18px !important; padding: 0.6rem 2rem !important;
+    box-shadow: var(--shadow-sm) !important; border-radius: var(--radius-sm) !important;
+    width: 100%; font-family: var(--font-main) !important; transition: var(--transition);
+}
+div.stButton > button[kind="primary"]:hover {
+    background-color: #cc181e !important; border-color: #cc181e !important;
+    color: white !important; box-shadow: var(--shadow-md) !important;
+    transform: translateY(-1px);
+}
+div.stButton > button[kind="secondary"] {
+    background-color: white !important; color: #333 !important;
+    border: 1px solid #ddd !important; font-weight: 600 !important;
+    font-size: 18px !important; padding: 0.6rem 2rem !important;
+    border-radius: var(--radius-sm) !important; width: 100%;
+    font-family: var(--font-main) !important; transition: var(--transition);
+}
+div.stButton > button[kind="secondary"]:hover {
+    background-color: #f1f1f1 !important; border-color: #ccc !important;
+    color: #000 !important; transform: translateY(-1px);
+}
+
+
+/* All headings & markdown text */
+[data-testid="stMarkdownContainer"] h1,
+[data-testid="stMarkdownContainer"] h2,
+[data-testid="stMarkdownContainer"] h3,
+[data-testid="stMarkdownContainer"] h4,
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li,
+[data-testid="stMarkdownContainer"] span,
+[data-testid="stCaptionContainer"],
+label {
+    font-family: var(--font-main) !important;
+}
+[data-testid="stMarkdownContainer"] h3 {
+    font-weight: 700 !important;
+    color: #1e293b !important;
+}
+
+/* Streamlit messages: accent left-border */
+div[data-testid="stAlert"] > div {
+    border-left: 4px solid currentColor !important;
+    border-radius: var(--radius-sm) !important;
+    font-family: var(--font-main) !important;
+}
+
+.purple-header {
+    background: linear-gradient(135deg, #7b2cbf 0%, var(--color-primary-dark) 100%);
+    color: white; text-align: center; padding: 2rem 1rem;
+    margin: -4rem -5rem 2rem -5rem; font-size: 2rem; font-weight: 700;
+    box-shadow: var(--shadow-md);
+}
+.upload-section {
+    background-color: transparent; padding: 1.5rem 1rem;
+    border-radius: var(--radius-md); border: 0;
+    text-align: center; margin: 1rem 0 2rem 0;
+}
+[data-testid="stFileUploader"] {
+    background-color: #f8fbff; padding: 3rem;
+    border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+    border: 2px dashed #3b82f6; max-width: 800px; margin: 0 auto;
+    transition: var(--transition);
+}
+.upload-prompt-text {
+    font-size: 1.2rem; font-weight: 600; color: var(--color-text);
+    margin-bottom: 1rem; text-align: center !important;
+    width: 100%; display: block;
+}
+.efka-link { color: var(--color-link) !important; text-decoration: none; font-weight: 400; font-size: 1rem; }
+.efka-link:hover { text-decoration: underline; color: #003d82 !important; }
+.instructions-box {
+    max-width: 800px; margin: 0 auto 4rem auto;
+    background: var(--color-surface); border: 1px solid var(--color-border);
+    border-radius: 12px; padding: 3rem; box-shadow: var(--shadow-md);
+}
+.instructions-title {
+    font-size: 1.5rem; font-weight: 700; color: #2c3e50;
+    margin-bottom: 2rem; text-align: center;
+    border-bottom: 2px solid #f0f2f5; padding-bottom: 1rem;
+}
+.instructions-list {
+    text-align: left; color: var(--color-text-subtle);
+    font-size: 1.1rem; line-height: 1.8;
+}
+.main-footer {
+    margin-top: 5rem; padding: 3rem 1rem;
+    background-color: #f8f9fa; border-top: 1px solid var(--color-border);
+    text-align: center; color: var(--color-text-muted);
+    margin-left: -5rem; margin-right: -5rem; margin-bottom: -5rem;
+}
+.footer-disclaimer {
+    font-size: 0.85rem; color: var(--color-text-muted);
+    margin-bottom: 1.5rem; line-height: 1.6;
+    max-width: 800px; margin-left: auto; margin-right: auto;
+}
+.footer-copyright { font-weight: 600; color: #2c3e50; font-size: 0.95rem; }
 </style>
 """,
     unsafe_allow_html=True
@@ -446,14 +433,17 @@ if section == "all":
         sections.append("<section class='print-section'><h2>Συνοπτική Αναφορά</h2><p class='print-description'>Δεν βρέθηκαν δεδομένα.</p></section>")
     sections.append("<div class='page-break'></div>")
     if not final_display_df.empty:
+        count_table_html = build_yearly_print_html(
+            final_display_df,
+            year_column='ΕΤΟΣ',
+            style_rows=print_style_rows,
+        )
         sections.append(
-            build_print_section_html(
-                "Πίνακας Καταμέτρησης",
-                final_display_df,
-                description="Αναλυτική καταμέτρηση ημερών ασφάλισης ανά μήνα.",
-                style_rows=print_style_rows,
-                heading_tag="h2"
-            )
+            f"<section class='print-section'>"
+            f"<h2>Πίνακας Καταμέτρησης</h2>"
+            f"<p class='print-description'>Αναλυτική καταμέτρηση ημερών ασφάλισης ανά μήνα.</p>"
+            f"{count_table_html}"
+            f"</section>"
         )
     else:
         sections.append("<section class='print-section'><h2>Πίνακας Καταμέτρησης</h2><p class='print-description'>Δεν βρέθηκαν δεδομένα.</p></section>")

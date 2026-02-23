@@ -227,306 +227,244 @@ PLAFOND_NEOS = {
   "2022": 6500.00, "2023": 7126.94, "2024": 7126.94, "2025": 7572.62
 }
 
-# CSS για καλύτερη εμφάνιση
+# CSS Design System
 st.markdown("""
 <style>
-    /* Καθολικό φόντο και γραμματοσειρά */
-    .stApp { background-color: #f5f6f7; }
-    html, body, [data-testid="stAppViewContainer"], .block-container {
-        font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif !important;
-        font-size: 17px;
-    }
-    .main-header {
-        font-size: 3rem;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 2rem;
-        font-weight: bold;
-    }
-    .professional-header {
-        background: linear-gradient(135deg, #6f42c1 0%, #8e44ad 100%);
-        color: #ffffff;
-        padding: 0.8rem 1.5rem;
-        margin: -4rem -5rem 0.5rem -5rem;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-    .header-content {
-        position: relative;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        max-width: none;
-        margin: 0;
-        padding-left: 0.5rem;
-        padding-right: 0.5rem;
-    }
-    .header-left {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-    }
-    .header-icon {
-        font-size: 2.5rem;
-        background: rgba(255,255,255,0.2);
-        padding: 0.5rem;
-        border-radius: 10px;
-    }
-    .header-text h1 {
-        margin: 0;
-        font-size: 1.35rem;
-        font-weight: 700;
-        letter-spacing: 0.2px;
-    }
-    .header-center {
-        position: absolute;
-        left: 50%;
-        transform: translateX(-50%);
-        font-size: 1.25rem;
-        font-weight: 800;
-        letter-spacing: 0.2px;
-        color: #ffffff !important;
-        text-align: center;
-        white-space: nowrap;
-        pointer-events: none;
-    }
-    .header-right { display: flex; gap: 1.5rem; }
-    .nav-link { 
-        color: #ffffff !important; 
-        text-decoration: none; 
-        font-weight: 600; 
-        padding: 0.5rem 1.2rem; 
-        border: 1px solid rgba(255,255,255,0.5);
-        border-radius: 6px;
-        transition: all 0.2s ease;
-        display: inline-block;
-    }
-    .nav-link:hover { 
-        background-color: rgba(255,255,255,0.15); 
-        border-color: #ffffff;
-        text-decoration: none !important; 
-        color: #ffffff !important;
-        transform: translateY(-1px);
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    div[data-testid="stExpander"] details summary p {
-        font-size: 1.25rem !important;
-        font-weight: 700 !important;
-    }
-    .upload-section {
-        background-color: transparent;
-        padding: 1.5rem 1rem;
-        border-radius: 10px;
-        border: 0;
-        text-align: center;
-        margin: 1rem 0 2rem 0;
-    }
-    /* Upload Container - Modern Card Style - Εφαρμογή απευθείας στο widget */
-    [data-testid="stFileUploader"] {
-        background-color: #f8fbff;
-        padding: 3rem;
-        border-radius: 16px;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.08);
-        border: 2px dashed #3b82f6;
-    }
+@import url('https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700;800&display=swap');
 
-    /* Κεντράρισμα του uploader */
-    div[data-testid="stFileUploader"] {
-        margin-left: auto !important;
-        margin-right: auto !important;
-        max-width: 600px !important;
-    }
+:root {
+    --font-main: "Fira Sans", -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    --color-bg: #f5f6f7;
+    --color-surface: #ffffff;
+    --color-border: #e1e4e8;
+    --color-text: #111827;
+    --color-text-muted: #6c757d;
+    --color-text-subtle: #4a5568;
+    --color-primary: #6f42c1;
+    --color-primary-dark: #5a189a;
+    --color-accent: #e88e10;
+    --color-success: #00b050;
+    --color-info: #0666ba;
+    --color-warning: #996600;
+    --color-error: #cc0000;
+    --color-link: #0056b3;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
+    --shadow-lg: 0 10px 30px rgba(0,0,0,0.08);
+    --transition: all 0.2s ease;
+}
 
-    /* Βοηθητικό class για το κείμενο προτροπής */
-    .upload-prompt-text {
-        font-size: 1.2rem;
-        font-weight: 600;
-        color: #1a1a1a;
-        margin-bottom: 1rem;
-        text-align: center !important;
-        width: 100%;
-        display: block;
-    }
-    .app-container { max-width: 680px; margin: 0 auto; }
-    .main-header { margin-top: 0.5rem; }
-    
-    /* Μωβ Header - Full Width - Modern */
-    .purple-header {
-        background: linear-gradient(135deg, #7b2cbf 0%, #5a189a 100%);
-        color: white;
-        text-align: center;
-        padding: 2rem 1rem;
-        margin: -4rem -5rem 2rem -5rem;
-        font-size: 2rem;
-        font-weight: 700;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    }
-    
-    
-    /* Σύνδεσμος κατεβάσματος ΑΤΛΑΣ - απλό κείμενο, όχι κουμπί */
-    .efka-link-wrapper {
-        text-align: center;
-        margin: 1.5rem 0;
-    }
-    .efka-link {
-        color: #0056b3 !important;
-        text-decoration: none;
-        font-weight: 400;
-        font-size: 1rem;
-    }
-    .efka-link:hover {
-        text-decoration: underline;
-        color: #003d82 !important;
-    }
-    
-    /* Οδηγίες Box - Modern Style */
-    .instructions-box {
-        max-width: 800px;
-        margin: 0 auto 4rem auto;
-        background: #ffffff;
-        border: 1px solid #e1e4e8;
-        border-radius: 12px;
-        padding: 3rem;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.05);
-    }
-    
-    .instructions-title {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: #2c3e50;
-        margin-bottom: 2rem;
-        text-align: center;
-        border-bottom: 2px solid #f0f2f5;
-        padding-bottom: 1rem;
-    }
-    
-    .instructions-list {
-        text-align: left;
-        color: #4a5568;
-        font-size: 1.1rem;
-        line-height: 1.8;
-    }
+.stApp { background-color: var(--color-bg); }
+html, body, [data-testid="stAppViewContainer"], .block-container {
+    font-family: var(--font-main) !important;
+    font-size: 17px;
+    color: var(--color-text);
+}
 
-    /* Footer Styles */
-    .main-footer {
-        margin-top: 5rem;
-        padding: 3rem 1rem;
-        background-color: #f8f9fa;
-        border-top: 1px solid #e1e4e8;
-        text-align: center;
-        color: #6c757d;
-        margin-left: -5rem;
-        margin-right: -5rem;
-        margin-bottom: -5rem;
-    }
-    .footer-disclaimer {
-        font-size: 0.85rem;
-        color: #6c757d;
-        margin-bottom: 1.5rem;
-        line-height: 1.6;
-        max-width: 800px;
-        margin-left: auto;
-        margin-right: auto;
-    }
-    .footer-copyright {
-        font-weight: 600;
-        color: #2c3e50;
-        font-size: 0.95rem;
-    }
-    .success-box {
-        padding: 1rem;
-        border-radius: 0.5rem;
-        background-color: #d4edda;
-        border: 1px solid #c3e6cb;
-        color: #155724;
-        margin: 1rem 0;
-    }
-    .info-box {
-        padding: 1rem;
-        border-radius: 0.5rem;
-        background-color: #d1ecf1;
-        border: 1px solid #bee5eb;
-        color: #0c5460;
-        margin: 1rem 0;
-    }
-    .warning-box {
-        padding: 1rem;
-        border-radius: 0.5rem;
-        background-color: #fff3cd;
-        border: 1px solid #ffeaa7;
-        color: #856404;
-        margin: 1rem 0;
-    }
-    .results-section {
-        background-color: #ffffff;
-        padding: 2rem;
-        border-radius: 10px;
-        border: 1px solid #dee2e6;
-        margin: 2rem 0;
-    }
-    .stButton > button {
-        width: 100%;
-        font-size: 1.2rem;
-        padding: 0.5rem 1rem;
-    }
-    
-    /* Μεγαλύτερα εικονίδια για τα dataframe controls */
-    [data-testid="stDataFrame"] button {
-        transform: scale(1.5) !important;
-        margin: 0.3rem !important;
-    }
-    [data-testid="stDataFrame"] button svg {
-        width: 22px !important;
-        height: 22px !important;
-    }
-    [data-testid="stDataFrame"] [data-testid="baseButton-header"] {
-        transform: scale(1.5) !important;
-    }
-    [data-testid="stDataFrame"] .stElementContainer button {
-        transform: scale(1.5) !important;
-        margin: 0.4rem !important;
-    }
-    /* Μεγαλύτερο μέγεθος για τα toolbar buttons */
-    div[data-testid="stDataFrameToolbar"] button {
-        transform: scale(1.5) !important;
-        transform-origin: center !important;
-        margin: 0.3rem !important;
-        padding: 0.3rem !important;
-    }
-    div[data-testid="stDataFrameToolbar"] button svg {
-        width: 22px !important;
-        height: 22px !important;
-    }
-    div[data-testid="stDataFrameToolbar"] {
-        padding: 0.5rem !important;
-        z-index: 1000 !important;
-        position: relative !important;
-    }
-    
-    /* Απόκρυψη μενού Streamlit (Fork, Settings, κτλ) */
-    [data-testid="stHeader"] button[kind="header"],
-    [data-testid="stHeader"] [data-testid="stDeployButton"],
-    [data-testid="stHeader"] button[title="Fork this app"],
-    [data-testid="stHeader"] button[title="Settings"],
-    [data-testid="stHeader"] button[title="Menu"],
-    [data-testid="stHeader"] button[aria-label*="Settings"],
-    [data-testid="stHeader"] button[aria-label*="Menu"],
-    [data-testid="stHeader"] button[aria-label*="Fork"],
-    button[kind="header"],
-    .stDeployButton,
-    header[data-testid="stHeader"] button,
-    header[data-testid="stHeader"] [data-testid="stToolbar"],
-    header[data-testid="stHeader"] [data-testid="stHeaderViewButton"],
-    header[data-testid="stHeader"] [data-testid="stHeaderActionElements"],
-    header[data-testid="stHeader"] > div:last-child,
-    header[data-testid="stHeader"] > div:nth-child(2) {
-        display: none !important;
-        visibility: hidden !important;
-    }
-    
-    /* Απόκρυψη ολόκληρου του header αν είναι απαραίτητο */
-    /* [data-testid="stHeader"] {
-        display: none !important;
-    } */
+/* --- Professional Header (results page) --- */
+.professional-header {
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    color: #ffffff;
+    padding: 0.8rem 1.5rem;
+    margin: -4rem -5rem 0.5rem -5rem;
+    box-shadow: var(--shadow-md);
+}
+.header-content {
+    position: relative;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    max-width: none;
+    margin: 0;
+    padding: 0 0.5rem;
+}
+.header-left { display: flex; align-items: center; gap: 1rem; }
+.header-text h1 { margin: 0; font-size: 1.35rem; font-weight: 700; letter-spacing: 0.2px; }
+.header-center {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    font-size: 1.25rem; font-weight: 800; color: #ffffff !important;
+    text-align: center; white-space: nowrap; pointer-events: none;
+}
+.header-right { display: flex; gap: 1.5rem; }
+.nav-link {
+    color: #ffffff !important; text-decoration: none; font-weight: 600;
+    padding: 0.5rem 1.2rem; border: 1px solid rgba(255,255,255,0.5);
+    border-radius: var(--radius-sm); transition: var(--transition); display: inline-block;
+}
+.nav-link:hover {
+    background-color: rgba(255,255,255,0.15); border-color: #ffffff;
+    text-decoration: none !important; color: #ffffff !important;
+    transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* --- Purple Header (landing page) --- */
+.purple-header {
+    background: linear-gradient(135deg, #7b2cbf 0%, var(--color-primary-dark) 100%);
+    color: white; text-align: center; padding: 2rem 1rem;
+    margin: -4rem -5rem 2rem -5rem; font-size: 2rem; font-weight: 700;
+    box-shadow: var(--shadow-md);
+}
+
+/* --- Inputs: white background --- */
+.stSelectbox [data-baseweb="select"] > div,
+.stMultiSelect [data-baseweb="select"] > div,
+.stTextInput input, .stDateInput input, .stNumberInput input, .stTextArea textarea,
+div[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+div[data-testid="stMultiSelect"] [data-baseweb="select"] > div {
+    background-color: var(--color-surface) !important;
+    border-color: #d0d7de !important;
+    box-shadow: inset 0 1px 2px rgba(16,24,40,0.04) !important;
+}
+
+/* --- Buttons --- */
+.stButton > button {
+    width: 100%; font-size: 1.1rem; padding: 0.5rem 1rem;
+    font-family: var(--font-main) !important; font-weight: 600;
+    border-radius: var(--radius-sm); transition: var(--transition);
+}
+.stButton > button:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+}
+
+/* --- Streamlit messages: accent left-border --- */
+div[data-testid="stAlert"] > div {
+    border-left: 4px solid currentColor !important;
+    border-radius: var(--radius-sm) !important;
+    font-family: var(--font-main) !important;
+}
+
+/* --- All headings & markdown text --- */
+[data-testid="stMarkdownContainer"] h1,
+[data-testid="stMarkdownContainer"] h2,
+[data-testid="stMarkdownContainer"] h3,
+[data-testid="stMarkdownContainer"] h4,
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li,
+[data-testid="stMarkdownContainer"] span,
+[data-testid="stCaptionContainer"],
+label {
+    font-family: var(--font-main) !important;
+}
+[data-testid="stMarkdownContainer"] h3 {
+    font-weight: 700 !important;
+    color: #1e293b !important;
+    letter-spacing: 0.2px;
+}
+
+/* --- Expander titles --- */
+div[data-testid="stExpander"] details summary p {
+    font-size: 1.25rem !important;
+    font-weight: 700 !important;
+    font-family: var(--font-main) !important;
+}
+
+/* --- Tabs --- */
+.stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
+    font-size: 1.15rem !important; font-weight: 600 !important;
+    font-family: var(--font-main) !important;
+}
+.stTabs [data-baseweb="tab-list"] { gap: 1.5rem !important; }
+
+/* --- Metrics --- */
+div[data-testid="stMetric"] label {
+    font-family: var(--font-main) !important;
+    font-weight: 600 !important;
+    color: var(--color-text-subtle) !important;
+}
+div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+    font-family: var(--font-main) !important;
+    font-weight: 800 !important;
+}
+
+/* --- Upload area --- */
+.upload-section {
+    background-color: transparent; padding: 1.5rem 1rem;
+    border-radius: var(--radius-md); border: 0;
+    text-align: center; margin: 1rem 0 2rem 0;
+}
+[data-testid="stFileUploader"] {
+    background-color: #f8fbff; padding: 3rem;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    border: 2px dashed #3b82f6;
+    transition: var(--transition);
+}
+div[data-testid="stFileUploader"] {
+    margin-left: auto !important; margin-right: auto !important;
+    max-width: 600px !important;
+}
+.upload-prompt-text {
+    font-size: 1.2rem; font-weight: 600; color: var(--color-text);
+    margin-bottom: 1rem; text-align: center !important;
+    width: 100%; display: block;
+}
+
+/* --- Links --- */
+.efka-link { color: var(--color-link) !important; text-decoration: none; font-weight: 400; font-size: 1rem; }
+.efka-link:hover { text-decoration: underline; color: #003d82 !important; }
+
+/* --- Instructions box --- */
+.instructions-box {
+    max-width: 800px; margin: 0 auto 4rem auto;
+    background: var(--color-surface); border: 1px solid var(--color-border);
+    border-radius: 12px; padding: 3rem; box-shadow: var(--shadow-md);
+}
+.instructions-title {
+    font-size: 1.5rem; font-weight: 700; color: #2c3e50;
+    margin-bottom: 2rem; text-align: center;
+    border-bottom: 2px solid #f0f2f5; padding-bottom: 1rem;
+}
+.instructions-list {
+    text-align: left; color: var(--color-text-subtle);
+    font-size: 1.1rem; line-height: 1.8;
+}
+
+/* --- Footer --- */
+.main-footer {
+    margin-top: 5rem; padding: 3rem 1rem;
+    background-color: #f8f9fa; border-top: 1px solid var(--color-border);
+    text-align: center; color: var(--color-text-muted);
+    margin-left: -5rem; margin-right: -5rem; margin-bottom: -5rem;
+}
+.footer-disclaimer {
+    font-size: 0.85rem; color: var(--color-text-muted);
+    margin-bottom: 1.5rem; line-height: 1.6;
+    max-width: 800px; margin-left: auto; margin-right: auto;
+}
+.footer-copyright { font-weight: 600; color: #2c3e50; font-size: 0.95rem; }
+
+/* --- Container helpers --- */
+.app-container { max-width: 680px; margin: 0 auto; }
+
+/* --- Dataframe toolbar --- */
+[data-testid="stDataFrame"] button { transform: scale(1.5) !important; margin: 0.3rem !important; }
+[data-testid="stDataFrame"] button svg { width: 22px !important; height: 22px !important; }
+div[data-testid="stDataFrameToolbar"] button {
+    transform: scale(1.5) !important; transform-origin: center !important;
+    margin: 0.3rem !important; padding: 0.3rem !important;
+}
+div[data-testid="stDataFrameToolbar"] { padding: 0.5rem !important; z-index: 1000 !important; position: relative !important; }
+div[data-testid="stDataFrame"] { z-index: 1 !important; position: relative !important; }
+body > div[data-baseweb="popover"], body > div[role="dialog"] { z-index: 10000 !important; }
+
+/* --- Hide Streamlit chrome --- */
+[data-testid="stHeader"] button[kind="header"],
+[data-testid="stHeader"] [data-testid="stDeployButton"],
+button[kind="header"], .stDeployButton,
+header[data-testid="stHeader"] button,
+header[data-testid="stHeader"] [data-testid="stToolbar"],
+header[data-testid="stHeader"] [data-testid="stHeaderViewButton"],
+header[data-testid="stHeader"] [data-testid="stHeaderActionElements"],
+header[data-testid="stHeader"] > div:last-child,
+header[data-testid="stHeader"] > div:nth-child(2),
+div[class*="viewerBadge"], a[class*="viewerBadge"],
+button[class*="viewerBadge"], div[data-testid="stToolbarActionButton"] {
+    display: none !important; visibility: hidden !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -540,31 +478,31 @@ def build_print_table_html(
         c_name = str(col).upper().strip()
         width = 'auto'
         if c_name in ['A/A', 'Α/Α', 'AA']:
-            width = '24px'
-        if c_name in ['ΕΤΟΣ', 'ETOS']:
-            width = '30px'
+            width = '20px'
+        elif c_name in ['ΕΤΟΣ', 'ETOS', 'ΈΤΟΣ']:
+            width = '28px'
         elif c_name in ['ΤΑΜΕΙΟ', 'TAMEIO']:
-            width = '45px'
+            width = '38px'
         elif c_name in ['ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ']:
-            width = '45px'
+            width = '38px'
         elif c_name in ['ΕΡΓΟΔΟΤΗΣ']:
-            width = '45px'
+            width = '42px'
         elif 'ΚΛΑΔΟΣ' in c_name:
-            width = '30px'
+            width = '22px'
         elif c_name in ['ΠΕΡΙΓΡΑΦΗ']:
-            width = '90px'
+            width = '72px'
         elif 'ΑΠΟΔΟΧΩΝ' in c_name and 'ΤΥΠΟΣ' in c_name:
-            width = '45px'
+            width = '22px'
         elif c_name in ['ΣΥΝΟΛΟ']:
-            width = '30px'
-        elif c_name.endswith('ος'):
-            width = '46px'
-        elif 'ΜΙΚΤΕΣ' in c_name:
-            width = '55px'
-        elif 'ΕΙΣΦΟΡΕΣ' in c_name:
-            width = '55px'
+            width = '28px'
+        elif c_name.endswith('ος') or c_name in ['ΙΑΝ', 'ΦΕΒ', 'ΜΑΡ', 'ΑΠΡ', 'ΜΑΙ', 'ΙΟΥΝ', 'ΙΟΥΛ', 'ΑΥΓ', 'ΣΕΠ', 'ΟΚΤ', 'ΝΟΕ', 'ΔΕΚ']:
+            width = '38px'
+        elif 'ΜΙΚΤΕΣ' in c_name or 'ΜΙΚΤΈΣ' in c_name:
+            width = '52px'
+        elif 'ΕΙΣΦΟΡΕΣ' in c_name or 'ΕΙΣΦΟΡΈΣ' in c_name:
+            width = '52px'
         elif 'ΠΟΣΟΣΤΟ' in c_name:
-            width = '35px'
+            width = '30px'
         colgroup_html += f'<col style="width:{width}">'
     colgroup_html += '</colgroup>'
 
@@ -622,42 +560,174 @@ def build_print_section_html(
     table_html = build_print_table_html(dataframe, style_rows, wrap_cells=wrap_cells)
     return f"<section class='print-section'><{heading_tag}>{html.escape(title)}</{heading_tag}>{description_html}{filters_html}{table_html}</section>"
 
+def build_yearly_print_html(
+    dataframe: pd.DataFrame,
+    year_column: str = 'ΕΤΟΣ',
+    style_rows: list[dict[str, str]] | None = None,
+    wrap_cells: bool = False,
+) -> str:
+    """Σπάει DataFrame ανά έτος σε ξεχωριστούς πίνακες με heading ανά έτος.
+    Αφαιρεί τη στήλη έτους από τον πίνακα. Κρατά total-rows μέσα στο έτος τους.
+    """
+    if year_column not in dataframe.columns:
+        return build_print_table_html(dataframe, style_rows, wrap_cells=wrap_cells)
+
+    col_name_map = {c: c for c in dataframe.columns}
+    year_alt = None
+    for c in dataframe.columns:
+        if c.strip().upper() in ('ΕΤΟΣ', 'ΈΤΟΣ', 'YEAR', 'Έτος'):
+            year_alt = c
+            break
+    if year_alt:
+        year_column = year_alt
+
+    sections: list[str] = []
+    current_year = None
+    current_rows: list[int] = []
+
+    for idx in range(len(dataframe)):
+        row_year_val = str(dataframe.iloc[idx].get(year_column, '')).strip()
+
+        is_empty_row = all(
+            str(dataframe.iloc[idx].get(c, '')).strip() == ''
+            for c in dataframe.columns
+        )
+        if is_empty_row:
+            continue
+
+        if row_year_val and row_year_val != current_year and row_year_val != '':
+            if current_rows and current_year:
+                sections.append(_render_year_section(
+                    dataframe, current_rows, current_year, year_column, style_rows, wrap_cells
+                ))
+            current_year = row_year_val
+            current_rows = [idx]
+        else:
+            current_rows.append(idx)
+
+    if current_rows and current_year:
+        sections.append(_render_year_section(
+            dataframe, current_rows, current_year, year_column, style_rows, wrap_cells
+        ))
+
+    return "\n".join(sections)
+
+
+def _render_year_section(
+    dataframe: pd.DataFrame,
+    row_indices: list[int],
+    year_label: str,
+    year_column: str,
+    style_rows: list[dict[str, str]] | None,
+    wrap_cells: bool,
+) -> str:
+    subset = dataframe.iloc[row_indices].copy()
+    if year_column in subset.columns:
+        subset = subset.drop(columns=[year_column])
+
+    sub_styles = None
+    if style_rows:
+        sub_styles = []
+        for idx in row_indices:
+            if idx < len(style_rows):
+                row_style = dict(style_rows[idx])
+                row_style.pop(year_column, None)
+                row_style.pop('ΕΤΟΣ', None)
+                row_style.pop('Έτος', None)
+                sub_styles.append(row_style)
+            else:
+                sub_styles.append({})
+
+    table_html = build_print_table_html(subset.reset_index(drop=True), sub_styles, wrap_cells=wrap_cells)
+    return (
+        f"<div class='year-section'>"
+        f"<div class='year-heading'>{html.escape(str(year_label))}</div>"
+        f"{table_html}"
+        f"</div>"
+    )
+
+
 def wrap_print_html(title: str, body_html: str, auto_print: bool = True, scale: float = 1.0) -> str:
     return f"""<!DOCTYPE html>
 <html lang="el">
 <head>
   <meta charset="utf-8" />
   <title>{html.escape(title)}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
   <style>
-    @media print {{ @page {{ size: A4 landscape; margin: 5mm; }} }}
+    @media print {{ @page {{ size: A4 landscape; margin: 8mm; }} }}
     :root {{ --print-scale: {scale}; }}
-    body {{ font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #222; }}
-    h1 {{ font-size: 20px; margin: 12px 0 10px 0; text-align: center; }}
-    h2 {{ font-size: 16px; margin: 18px 0 8px 0; text-align: left; }}
-    .print-section {{ margin-bottom: 18px; }}
+    * {{ box-sizing: border-box; }}
+    body {{
+        font-family: "Fira Sans", -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        color: #222; line-height: 1.45; margin: 0; padding: 8px;
+    }}
+    h1 {{
+        font-size: 22px; font-weight: 700; margin: 14px 0 6px 0; text-align: center;
+        color: #111827; letter-spacing: 0.2px;
+    }}
+    h2 {{ font-size: 17px; font-weight: 700; margin: 20px 0 10px 0; text-align: left; color: #2c3e50; }}
+    .print-section {{ margin-bottom: 22px; }}
     .page-break {{ page-break-after: always; }}
-    .print-client-name {{ font-size: 28px; font-weight: 700; text-align: center; margin: 0; color: #111827; }}
-    .print-client-amka {{ font-size: 15px; text-align: center; margin: 2px 0 10px 0; color: #4b5563; }}
-    .print-client-birthdate {{ font-size: 15px; text-align: center; margin: 2px 0 10px 0; color: #4b5563; }}
-    .print-description {{ font-size: 15px; text-align: center; color: #4b5563; margin: 0 0 8px 0; }}
-    .print-filters {{ font-size: 12px; margin: 0 0 10px 0; color: #374151; }}
+    .print-client-name {{
+        font-size: 26px; font-weight: 800; text-align: center; margin: 0;
+        color: #111827; letter-spacing: 0.3px;
+    }}
+    .print-client-amka {{
+        font-size: 14px; text-align: center; margin: 3px 0 4px 0; color: #6b7280; font-weight: 400;
+    }}
+    .print-client-birthdate {{
+        font-size: 14px; text-align: center; margin: 0 0 12px 0; color: #6b7280; font-weight: 400;
+    }}
+    .print-description {{
+        font-size: 14px; text-align: center; color: #6b7280; margin: 0 0 10px 0;
+        font-style: italic;
+    }}
+    .print-filters {{ font-size: 11px; margin: 0 0 10px 0; color: #374151; }}
     .print-filters-label {{ font-weight: 600; margin-bottom: 2px; }}
     .print-filters ul {{ margin: 4px 0 0 18px; padding: 0; }}
-    .print-disclaimer {{ font-size: 13px; color: #374151; margin-top: 35px; line-height: 1.4; }}
-    .print-disclaimer strong {{ font-weight: 700; }}
-    table.print-table {{ border-collapse: collapse; width: 100%; font-size: 10px; table-layout: fixed; }}
-    table.print-table thead th {{ background: #f2f4f7; border-bottom: 1px solid #d0d7de; padding: 4px 2px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-    table.print-table tbody td {{ border-bottom: 1px solid #eee; padding: 4px 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+    .print-disclaimer {{
+        font-size: 12px; color: #6b7280; margin-top: 30px; padding-top: 12px;
+        border-top: 1px solid #e5e7eb; line-height: 1.5;
+    }}
+    .print-disclaimer strong {{ font-weight: 700; color: #374151; }}
+
+    /* --- Table --- */
+    table.print-table {{
+        border-collapse: collapse; width: 100%; font-size: 8.5px; table-layout: fixed;
+        border: none;
+    }}
+    table.print-table thead th {{
+        background: #f3f4f6;
+        border-bottom: 1px solid #d0d7de; border-right: none; border-left: none; border-top: none;
+        padding: 3px 2px; text-align: left; font-weight: 700; color: #111827;
+        font-size: 7.5px; letter-spacing: 0;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }}
+    table.print-table tbody td {{
+        border-bottom: 0.5px solid #e8eaed; border-right: none; border-left: none; border-top: none;
+        padding: 2px 2px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }}
+    table.print-table tbody tr:nth-child(even) td {{ background-color: #f9fafb; }}
     table.print-table tbody td:first-child {{ font-weight: 700; }}
-    table.print-table tbody tr.total-row td {{ background: #e6f2ff !important; color: #000; font-weight: 700 !important; }}
+    table.print-table tbody tr.total-row td {{
+        background: #dbeafe !important; color: #000; font-weight: 700 !important;
+        border-top: 1px solid #93c5fd;
+    }}
     table.print-table.wrap-cells thead th,
     table.print-table.wrap-cells tbody td {{
-        white-space: normal;
-        overflow: visible;
-        text-overflow: clip;
-        word-break: break-word;
+        white-space: normal; overflow: visible; text-overflow: clip; word-break: break-word;
     }}
-    #print-root {{ transform: scale(var(--print-scale)); transform-origin: top left; }}
+    /* --- Yearly sections --- */
+    .year-section {{ margin-bottom: 18px; }}
+    .year-heading {{
+        font-size: 15px; font-weight: 800; color: #1e293b;
+        padding: 6px 0 4px 2px; margin-top: 12px;
+        border-bottom: 2px solid #6f42c1; margin-bottom: 4px;
+        letter-spacing: 0.3px;
+    }}
+    #print-root {{ width: 100%; }}
   </style>
 </head>
 <body{(" onload=\"window.print()\"" if auto_print else "")}>
@@ -679,6 +749,8 @@ def build_print_html(
     auto_print: bool = True,
     scale: float = 1.0,
     wrap_cells: bool = False,
+    yearly: bool = False,
+    year_column: str = 'ΕΤΟΣ',
 ) -> str:
     client_name = (client_name or '').strip()
     client_amka = (client_amka or '').strip()
@@ -688,7 +760,10 @@ def build_print_html(
     birthdate_html = f"<div class='print-client-birthdate'>Ημ/νία γέννησης: {html.escape(client_birthdate)}</div>" if client_birthdate else ''
     description_html = f"<p class='print-description'>{html.escape(description)}</p>" if description else ''
     filters_html = build_print_filters_html(filters)
-    table_html = build_print_table_html(dataframe, style_rows, wrap_cells=wrap_cells)
+    if yearly:
+        table_html = build_yearly_print_html(dataframe, year_column=year_column, style_rows=style_rows, wrap_cells=wrap_cells)
+    else:
+        table_html = build_print_table_html(dataframe, style_rows, wrap_cells=wrap_cells)
     disclaimer_html = get_print_disclaimer_html()
 
     body_html = (
@@ -711,6 +786,8 @@ def render_print_button(
     filters: list[str] | None = None,
     style_rows: list[dict[str, str]] | None = None,
     scale: float = 1.0,
+    yearly: bool = False,
+    year_column: str = 'ΕΤΟΣ',
 ) -> None:
     """Εμφανίζει κουμπί εκτύπωσης που ανοίγει νέο παράθυρο με καλαίσθητη εκτύπωση του πίνακα.
 
@@ -741,7 +818,9 @@ def render_print_button(
                 client_name=client_name,
                 client_amka=client_amka,
                 client_birthdate=client_birthdate,
-                scale=scale
+                scale=scale,
+                yearly=yearly,
+                year_column=year_column,
             )
 
             # Δημιουργία JavaScript που θα ανοίξει νέο tab με auto-print
@@ -1703,7 +1782,7 @@ def compute_parallel_months_2017(base_df: pd.DataFrame) -> list[tuple[int, int]]
 
 def compute_applied_monthly_day_caps(data_df: pd.DataFrame) -> list[dict]:
     """Μήνες/πακέτα (μη-ΙΚΑ) όπου εφαρμόστηκε cap 25 ημερών στην Καταμέτρηση."""
-    required_cols = {'Από', 'Έως', 'Ημέρες', 'Κλάδος/Πακέτο Κάλυψης'}
+    required_cols = {'Από', 'Έως', 'Κλάδος/Πακέτο Κάλυψης'}
     if not required_cols.issubset(set(data_df.columns)):
         return []
 
@@ -1721,7 +1800,20 @@ def compute_applied_monthly_day_caps(data_df: pd.DataFrame) -> list[dict]:
             if not package or package.upper() in excluded_packages:
                 continue
 
-            days_val = clean_numeric_value(row.get('Ημέρες')) or 0.0
+            # Ίδιος τύπος ημερών με build_count_report: Έτη*300 + Μήνες*25 + Ημέρες
+            days_val = 0.0
+            if 'Ημέρες' in row and pd.notna(row.get('Ημέρες')) and str(row.get('Ημέρες', '')).strip() != '':
+                d = clean_numeric_value(row.get('Ημέρες'))
+                if d is not None and d != 0:
+                    days_val += float(d)
+            if 'Έτη' in row and pd.notna(row.get('Έτη')):
+                y = clean_numeric_value(row.get('Έτη'))
+                if y is not None and y != 0:
+                    days_val += float(y) * 300
+            if 'Μήνες' in row and pd.notna(row.get('Μήνες')):
+                m = clean_numeric_value(row.get('Μήνες'))
+                if m is not None and m != 0:
+                    days_val += float(m) * 25
             gross_val = clean_numeric_value(row.get('Μικτές αποδοχές'), exclude_drx=True)
             raw_contrib = str(row.get('Συνολικές εισφορές', ''))
             if 'ΔΡΧ' in raw_contrib.upper() or 'DRX' in raw_contrib.upper():
@@ -4412,47 +4504,56 @@ def show_results_page(df, filename):
                 actions_html = ""
                 if row['Ενέργειες'] != '-' and row['Ενέργειες']:
                     actions_html = f"""
-                    <div style="margin-top: 4px; font-weight: bold; color: #d9534f; font-size: 0.9rem;">
-                        Ενέργειες: <span style="font-weight: normal; color: #333;">{row['Ενέργειες']}</span>
+                    <div style="margin-top: 6px; font-weight: 700; color: var(--color-accent); font-size: 0.9rem;">
+                        Ενέργειες: <span style="font-weight: 400; color: #333;">{row['Ενέργειες']}</span>
                     </div>
                     """
-                
+
                 details_val = row['Λεπτομέρειες'] if row['Λεπτομέρειες'] != '-' else ""
                 if details_val:
                     if row['A/A'] in [9, 10]:
-                        details_html = f'<div style="margin-top: 4px; color: #555; font-size: 0.95rem; columns: 2; -webkit-columns: 2; column-gap: 16px;">{details_val}</div>'
+                        details_html = f'<div style="margin-top: 6px; color: #555; font-size: 0.95rem; columns: 2; -webkit-columns: 2; column-gap: 16px;">{details_val}</div>'
                     else:
-                        details_html = f'<div style="margin-top: 4px; color: #555; font-size: 0.95rem;">{details_val}</div>'
+                        details_html = f'<div style="margin-top: 6px; color: #555; font-size: 0.95rem;">{details_val}</div>'
                 else:
                     details_html = ""
 
-                # Εικονίδιο προσοχής για προβληματικά ευρήματα
                 finding_text = str(row['Εύρημα'])
                 aa = row['A/A']
                 icon_html = ""
                 is_safe = False
-                
+
                 safe_keywords = ["Κανένα", "Κανένας", "Καμία", "Όχι", "Εντός ορίων", "Δεν εντοπίστηκαν", "0 ημέρες", "-"]
-                
-                if aa in [1, 2]: # Πληροφοριακά
+
+                if aa in [1, 2]:
                     is_safe = True
                 else:
                     for safe in safe_keywords:
                         if safe in finding_text:
                             is_safe = True
                             break
-                
-                if not is_safe:
+
+                if is_safe:
+                    border_color = "#00b050"
+                    finding_color = "#00b050"
+                elif aa in [1, 2]:
+                    border_color = "#0666ba"
+                    finding_color = "#0666ba"
+                else:
+                    border_color = "#cc0000"
+                    finding_color = "#cc0000"
                     icon_html = "⚠️ "
-                    finding_text = f"<span style='color: #d9534f;'>{finding_text}</span>"
+                    finding_text = f"<span style='color:{finding_color};'>{finding_text}</span>"
 
                 st.markdown(
                     f"""
-                    <div style="margin-bottom: 20px; padding: 12px; background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-                        <div style="font-size: 1.3rem; color: #111; margin-bottom: 6px;">
-                            <span style="font-weight: 700; color: #2c3e50;">{row['Έλεγχος']}</span>
-                            <br>
-                            <span style="font-weight: 600; color: #2980b9;">{icon_html}{finding_text}</span>
+                    <div style="margin-bottom: 16px; padding: 14px 14px 14px 18px; background-color: #fff;
+                                border: 1px solid #e5e7eb; border-left: 4px solid {border_color};
+                                border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+                                font-family: var(--font-main);">
+                        <div style="font-size: 1.15rem; color: #111; margin-bottom: 4px;">
+                            <span style="font-weight: 700; color: #2c3e50;">{row['Έλεγχος']}</span><br>
+                            <span style="font-weight: 600; color: {finding_color};">{icon_html}{finding_text}</span>
                         </div>
                         {details_html}
                         {actions_html}
@@ -6218,7 +6319,9 @@ def show_results_page(df, filename):
             "print_apd",
             "Ανάλυση ΑΠΔ",
             print_df,
-            description="Ανάλυση εγγραφών ΑΠΔ με υπολογισμό εισφ. πλαφόν ΙΚΑ, περικοπής λόγω πλαφόν και ποσοστού κράτησης για τον εντοπισμό των πραγματικών εισφορίσιμων αποδοχών."
+            description="Ανάλυση εγγραφών ΑΠΔ με υπολογισμό εισφ. πλαφόν ΙΚΑ, περικοπής λόγω πλαφόν και ποσοστού κράτησης για τον εντοπισμό των πραγματικών εισφορίσιμων αποδοχών.",
+            yearly=True,
+            year_column='Έτος'
         )
 
     with tab_count:
@@ -6947,7 +7050,9 @@ def show_results_page(df, filename):
                     final_display_df,
                     description="Αναλυτική καταμέτρηση ημερών ασφάλισης ανά μήνα.",
                     style_rows=print_style_rows,
-                    scale=0.9
+                    scale=0.9,
+                    yearly=True,
+                    year_column='ΕΤΟΣ'
                 )
                 
             else:
@@ -7421,7 +7526,9 @@ def show_results_page(df, filename):
                         "print_parallel",
                         "Παράλληλη Ασφάλιση",
                         display_final_df,
-                        description="Πίνακας Παράλληλης Ασφάλισης (ΙΚΑ & ΟΑΕΕ)"
+                        description="Πίνακας Παράλληλης Ασφάλισης (ΙΚΑ & ΟΑΕΕ)",
+                        yearly=True,
+                        year_column='Έτος'
                     )
                 else:
                     st.warning("Δεν βρέθηκαν διαστήματα παράλληλης ασφάλισης με τα συγκεκριμένα κριτήρια.")
@@ -7673,7 +7780,9 @@ def show_results_page(df, filename):
                         "print_parallel_2017",
                         "Παράλληλη Απασχόληση 2017+",
                         display_df.drop(columns=['Is_Aggregate']),
-                        description="Πίνακας Παράλληλης Απασχόλησης 2017+ (ΙΚΑ/ΕΦΚΑ Μισθωτή & ΕΦΚΑ Μη Μισθωτή)."
+                        description="Πίνακας Παράλληλης Απασχόλησης 2017+ (ΙΚΑ/ΕΦΚΑ Μισθωτή & ΕΦΚΑ Μη Μισθωτή).",
+                        yearly=True,
+                        year_column='Έτος'
                     )
                 else:
                     st.warning("Δεν βρέθηκαν διαστήματα παράλληλης απασχόλησης 2017+ με τα συγκεκριμένα κριτήρια.")
