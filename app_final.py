@@ -3738,6 +3738,237 @@ def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] |
 
     return final_display_df, active_mask_rows, last_month_col, month_cols, print_style_rows
 
+
+def render_totals_tab(
+    df: pd.DataFrame,
+    description_map: dict | None = None,
+    key_prefix: str = "totals",
+    register_view_fn=None,
+    has_parallel: bool = False,
+    has_parallel_2017: bool = False,
+    has_multi: bool = False,
+) -> None:
+    """
+    Αποδίδει την καρτέλα Σύνολα (φίλτρα, πίνακας ομαδοποίησης, metrics).
+    Χρησιμοποιείται και στο app_final και στο app_lite.
+    """
+    if description_map is None:
+        description_map = {}
+    if 'Κλάδος/Πακέτο Κάλυψης' not in df.columns:
+        st.warning("Η στήλη 'Κλάδος/Πακέτο Κάλυψης' δεν βρέθηκε στα δεδομένα.")
+        return
+    st.markdown("### Σύνολα - Ομαδοποίηση κατά Κλάδο/Πακέτο (και Ταμείο)")
+    row1_cols = st.columns([2, 1, 1])
+    filter_cols = st.columns([0.9, 2.0, 0.9, 0.9])
+    summary_df = df.copy()
+    summary_df['Κλάδος/Πακέτο Κάλυψης'] = (
+        summary_df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
+    )
+    summary_df['Από_dt'] = pd.to_datetime(summary_df.get('Από'), format='%d/%m/%Y', errors='coerce')
+    summary_df['Έως_dt'] = pd.to_datetime(summary_df.get('Έως'), format='%d/%m/%Y', errors='coerce')
+
+    selected_tameia = []
+    selected_klados = []
+    from_summary_str = ''
+    to_summary_str = ''
+
+    with filter_cols[0]:
+        if 'Ταμείο' in summary_df.columns:
+            tameia_options = sorted(summary_df['Ταμείο'].dropna().astype(str).unique().tolist())
+            selected_tameia = st.multiselect(
+                "Ταμείο:",
+                options=tameia_options,
+                default=[],
+                key=f"{key_prefix}_filter_tameio"
+            )
+        else:
+            selected_tameia = []
+
+    with filter_cols[1]:
+        klados_raw = summary_df['Κλάδος/Πακέτο Κάλυψης'].dropna().astype(str).str.strip()
+        klados_codes = sorted([c for c in klados_raw.unique().tolist() if c and c.lower() not in ('nan', 'none', '')])
+        klados_options_with_desc = []
+        klados_code_map = {}
+        for code in klados_codes:
+            if code in description_map and description_map[code]:
+                option_label = f"{code} - {description_map[code]}"
+                klados_options_with_desc.append(option_label)
+                klados_code_map[option_label] = code
+            else:
+                klados_options_with_desc.append(code)
+                klados_code_map[code] = code
+        selected_klados_labels = st.multiselect(
+            "Κλάδος/Πακέτο Κάλυψης:",
+            options=klados_options_with_desc,
+            default=[],
+            key=f"{key_prefix}_filter_klados"
+        )
+        selected_klados = [klados_code_map.get(opt, opt) for opt in selected_klados_labels]
+
+    with filter_cols[2]:
+        from_summary_str = st.text_input(
+            "Από (dd/mm/yyyy):",
+            value="",
+            placeholder="01/01/1980",
+            key=f"{key_prefix}_filter_from"
+        )
+
+    with filter_cols[3]:
+        to_summary_str = st.text_input(
+            "Έως (dd/mm/yyyy):",
+            value="",
+            placeholder="31/12/2025",
+            key=f"{key_prefix}_filter_to"
+        )
+
+    total_ins_days = None
+    total_years_val = None
+    display_summary = None
+    year_days = 300
+
+    if 'Ταμείο' in summary_df.columns and selected_tameia:
+        summary_df = summary_df[summary_df['Ταμείο'].isin(selected_tameia)]
+    if 'Κλάδος/Πακέτο Κάλυψης' in summary_df.columns and selected_klados:
+        summary_df = summary_df[summary_df['Κλάδος/Πακέτο Κάλυψης'].isin(selected_klados)]
+    if from_summary_str:
+        try:
+            from_dt = pd.to_datetime(from_summary_str, format='%d/%m/%Y')
+            summary_df = summary_df[summary_df['Από_dt'] >= from_dt]
+        except Exception:
+            st.warning("Μη έγκυρη ημερομηνία στο πεδίο Από για τη Συνολα.")
+    if to_summary_str:
+        try:
+            to_dt = pd.to_datetime(to_summary_str, format='%d/%m/%Y')
+            summary_df = summary_df[summary_df['Από_dt'] <= to_dt]
+        except Exception:
+            st.warning("Μη έγκυρη ημερομηνία στο πεδίο Έως για τη Συνολα.")
+
+    summary_df = summary_df.dropna(subset=['Από_dt'])
+
+    numeric_columns = ['Έτη', 'Μήνες', 'Ημέρες']
+    currency_columns = ['Μικτές αποδοχές', 'Συνολικές εισφορές']
+    for col in numeric_columns:
+        if col in summary_df.columns:
+            summary_df[col] = summary_df[col].apply(clean_numeric_value)
+    for col in currency_columns:
+        if col in summary_df.columns:
+            summary_df[col] = summary_df[col].apply(lambda x: clean_numeric_value(x, exclude_drx=True))
+    summary_df = apply_negative_time_sign(summary_df)
+
+    group_keys = ['Κλάδος/Πακέτο Κάλυψης']
+    if 'Ταμείο' in summary_df.columns:
+        group_keys.append('Ταμείο')
+    grouped = summary_df.groupby(group_keys).agg({
+        'Από_dt': 'min',
+        'Έως_dt': 'max',
+        'Έτη': 'sum',
+        'Μήνες': 'sum',
+        'Ημέρες': 'sum',
+        'Μικτές αποδοχές': 'sum',
+        'Συνολικές εισφορές': 'sum'
+    }).reset_index()
+
+    basis_label = st.session_state.get('ins_days_basis', 'Μήνας = 25, Έτος = 300')
+    if str(basis_label).startswith('Μήνας = 30'):
+        month_days, year_days = 30, 360
+    else:
+        month_days, year_days = 25, 300
+
+    raw_total_days = (
+        grouped['Ημέρες'].fillna(0) +
+        grouped['Μήνες'].fillna(0) * month_days +
+        grouped['Έτη'].fillna(0) * year_days
+    )
+    capped_days = compute_summary_capped_days_by_group(summary_df, group_keys, month_days=month_days, year_days=year_days)
+    if not capped_days.empty:
+        grouped = grouped.merge(capped_days, on=group_keys, how='left')
+        total_days = grouped['Συνολικές_Ημέρες_cap'].fillna(raw_total_days)
+        grouped = grouped.drop(columns=['Συνολικές_Ημέρες_cap'])
+    else:
+        total_days = raw_total_days
+
+    grouped['Συνολικές ημέρες'] = total_days.round(0).astype(int)
+    years_series = (grouped['Συνολικές ημέρες'].astype(float) // year_days)
+    remaining_after_years = grouped['Συνολικές ημέρες'].astype(float) - (years_series * year_days)
+    months_series = (remaining_after_years // month_days)
+    days_series = remaining_after_years - (months_series * month_days)
+    grouped['Έτη'] = years_series
+    grouped['Μήνες'] = months_series
+    grouped['Ημέρες'] = days_series
+
+    grouped['Από'] = grouped['Από_dt'].dt.strftime('%d/%m/%Y')
+    grouped['Έως'] = grouped['Έως_dt'].dt.strftime('%d/%m/%Y')
+    grouped = grouped.drop(columns=['Από_dt', 'Έως_dt'])
+
+    record_counts = summary_df.groupby(group_keys).size().reset_index(name='Αριθμός Εγγραφών')
+    summary_final = grouped.merge(record_counts, on=group_keys, how='left')
+
+    if 'Κωδικός Κλάδων / Πακέτων Κάλυψης' in df.columns and 'Περιγραφή' in df.columns:
+        desc_df_merge = df[['Κωδικός Κλάδων / Πακέτων Κάλυψης', 'Περιγραφή']].copy()
+        desc_df_merge = desc_df_merge.dropna(subset=['Κωδικός Κλάδων / Πακέτων Κάλυψης', 'Περιγραφή'])
+        desc_df_merge = desc_df_merge[desc_df_merge['Κωδικός Κλάδων / Πακέτων Κάλυψης'] != '']
+        desc_df_merge = desc_df_merge[desc_df_merge['Περιγραφή'] != '']
+        desc_df_merge = desc_df_merge.drop_duplicates(subset=['Κωδικός Κλάδων / Πακέτων Κάλυψης'])
+        desc_df_merge.columns = ['Κλάδος/Πακέτο Κάλυψης', 'Περιγραφή']
+        desc_df_merge['Κλάδος/Πακέτο Κάλυψης'] = desc_df_merge['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
+        summary_final = summary_final.merge(desc_df_merge, on='Κλάδος/Πακέτο Κάλυψης', how='left')
+
+    columns_order = ['Κλάδος/Πακέτο Κάλυψης']
+    if 'Ταμείο' in summary_final.columns:
+        columns_order.append('Ταμείο')
+    if 'Περιγραφή' in summary_final.columns:
+        columns_order.append('Περιγραφή')
+    columns_order += ['Από', 'Έως', 'Συνολικές ημέρες', 'Έτη', 'Μήνες', 'Ημέρες',
+                     'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
+    summary_final = summary_final[columns_order]
+
+    display_summary = summary_final.copy()
+    display_summary['Μικτές αποδοχές'] = display_summary['Μικτές αποδοχές'].apply(format_currency)
+    display_summary['Συνολικές εισφορές'] = display_summary['Συνολικές εισφορές'].apply(format_currency)
+    for col in ['Συνολικές ημέρες', 'Έτη', 'Μήνες', 'Ημέρες', 'Αριθμός Εγγραφών']:
+        if col in display_summary.columns:
+            decimals = 1 if col in ['Έτη', 'Μήνες'] else 0
+            display_summary[col] = display_summary[col].apply(
+                lambda x, d=decimals: format_number_greek(x, decimals=d) if pd.notna(x) and x != '' else x
+            )
+
+    if selected_klados and 'Συνολικές ημέρες' in summary_final.columns:
+        total_ins_days = int(summary_final['Συνολικές ημέρες'].sum())
+        total_years_val = total_ins_days / year_days if year_days else 0
+
+    with row1_cols[0]:
+        st.info("Επιλέξτε πακέτα κάλυψης για να δείτε την αθροιστική προϋπηρεσία.")
+    with row1_cols[1]:
+        m_val = format_number_greek(total_ins_days, decimals=0) if total_ins_days is not None else "•"
+        st.metric("Εκτίμηση Ημερών Ασφάλισης", m_val)
+    with row1_cols[2]:
+        y_val = format_number_greek(total_years_val, decimals=1) if total_years_val is not None else "•"
+        st.metric("Συνολικά Έτη", y_val)
+
+    if has_parallel or has_parallel_2017 or has_multi:
+        parts = []
+        if has_parallel:
+            parts.append("Παράλληλη ασφάλιση")
+        if has_parallel_2017:
+            parts.append("Παράλληλη απασχόληση")
+        if has_multi:
+            parts.append("Πολλαπλή απασχόληση")
+        st.warning(
+            f"**Εντοπίστηκε: {' / '.join(parts)}.** Το άθροισμα ημερών ασφάλισης μπορεί να δώσει παραπλανητικό αποτέλεσμα. "
+            "Ελέγξτε τις αντίστοιχες καρτέλες για λεπτομέρειες."
+        )
+
+    st.dataframe(display_summary, use_container_width=True)
+    if register_view_fn is not None:
+        register_view_fn("Συνολα - Ομαδοποίηση", display_summary)
+    render_print_button(
+        f"{key_prefix}_print",
+        "Σύνολα - Ομαδοποίηση κατά Κλάδο/Πακέτο (και Ταμείο)",
+        display_summary,
+        description="Συνοπτική απεικόνιση ανά Κλάδο/Πακέτο Κάλυψης για τις περιόδους που εμφανίζονται, καθώς και άθροισμα αποδοχών και εισφορών (μόνο των εγγραφών σε €)."
+    )
+
+
 def show_results_page(df, filename):
     """
     Εμφανίζει τη σελίδα αποτελεσμάτων
@@ -3970,15 +4201,19 @@ def show_results_page(df, filename):
     tab_titles = {
         "summary": "Σύνοψη",
         "ai_summary": "Σύνοψη AI Beta",
+        "totals": "Σύνολα",
         "count": "Καταμέτρηση",
         "gaps": "Κενά",
         "apd": "Ανάλυση ΑΠΔ",
         "parallel": "Παράλληλη",
         "parallel_2017": "Παράλληλη Απασχόληση 2017+",
         "multi": "Πολλαπλή",
-        "main": "Κύρια Δεδομένα",
-        "annex": "Παράρτημα"
+        "more": "Περισσότερα",
     }
+
+    has_parallel = False
+    has_parallel_2017 = False
+    has_multi = False
 
     if not df.empty and 'Από' in df.columns:
         # 1. Κενά
@@ -4029,6 +4264,7 @@ def show_results_page(df, filename):
                         break
 
                 if found_multi:
+                    has_multi = True
                     tab_titles["multi"] = "❗ Πολλαπλή"
         except:
             pass
@@ -4037,6 +4273,7 @@ def show_results_page(df, filename):
         try:
             valid_months = compute_parallel_months(df)
             if valid_months:
+                has_parallel = True
                 tab_titles["parallel"] = "❗ Παράλληλη"
         except: pass
 
@@ -4044,376 +4281,375 @@ def show_results_page(df, filename):
         try:
             valid_months_2017 = compute_parallel_months_2017(df)
             if valid_months_2017:
+                has_parallel_2017 = True
                 tab_titles["parallel_2017"] = "❗ Παράλληλη 2017+"
         except:
             pass
 
     # Δημιουργία tabs
-    tab_summary, tab_ai_summary, tab_count, tab_gaps, tab_apd, tab_parallel, tab_parallel_2017, tab_multi, tab_main, tab_annex = st.tabs(list(tab_titles.values()))
-    
-    with tab_main:
-        # Κύρια δεδομένα (χωρίς τις στήλες από τελευταίες σελίδες)
-        main_columns = [col for col in df.columns if col not in ['Φορέας', 'Κωδικός Κλάδων / Πακέτων Κάλυψης', 'Περιγραφή', 'Κωδικός Τύπου Αποδοχών']]
-        main_df = df[main_columns] if main_columns else df
-        
-        
-        # Φιλτράρουμε μόνο τις γραμμές που ξεκινάνε με ημερομηνία "Από"
-        if 'Από' in main_df.columns:
-            # Κρατάμε μόνο τις γραμμές που έχουν έγκυρη ημερομηνία στο "Από"
-            main_df = main_df.copy()
-            main_df['Από_DateTime'] = pd.to_datetime(main_df['Από'], format='%d/%m/%Y', errors='coerce')
+    tab_summary, tab_ai_summary, tab_totals, tab_count, tab_gaps, tab_apd, tab_parallel, tab_parallel_2017, tab_multi, tab_more = st.tabs(list(tab_titles.values()))
+
+    with tab_more:
+        sub_tab_main, sub_tab_annex = st.tabs(["Κύρια Δεδομένα", "Παράρτημα"])
+        with sub_tab_main:
+            # Κύρια δεδομένα (χωρίς τις στήλες από τελευταίες σελίδες)
+            main_columns = [col for col in df.columns if col not in ['Φορέας', 'Κωδικός Κλάδων / Πακέτων Κάλυψης', 'Περιγραφή', 'Κωδικός Τύπου Αποδοχών']]
+            main_df = df[main_columns] if main_columns else df
+
+            # Φιλτράρουμε μόνο τις γραμμές που ξεκινάνε με ημερομηνία "Από"
+            if 'Από' in main_df.columns:
+                # Κρατάμε μόνο τις γραμμές που έχουν έγκυρη ημερομηνία στο "Από"
+                main_df = main_df.copy()
+                main_df['Από_DateTime'] = pd.to_datetime(main_df['Από'], format='%d/%m/%Y', errors='coerce')
             
-            # Φιλτράρουμε μόνο τις γραμμές με έγκυρη ημερομηνία
-            main_df = main_df.dropna(subset=['Από_DateTime'])
+                # Φιλτράρουμε μόνο τις γραμμές με έγκυρη ημερομηνία
+                main_df = main_df.dropna(subset=['Από_DateTime'])
             
-            # Χρονολογική ταξινόμηση
-            main_df = main_df.sort_values('Από_DateTime', na_position='last')
-            main_df = main_df.drop('Από_DateTime', axis=1)  # Αφαιρούμε τη βοηθητική στήλη
+                # Χρονολογική ταξινόμηση
+                main_df = main_df.sort_values('Από_DateTime', na_position='last')
+                main_df = main_df.drop('Από_DateTime', axis=1)  # Αφαιρούμε τη βοηθητική στήλη
         
-        # Σύστημα Φίλτρων (χωρίς εμφανή τίτλο)
+            # Σύστημα Φίλτρων (χωρίς εμφανή τίτλο)
         
-        # Κουμπί για άνοιγμα popup φίλτρων
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            if st.button("Άνοιγμα Φίλτρων", type="secondary", use_container_width=True):
-                st.session_state['show_filters'] = not st.session_state.get('show_filters', False)
+            # Κουμπί για άνοιγμα popup φίλτρων
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                if st.button("Άνοιγμα Φίλτρων", type="secondary", use_container_width=True):
+                    st.session_state['show_filters'] = not st.session_state.get('show_filters', False)
         
-        # Popup φίλτρων
-        if st.session_state.get('show_filters', False):
-            with st.expander("Φίλτρα Δεδομένων", expanded=True):
-                # Όλα τα φίλτρα σε μία γραμμή
-                col1, col2, col3, col4, col5, col6, col7 = st.columns([1.1, 1.1, 1.4, 1.1, 1.0, 1.0, 1.2])
+            # Popup φίλτρων
+            if st.session_state.get('show_filters', False):
+                with st.expander("Φίλτρα Δεδομένων", expanded=True):
+                    # Όλα τα φίλτρα σε μία γραμμή
+                    col1, col2, col3, col4, col5, col6, col7 = st.columns([1.1, 1.1, 1.4, 1.1, 1.0, 1.0, 1.2])
 
-                with col1:
-                    # Φίλτρο Ταμείου
-                    if 'Ταμείο' in main_df.columns:
-                        taimeia_options = sorted(main_df['Ταμείο'].dropna().unique().tolist())
-                        selected_taimeia = st.multiselect(
-                            "Ταμείο:",
-                            options=taimeia_options,
-                            default=[],
-                            key="filter_taimeio"
-                        )
-                        if selected_taimeia:
-                            main_df = main_df[main_df['Ταμείο'].isin(selected_taimeia)]
+                    with col1:
+                        # Φίλτρο Ταμείου
+                        if 'Ταμείο' in main_df.columns:
+                            taimeia_options = sorted(main_df['Ταμείο'].dropna().unique().tolist())
+                            selected_taimeia = st.multiselect(
+                                "Ταμείο:",
+                                options=taimeia_options,
+                                default=[],
+                                key="filter_taimeio"
+                            )
+                            if selected_taimeia:
+                                main_df = main_df[main_df['Ταμείο'].isin(selected_taimeia)]
 
-                with col2:
-                    # Φίλτρο Τύπου Ασφάλισης
-                    if 'Τύπος Ασφάλισης' in main_df.columns:
-                        typos_options = sorted(main_df['Τύπος Ασφάλισης'].dropna().unique().tolist())
-                        selected_typos = st.multiselect(
-                            "Τύπος Ασφάλισης:",
-                            options=typos_options,
-                            default=[],
-                            key="filter_typos"
-                        )
-                        if selected_typos:
-                            main_df = main_df[main_df['Τύπος Ασφάλισης'].isin(selected_typos)]
+                    with col2:
+                        # Φίλτρο Τύπου Ασφάλισης
+                        if 'Τύπος Ασφάλισης' in main_df.columns:
+                            typos_options = sorted(main_df['Τύπος Ασφάλισης'].dropna().unique().tolist())
+                            selected_typos = st.multiselect(
+                                "Τύπος Ασφάλισης:",
+                                options=typos_options,
+                                default=[],
+                                key="filter_typos"
+                            )
+                            if selected_typos:
+                                main_df = main_df[main_df['Τύπος Ασφάλισης'].isin(selected_typos)]
 
-                with col3:
-                    # Φίλτρο Κλάδου/Πακέτου με περιγραφές
-                    if 'Κλάδος/Πακέτο Κάλυψης' in main_df.columns:
-                        # Δημιουργούμε options με περιγραφές
-                        klados_codes = sorted(main_df['Κλάδος/Πακέτο Κάλυψης'].dropna().unique().tolist())
-                        klados_options_with_desc = []
-                        klados_code_map = {}  # Mapping από "Κωδικός - Περιγραφή" -> Κωδικός
+                    with col3:
+                        # Φίλτρο Κλάδου/Πακέτου με περιγραφές
+                        if 'Κλάδος/Πακέτο Κάλυψης' in main_df.columns:
+                            # Δημιουργούμε options με περιγραφές
+                            klados_codes = sorted(main_df['Κλάδος/Πακέτο Κάλυψης'].dropna().unique().tolist())
+                            klados_options_with_desc = []
+                            klados_code_map = {}  # Mapping από "Κωδικός - Περιγραφή" -> Κωδικός
                         
-                        for code in klados_codes:
-                            if code in description_map and description_map[code]:
-                                option_label = f"{code} - {description_map[code]}"
-                                klados_options_with_desc.append(option_label)
-                                klados_code_map[option_label] = code
-                            else:
-                                klados_options_with_desc.append(code)
-                                klados_code_map[code] = code
+                            for code in klados_codes:
+                                if code in description_map and description_map[code]:
+                                    option_label = f"{code} - {description_map[code]}"
+                                    klados_options_with_desc.append(option_label)
+                                    klados_code_map[option_label] = code
+                                else:
+                                    klados_options_with_desc.append(code)
+                                    klados_code_map[code] = code
                         
-                        selected_klados = st.multiselect(
-                            "Κλάδος/Πακέτο:",
-                            options=klados_options_with_desc,
-                            default=[],
-                            key="filter_klados"
-                        )
+                            selected_klados = st.multiselect(
+                                "Κλάδος/Πακέτο:",
+                                options=klados_options_with_desc,
+                                default=[],
+                                key="filter_klados"
+                            )
                         
-                        if selected_klados:
-                            # Μετατρέπουμε τις επιλογές σε κωδικούς
-                            selected_codes = [klados_code_map.get(opt, opt) for opt in selected_klados]
-                            main_df = main_df[main_df['Κλάδος/Πακέτο Κάλυψης'].isin(selected_codes)]
+                            if selected_klados:
+                                # Μετατρέπουμε τις επιλογές σε κωδικούς
+                                selected_codes = [klados_code_map.get(opt, opt) for opt in selected_klados]
+                                main_df = main_df[main_df['Κλάδος/Πακέτο Κάλυψης'].isin(selected_codes)]
 
-                with col4:
-                    # Φίλτρο Τύπου Αποδοχών (σταθερή και ανθεκτική ανίχνευση ονόματος)
-                    earnings_col = None
-                    if 'Τύπος Αποδοχών' in main_df.columns:
-                        earnings_col = 'Τύπος Αποδοχών'
-                    else:
-                        for c in main_df.columns:
-                            name = str(c).strip().lower()
-                            if ('αποδοχ' in name) and ('τύπος' in name or 'τυπος' in name):
-                                earnings_col = c
-                                break
-                    if earnings_col is not None:
-                        options_raw = main_df[earnings_col].dropna().astype(str).unique().tolist()
-                        typos_apodochon_options = sorted(options_raw)
-                        selected_typos_apodochon = st.multiselect(
-                            "Τύπος Αποδοχών:",
-                            options=typos_apodochon_options,
-                            default=[],
-                            key="filter_apodochon"
-                        )
-                        if selected_typos_apodochon:
-                            main_df = main_df[main_df[earnings_col].isin(selected_typos_apodochon)]
+                    with col4:
+                        # Φίλτρο Τύπου Αποδοχών (σταθερή και ανθεκτική ανίχνευση ονόματος)
+                        earnings_col = None
+                        if 'Τύπος Αποδοχών' in main_df.columns:
+                            earnings_col = 'Τύπος Αποδοχών'
+                        else:
+                            for c in main_df.columns:
+                                name = str(c).strip().lower()
+                                if ('αποδοχ' in name) and ('τύπος' in name or 'τυπος' in name):
+                                    earnings_col = c
+                                    break
+                        if earnings_col is not None:
+                            options_raw = main_df[earnings_col].dropna().astype(str).unique().tolist()
+                            typos_apodochon_options = sorted(options_raw)
+                            selected_typos_apodochon = st.multiselect(
+                                "Τύπος Αποδοχών:",
+                                options=typos_apodochon_options,
+                                default=[],
+                                key="filter_apodochon"
+                            )
+                            if selected_typos_apodochon:
+                                main_df = main_df[main_df[earnings_col].isin(selected_typos_apodochon)]
 
-                with col5:
-                    # Ημερομηνία Από
-                    if 'Από' in main_df.columns:
-                        from_date_str = st.text_input(
-                            "Από (dd/mm/yyyy):",
-                            value="",
-                            placeholder="01/01/1985",
-                            key="filter_from_date"
-                        )
+                    with col5:
+                        # Ημερομηνία Από
+                        if 'Από' in main_df.columns:
+                            from_date_str = st.text_input(
+                                "Από (dd/mm/yyyy):",
+                                value="",
+                                placeholder="01/01/1985",
+                                key="filter_from_date"
+                            )
 
-                with col6:
-                    # Ημερομηνία Έως
-                    if 'Από' in main_df.columns:
-                        to_date_str = st.text_input(
-                            "Έως (dd/mm/yyyy):",
-                            value="",
-                            placeholder="31/12/1990",
-                            key="filter_to_date"
-                        )
+                    with col6:
+                        # Ημερομηνία Έως
+                        if 'Από' in main_df.columns:
+                            to_date_str = st.text_input(
+                                "Έως (dd/mm/yyyy):",
+                                value="",
+                                placeholder="31/12/1990",
+                                key="filter_to_date"
+                            )
 
-                with col7:
-                    # Φίλτρο Α-Μ Εργοδότη
-                    if 'Α-Μ εργοδότη' in main_df.columns:
-                        ame_options = ['Όλα'] + sorted(main_df['Α-Μ εργοδότη'].dropna().astype(str).unique().tolist())
-                        selected_ame = st.multiselect(
-                            "Α-Μ Εργοδότη:",
-                            options=ame_options,
-                            default=['Όλα'],
-                            key="filter_ame"
-                        )
-                        if 'Όλα' not in selected_ame:
-                            main_df = main_df[main_df['Α-Μ εργοδότη'].astype(str).isin(selected_ame)]
+                    with col7:
+                        # Φίλτρο Α-Μ Εργοδότη
+                        if 'Α-Μ εργοδότη' in main_df.columns:
+                            ame_options = ['Όλα'] + sorted(main_df['Α-Μ εργοδότη'].dropna().astype(str).unique().tolist())
+                            selected_ame = st.multiselect(
+                                "Α-Μ Εργοδότη:",
+                                options=ame_options,
+                                default=['Όλα'],
+                                key="filter_ame"
+                            )
+                            if 'Όλα' not in selected_ame:
+                                main_df = main_df[main_df['Α-Μ εργοδότη'].astype(str).isin(selected_ame)]
                 
-                # Εφαρμογή φίλτρων ημερομηνιών
-                if 'Από' in main_df.columns and (from_date_str or to_date_str):
-                    main_df['Από_DateTime'] = pd.to_datetime(main_df['Από'], format='%d/%m/%Y', errors='coerce')
+                    # Εφαρμογή φίλτρων ημερομηνιών
+                    if 'Από' in main_df.columns and (from_date_str or to_date_str):
+                        main_df['Από_DateTime'] = pd.to_datetime(main_df['Από'], format='%d/%m/%Y', errors='coerce')
                     
-                    if from_date_str:
-                        try:
-                            from_date_pd = pd.to_datetime(from_date_str, format='%d/%m/%Y')
-                            main_df = main_df[main_df['Από_DateTime'] >= from_date_pd]
-                        except:
-                            st.error("Μη έγκυρη μορφή ημερομηνίας 'Από'")
+                        if from_date_str:
+                            try:
+                                from_date_pd = pd.to_datetime(from_date_str, format='%d/%m/%Y')
+                                main_df = main_df[main_df['Από_DateTime'] >= from_date_pd]
+                            except:
+                                st.error("Μη έγκυρη μορφή ημερομηνίας 'Από'")
                     
-                    if to_date_str:
-                        try:
-                            to_date_pd = pd.to_datetime(to_date_str, format='%d/%m/%Y')
-                            main_df = main_df[main_df['Από_DateTime'] <= to_date_pd]
-                        except:
-                            st.error("Μη έγκυρη μορφή ημερομηνίας 'Έως'")
+                        if to_date_str:
+                            try:
+                                to_date_pd = pd.to_datetime(to_date_str, format='%d/%m/%Y')
+                                main_df = main_df[main_df['Από_DateTime'] <= to_date_pd]
+                            except:
+                                st.error("Μη έγκυρη μορφή ημερομηνίας 'Έως'")
                     
-                    main_df = main_df.drop('Από_DateTime', axis=1)
+                        main_df = main_df.drop('Από_DateTime', axis=1)
         
-        # Εμφάνιση αποτελεσμάτων φίλτρων (σε πραγματικό χρόνο)
-        if st.session_state.get('show_filters', False):
-            st.info(f"Εμφανίζονται {len(main_df)} γραμμές")
+            # Εμφάνιση αποτελεσμάτων φίλτρων (σε πραγματικό χρόνο)
+            if st.session_state.get('show_filters', False):
+                st.info(f"Εμφανίζονται {len(main_df)} γραμμές")
         
-        # Δημιουργούμε αντίγραφο για εμφάνιση με μορφοποίηση
-        display_df = main_df.copy()
+            # Δημιουργούμε αντίγραφο για εμφάνιση με μορφοποίηση
+            display_df = main_df.copy()
         
-        # Εφαρμόζουμε μορφοποίηση νομισμάτων μόνο για εμφάνιση
-        currency_columns = ['Μικτές αποδοχές', 'Συνολικές εισφορές']
-        for col in currency_columns:
-            if col in display_df.columns:
-                display_df[col] = display_df[col].apply(format_currency)
+            # Εφαρμόζουμε μορφοποίηση νομισμάτων μόνο για εμφάνιση
+            currency_columns = ['Μικτές αποδοχές', 'Συνολικές εισφορές']
+            for col in currency_columns:
+                if col in display_df.columns:
+                    display_df[col] = display_df[col].apply(format_currency)
         
-        # Εφαρμόζουμε ελληνική μορφοποίηση για αριθμητικές στήλες
-        numeric_columns = ['Ημερολογιακές ημέρες', 'Μήνες', 'Έτη']
-        for col in numeric_columns:
-            if col in display_df.columns:
-                # Μήνες και Έτη με 1 δεκαδικό, ημέρες χωρίς δεκαδικά
-                decimals = 1 if col in ['Μήνες', 'Έτη'] else 0
-                display_df[col] = display_df[col].apply(lambda x: format_number_greek(x, decimals=decimals) if pd.notna(x) and x != '' else x)
+            # Εφαρμόζουμε ελληνική μορφοποίηση για αριθμητικές στήλες
+            numeric_columns = ['Ημερολογιακές ημέρες', 'Μήνες', 'Έτη']
+            for col in numeric_columns:
+                if col in display_df.columns:
+                    # Μήνες και Έτη με 1 δεκαδικό, ημέρες χωρίς δεκαδικά
+                    decimals = 1 if col in ['Μήνες', 'Έτη'] else 0
+                    display_df[col] = display_df[col].apply(lambda x: format_number_greek(x, decimals=decimals) if pd.notna(x) and x != '' else x)
         
-        st.markdown("### Κύρια Δεδομένα e-EFKA (Με χρονολογική σειρά)")
-        st.dataframe(
-            display_df,
-            use_container_width=True
-        )
-        register_view("Κύρια Δεδομένα", display_df)
-        # Κουμπί εκτύπωσης για Κύρια Δεδομένα
-        render_print_button(
-            "print_main",
-            "Κύρια Δεδομένα e-EFKA",
-            display_df,
-            description="Αναλυτική χρονολογική κατάσταση ασφαλιστικών εγγραφών όπως εξήχθησαν από τον e-ΕΦΚΑ και το ασφ. βιογραφικό ΑΤΛΑΣ."
-        )
-
-    with tab_ai_summary:
-        st.markdown("### AI Σύνοψη Φακέλου (BETA)")
-        ai_row1, ai_row2, ai_row3 = st.columns([2, 0.7, 1])
-        with ai_row1:
-            st.info("Παράγεται δομημένη σύνοψη φακέλου με βάση τη Σύνοψη, τις καρτέλες και τους βασικούς ελέγχους. Επιπλέον, μπορείτε να κάνετε συγκεκριμένες ερωτήσεις για τα στοιχεία του φακέλου.")
-        with ai_row2:
-            run_ai_main = st.button("Παραγωγή AI Σύνοψης", type="primary", use_container_width=True, key="main_ai_generate")
-        with ai_row3:
-            ai_model_labels = list(AI_MODEL_OPTIONS.keys())
-            ai_model_choice = st.selectbox(
-                "Μοντέλο AI:",
-                options=ai_model_labels,
-                index=0,
-                key="main_ai_model"
+            st.markdown("### Κύρια Δεδομένα e-EFKA (Με χρονολογική σειρά)")
+            st.dataframe(
+                display_df,
+                use_container_width=True
+            )
+            register_view("Κύρια Δεδομένα", display_df)
+            # Κουμπί εκτύπωσης για Κύρια Δεδομένα
+            render_print_button(
+                "print_main",
+                "Κύρια Δεδομένα e-EFKA",
+                display_df,
+                description="Αναλυτική χρονολογική κατάσταση ασφαλιστικών εγγραφών όπως εξήχθησαν από τον e-ΕΦΚΑ και το ασφ. βιογραφικό ΑΤΛΑΣ."
             )
 
-        if run_ai_main:
-            selected = AI_MODEL_OPTIONS.get(ai_model_choice, AI_MODEL_OPTIONS[ai_model_labels[0]])
-            with st.spinner(f"Παραγωγή σύνοψης ({ai_model_choice})..."):
-                audit_ai_df = generate_audit_report(df)
-                summary_ai_df = build_summary_grouped_display(df, df) if 'Κλάδος/Πακέτο Κάλυψης' in df.columns else pd.DataFrame()
-                ai_count_df = exclude_unused_packages(df.copy())
-                count_ai_df, _, _, _, _ = build_count_report(
-                    ai_count_df,
+        with tab_ai_summary:
+            st.markdown("### AI Σύνοψη Φακέλου (BETA)")
+            ai_row1, ai_row2, ai_row3 = st.columns([2, 0.7, 1])
+            with ai_row1:
+                st.info("Παράγεται δομημένη σύνοψη φακέλου με βάση τη Σύνοψη, τις καρτέλες και τους βασικούς ελέγχους. Επιπλέον, μπορείτε να κάνετε συγκεκριμένες ερωτήσεις για τα στοιχεία του φακέλου.")
+            with ai_row2:
+                run_ai_main = st.button("Παραγωγή AI Σύνοψης", type="primary", use_container_width=True, key="main_ai_generate")
+            with ai_row3:
+                ai_model_labels = list(AI_MODEL_OPTIONS.keys())
+                ai_model_choice = st.selectbox(
+                    "Μοντέλο AI:",
+                    options=ai_model_labels,
+                    index=0,
+                    key="main_ai_model"
+                )
+
+            if run_ai_main:
+                selected = AI_MODEL_OPTIONS.get(ai_model_choice, AI_MODEL_OPTIONS[ai_model_labels[0]])
+                with st.spinner(f"Παραγωγή σύνοψης ({ai_model_choice})..."):
+                    audit_ai_df = generate_audit_report(df)
+                    summary_ai_df = build_summary_grouped_display(df, df) if 'Κλάδος/Πακέτο Κάλυψης' in df.columns else pd.DataFrame()
+                    ai_count_df = exclude_unused_packages(df.copy())
+                    count_ai_df, _, _, _, _ = build_count_report(
+                        ai_count_df,
+                        description_map=description_map,
+                        show_count_totals_only=False
+                    )
+                    gaps_ai_df = find_gaps_in_insurance_data(df)
+                    parallel_ai_rows = [
+                        {'ΕΤΟΣ': int(y), 'Μήνας': int(m)}
+                        for (y, m) in compute_parallel_months(df)
+                    ]
+                    ai_meta = {
+                        "analysis_date": datetime.date.today().strftime("%d/%m/%Y"),
+                        "source_file": str(filename),
+                        "app": "ATLAS Main"
+                    }
+                    st.session_state["main_ai_summary_result"] = generate_ai_case_summary(
+                        audit_df=audit_ai_df,
+                        summary_df=summary_ai_df,
+                        count_df=count_ai_df,
+                        gaps_df=gaps_ai_df,
+                        parallel_rows=parallel_ai_rows,
+                        metadata=ai_meta,
+                        model_name=selected["model"],
+                        provider=selected["provider"],
+                        fallback_models=selected.get("fallback_models")
+                    )
+
+            ai_main_result = st.session_state.get("main_ai_summary_result")
+            if ai_main_result:
+                if ai_main_result.get("ok"):
+                    data = ai_main_result.get("data", {})
+                    used_model = ai_main_result.get("model_used", ai_model_choice)
+                    if ai_main_result.get("fallback_used"):
+                        st.success(f"Η AI σύνοψη δημιουργήθηκε (με fallback σε {used_model}).")
+                    else:
+                        st.success(f"Η AI σύνοψη δημιουργήθηκε ({used_model}).")
+                    st.markdown(f"**Σύντομη Σύνοψη**: {data.get('executive_summary', '-')}")
+                    st.markdown("**Κρίσιμα Ευρήματα**")
+                    for item in data.get("critical_findings", []) or []:
+                        st.markdown(f"- {item}")
+                    st.markdown("**Κενά / Αβεβαιότητες**")
+                    for item in data.get("data_gaps", []) or []:
+                        st.markdown(f"- {item}")
+                    st.markdown("**Προτεινόμενες Ενέργειες**")
+                    for item in data.get("recommended_actions", []) or []:
+                        st.markdown(f"- {item}")
+                    conf = data.get("confidence", {}) if isinstance(data.get("confidence"), dict) else {}
+                    st.markdown(f"**Confidence**: {conf.get('level', '-')}")
+                    for reason in conf.get("reasons", []) or []:
+                        st.markdown(f"- {reason}")
+                    st.info(data.get("disclaimer", "Η σύνοψη είναι υποβοηθητική και απαιτεί επαγγελματικό έλεγχο."))
+                else:
+                    st.error(f"Αποτυχία AI σύνοψης: {ai_main_result.get('error', 'Άγνωστο σφάλμα')}")
+                    retry_after = ai_main_result.get("retry_after_seconds")
+                    if retry_after:
+                        wait_min = max(1, int(round(float(retry_after) / 60)))
+                        st.warning(f"Προτείνεται νέα προσπάθεια σε περίπου {wait_min} λεπτά.")
+
+            # --- AI Chat ---
+            st.markdown("---")
+            st.markdown("### Ρωτήστε για τον φάκελο")
+            st.caption("Κάντε ερωτήσεις σχετικά με τα δεδομένα του φακέλου. Η AI απαντά βασισμένη αποκλειστικά στα στοιχεία που αναλύθηκαν.")
+
+            if "ai_chat_history" not in st.session_state:
+                st.session_state["ai_chat_history"] = []
+
+            if "ai_chat_context" not in st.session_state:
+                chat_audit = generate_audit_report(df)
+                chat_summary = build_summary_grouped_display(df, df) if 'Κλάδος/Πακέτο Κάλυψης' in df.columns else pd.DataFrame()
+                chat_count_df = exclude_unused_packages(df.copy())
+                chat_count, _, _, _, _ = build_count_report(
+                    chat_count_df,
                     description_map=description_map,
                     show_count_totals_only=False
                 )
-                gaps_ai_df = find_gaps_in_insurance_data(df)
-                parallel_ai_rows = [
+                chat_gaps = find_gaps_in_insurance_data(df)
+                chat_parallel_rows = [
                     {'ΕΤΟΣ': int(y), 'Μήνας': int(m)}
                     for (y, m) in compute_parallel_months(df)
                 ]
-                ai_meta = {
-                    "analysis_date": datetime.date.today().strftime("%d/%m/%Y"),
-                    "source_file": str(filename),
-                    "app": "ATLAS Main"
-                }
-                st.session_state["main_ai_summary_result"] = generate_ai_case_summary(
-                    audit_df=audit_ai_df,
-                    summary_df=summary_ai_df,
-                    count_df=count_ai_df,
-                    gaps_df=gaps_ai_df,
-                    parallel_rows=parallel_ai_rows,
-                    metadata=ai_meta,
-                    model_name=selected["model"],
-                    provider=selected["provider"],
-                    fallback_models=selected.get("fallback_models")
-                )
+                st.session_state["ai_chat_context"] = json.dumps({
+                    'audit_findings': _df_to_records_for_ai(chat_audit),
+                    'summary_rows': _df_to_records_for_ai(chat_summary),
+                    'count_rows': _df_to_records_for_ai(chat_count),
+                    'gaps_rows': _df_to_records_for_ai(chat_gaps),
+                    'parallel_rows': chat_parallel_rows,
+                }, ensure_ascii=False)
 
-        ai_main_result = st.session_state.get("main_ai_summary_result")
-        if ai_main_result:
-            if ai_main_result.get("ok"):
-                data = ai_main_result.get("data", {})
-                used_model = ai_main_result.get("model_used", ai_model_choice)
-                if ai_main_result.get("fallback_used"):
-                    st.success(f"Η AI σύνοψη δημιουργήθηκε (με fallback σε {used_model}).")
-                else:
-                    st.success(f"Η AI σύνοψη δημιουργήθηκε ({used_model}).")
-                st.markdown(f"**Σύντομη Σύνοψη**: {data.get('executive_summary', '-')}")
-                st.markdown("**Κρίσιμα Ευρήματα**")
-                for item in data.get("critical_findings", []) or []:
-                    st.markdown(f"- {item}")
-                st.markdown("**Κενά / Αβεβαιότητες**")
-                for item in data.get("data_gaps", []) or []:
-                    st.markdown(f"- {item}")
-                st.markdown("**Προτεινόμενες Ενέργειες**")
-                for item in data.get("recommended_actions", []) or []:
-                    st.markdown(f"- {item}")
-                conf = data.get("confidence", {}) if isinstance(data.get("confidence"), dict) else {}
-                st.markdown(f"**Confidence**: {conf.get('level', '-')}")
-                for reason in conf.get("reasons", []) or []:
-                    st.markdown(f"- {reason}")
-                st.info(data.get("disclaimer", "Η σύνοψη είναι υποβοηθητική και απαιτεί επαγγελματικό έλεγχο."))
-            else:
-                st.error(f"Αποτυχία AI σύνοψης: {ai_main_result.get('error', 'Άγνωστο σφάλμα')}")
-                retry_after = ai_main_result.get("retry_after_seconds")
-                if retry_after:
-                    wait_min = max(1, int(round(float(retry_after) / 60)))
-                    st.warning(f"Προτείνεται νέα προσπάθεια σε περίπου {wait_min} λεπτά.")
+            for msg in st.session_state["ai_chat_history"]:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
 
-        # --- AI Chat ---
-        st.markdown("---")
-        st.markdown("### Ρωτήστε για τον φάκελο")
-        st.caption("Κάντε ερωτήσεις σχετικά με τα δεδομένα του φακέλου. Η AI απαντά βασισμένη αποκλειστικά στα στοιχεία που αναλύθηκαν.")
+            if chat_input := st.chat_input("Γράψτε την ερώτησή σας...", key="ai_chat_input"):
+                st.session_state["ai_chat_history"].append({"role": "user", "content": chat_input})
+                with st.chat_message("user"):
+                    st.markdown(chat_input)
 
-        if "ai_chat_history" not in st.session_state:
-            st.session_state["ai_chat_history"] = []
+                selected_chat = AI_MODEL_OPTIONS.get(ai_model_choice, AI_MODEL_OPTIONS[ai_model_labels[0]])
+                with st.chat_message("assistant"):
+                    with st.spinner("Σκέφτομαι..."):
+                        answer = ai_chat_response(
+                            user_message=chat_input,
+                            chat_history=st.session_state["ai_chat_history"][:-1],
+                            case_context=st.session_state["ai_chat_context"],
+                            model_name=selected_chat["model"],
+                            provider=selected_chat["provider"],
+                            fallback_models=selected_chat.get("fallback_models")
+                        )
+                    st.markdown(answer)
+                st.session_state["ai_chat_history"].append({"role": "assistant", "content": answer})
 
-        if "ai_chat_context" not in st.session_state:
-            chat_audit = generate_audit_report(df)
-            chat_summary = build_summary_grouped_display(df, df) if 'Κλάδος/Πακέτο Κάλυψης' in df.columns else pd.DataFrame()
-            chat_count_df = exclude_unused_packages(df.copy())
-            chat_count, _, _, _, _ = build_count_report(
-                chat_count_df,
-                description_map=description_map,
-                show_count_totals_only=False
-            )
-            chat_gaps = find_gaps_in_insurance_data(df)
-            chat_parallel_rows = [
-                {'ΕΤΟΣ': int(y), 'Μήνας': int(m)}
-                for (y, m) in compute_parallel_months(df)
-            ]
-            st.session_state["ai_chat_context"] = json.dumps({
-                'audit_findings': _df_to_records_for_ai(chat_audit),
-                'summary_rows': _df_to_records_for_ai(chat_summary),
-                'count_rows': _df_to_records_for_ai(chat_count),
-                'gaps_rows': _df_to_records_for_ai(chat_gaps),
-                'parallel_rows': chat_parallel_rows,
-            }, ensure_ascii=False)
+        with sub_tab_annex:
+            # Επιπλέον πίνακες (στήλες από τελευταίες σελίδες)
+            extra_columns = [col for col in df.columns if col in ['Φορέας', 'Κωδικός Κλάδων / Πακέτων Κάλυψης', 'Περιγραφή']]
 
-        for msg in st.session_state["ai_chat_history"]:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+            if extra_columns:
+                extra_df = df[extra_columns].copy()
 
-        if chat_input := st.chat_input("Γράψτε την ερώτησή σας...", key="ai_chat_input"):
-            st.session_state["ai_chat_history"].append({"role": "user", "content": chat_input})
-            with st.chat_message("user"):
-                st.markdown(chat_input)
+                # Φιλτράρουμε κενές γραμμές (όπου όλες οι στήλες είναι κενές ή "None")
+                extra_df = extra_df.dropna(how='all')
+                extra_df = extra_df[~((extra_df == 'None') | (extra_df == '') | (extra_df.isna())).all(axis=1)]
 
-            selected_chat = AI_MODEL_OPTIONS.get(ai_model_choice, AI_MODEL_OPTIONS[ai_model_labels[0]])
-            with st.chat_message("assistant"):
-                with st.spinner("Σκέφτομαι..."):
-                    answer = ai_chat_response(
-                        user_message=chat_input,
-                        chat_history=st.session_state["ai_chat_history"][:-1],
-                        case_context=st.session_state["ai_chat_context"],
-                        model_name=selected_chat["model"],
-                        provider=selected_chat["provider"],
-                        fallback_models=selected_chat.get("fallback_models")
+                if not extra_df.empty:
+                    st.markdown("### Παράρτημα (Τελευταίες Σελίδες)")
+                    st.dataframe(extra_df, use_container_width=True)
+                    register_view("Παράρτημα", extra_df)
+                    render_print_button(
+                        "print_extra",
+                        "Παράρτημα",
+                        extra_df,
+                        description="Επεξηγηματικοί πίνακες καλύψεων και αποδοχών."
                     )
-                st.markdown(answer)
-            st.session_state["ai_chat_history"].append({"role": "assistant", "content": answer})
-
-    with tab_annex:
-        # Επιπλέον πίνακες (στήλες από τελευταίες σελίδες)
-        extra_columns = [col for col in df.columns if col in ['Φορέας', 'Κωδικός Κλάδων / Πακέτων Κάλυψης', 'Περιγραφή']]
-        
-        if extra_columns:
-            extra_df = df[extra_columns].copy()
-            
-            # Φιλτράρουμε κενές γραμμές (όπου όλες οι στήλες είναι κενές ή "None")
-            extra_df = extra_df.dropna(how='all')  # Αφαιρούμε γραμμές που είναι όλες κενές
-            extra_df = extra_df[~((extra_df == 'None') | (extra_df == '') | (extra_df.isna())).all(axis=1)]  # Αφαιρούμε γραμμές με "None" ή κενά
-            
-            if not extra_df.empty:
-                st.markdown("### Παράρτημα (Τελευταίες Σελίδες)")
-                st.dataframe(
-                    extra_df,
-                    use_container_width=True
-                )
-                register_view("Παράρτημα", extra_df)
-                render_print_button(
-                    "print_extra",
-                    "Παράρτημα",
-                    extra_df,
-                    description="Επεξηγηματικοί πίνακες καλύψεων και αποδοχών."
-                )
+                else:
+                    st.info("Δεν βρέθηκαν δεδομένα στα επιπλέον πίνακες.")
             else:
-                st.info("Δεν βρέθηκαν δεδομένα στα επιπλέον πίνακες.")
-        else:
-            st.info("Δεν βρέθηκαν επιπλέον πίνακες από τις τελευταίες σελίδες.")
+                st.info("Δεν βρέθηκαν επιπλέον πίνακες από τις τελευταίες σελίδες.")
     
     with tab_summary:
-        
+
         # --- Audit Report Integration ---
         if not df.empty and 'Από' in df.columns:
             def generate_audit_report_local(data_df, extra_data_df=None):
@@ -4910,205 +5146,16 @@ def show_results_page(df, filename):
             
             register_view("Διαγνωστικός_Έλεγχος", audit_df)
             st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-        
-        if 'Κλάδος/Πακέτο Κάλυψης' in df.columns:
-            st.markdown("### Συνοπτική Αναφορά - Ομαδοποίηση κατά Κλάδο/Πακέτο (και Ταμείο)")
-            st.info("Σημείωση: Στα αθροίσματα συμπεριλαμβάνονται μόνο τα ποσά σε €. Τα ποσά σε ΔΡΧ (πριν το 2002) εμφανίζονται αλλά δεν υπολογίζονται στα συνολικά.")
-            # Προετοιμασία δεδομένων
-            summary_df = df.copy()
-            # Κανονικοποίηση τιμών κλάδου/πακέτου
-            summary_df['Κλάδος/Πακέτο Κάλυψης'] = (
-                summary_df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
-            )
-            # Μετατροπή ημερομηνιών σε datetime για φίλτρα και ομαδοποίηση
-            summary_df['Από_dt'] = pd.to_datetime(summary_df.get('Από'), format='%d/%m/%Y', errors='coerce')
-            summary_df['Έως_dt'] = pd.to_datetime(summary_df.get('Έως'), format='%d/%m/%Y', errors='coerce')
 
-            # Φίλτρα: Ταμείο και ημερομηνίες (όπως στην αναφορά Ημερών)
-            filter_cols = st.columns([1.4, 0.9, 0.9, 0.4])
-            selected_tameia = ['Όλα']
-            from_summary_str = ''
-            to_summary_str = ''
-
-            with filter_cols[0]:
-                if 'Ταμείο' in summary_df.columns:
-                    tameia_options = sorted(summary_df['Ταμείο'].dropna().astype(str).unique().tolist())
-                    selected_tameia = st.multiselect(
-                        "Ταμείο:",
-                        options=tameia_options,
-                        default=[],
-                        key="summary_filter_tameio"
-                    )
-                else:
-                    st.write("")
-                    selected_tameia = []
-
-            with filter_cols[1]:
-                from_summary_str = st.text_input(
-                    "Από (dd/mm/yyyy):",
-                    value="",
-                    placeholder="01/01/1980",
-                    key="summary_filter_from"
-                )
-
-            with filter_cols[2]:
-                to_summary_str = st.text_input(
-                    "Έως (dd/mm/yyyy):",
-                    value="",
-                    placeholder="31/12/2025",
-                    key="summary_filter_to"
-                )
-
-            with filter_cols[3]:
-                st.write("")
-
-            # Εφαρμογή φίλτρων Ταμείου
-            if 'Ταμείο' in summary_df.columns and selected_tameia:
-                summary_df = summary_df[summary_df['Ταμείο'].isin(selected_tameia)]
-
-            # Εφαρμογή φίλτρων ημερομηνιών
-            if from_summary_str:
-                try:
-                    from_dt = pd.to_datetime(from_summary_str, format='%d/%m/%Y')
-                    summary_df = summary_df[summary_df['Από_dt'] >= from_dt]
-                except Exception:
-                    st.warning("Μη έγκυρη ημερομηνία στο πεδίο Από για τη Συνοπτική Αναφορά.")
-            if to_summary_str:
-                try:
-                    to_dt = pd.to_datetime(to_summary_str, format='%d/%m/%Y')
-                    summary_df = summary_df[summary_df['Από_dt'] <= to_dt]
-                except Exception:
-                    st.warning("Μη έγκυρη ημερομηνία στο πεδίο Έως για τη Συνοπτική Αναφορά.")
-
-            # Κρατάμε γραμμές με τουλάχιστον έγκυρη μία ημερομηνία έναρξης
-            summary_df = summary_df.dropna(subset=['Από_dt'])
-            
-            # Καθαρισμός αριθμητικών στηλών πριν την ομαδοποίηση
-            # Για τα ποσά, εξαιρούμε τα ΔΡΧ από τα αθροίσματα
-            numeric_columns = ['Έτη', 'Μήνες', 'Ημέρες']
-            currency_columns = ['Μικτές αποδοχές', 'Συνολικές εισφορές']
-            
-            for col in numeric_columns:
-                if col in summary_df.columns:
-                    summary_df[col] = summary_df[col].apply(clean_numeric_value)
-            
-            # Για τα νομισματικά ποσά, εξαιρούμε τα ΔΡΧ
-            for col in currency_columns:
-                if col in summary_df.columns:
-                    summary_df[col] = summary_df[col].apply(lambda x: clean_numeric_value(x, exclude_drx=True))
-
-            summary_df = apply_negative_time_sign(summary_df)
-            
-            # Ομαδοποίηση με βάση Κλάδος/Πακέτο και (αν υπάρχει) Ταμείο
-            group_keys = ['Κλάδος/Πακέτο Κάλυψης']
-            if 'Ταμείο' in summary_df.columns:
-                group_keys.append('Ταμείο')
-
-            grouped = summary_df.groupby(group_keys).agg({
-                'Από_dt': 'min',
-                'Έως_dt': 'max',
-                'Έτη': 'sum',
-                'Μήνες': 'sum',
-                'Ημέρες': 'sum',
-                'Μικτές αποδοχές': 'sum',
-                'Συνολικές εισφορές': 'sum'
-            }).reset_index()
-
-            basis_label = st.session_state.get('ins_days_basis', 'Μήνας = 25, Έτος = 300')
-            if str(basis_label).startswith('Μήνας = 30'):
-                month_days, year_days = 30, 360
-            else:
-                month_days, year_days = 25, 300
-
-            raw_total_days = (
-                grouped['Ημέρες'].fillna(0) +
-                grouped['Μήνες'].fillna(0) * month_days +
-                grouped['Έτη'].fillna(0) * year_days
-            )
-            capped_days = compute_summary_capped_days_by_group(summary_df, group_keys, month_days=month_days, year_days=year_days)
-            if not capped_days.empty:
-                grouped = grouped.merge(capped_days, on=group_keys, how='left')
-                total_days = grouped['Συνολικές_Ημέρες_cap'].fillna(raw_total_days)
-                grouped = grouped.drop(columns=['Συνολικές_Ημέρες_cap'])
-            else:
-                total_days = raw_total_days
-
-            grouped['Συνολικές ημέρες'] = total_days.round(0).astype(int)
-            years_series = (grouped['Συνολικές ημέρες'].astype(float) // year_days)
-            remaining_after_years = grouped['Συνολικές ημέρες'].astype(float) - (years_series * year_days)
-            months_series = (remaining_after_years // month_days)
-            days_series = remaining_after_years - (months_series * month_days)
-            grouped['Έτη'] = years_series
-            grouped['Μήνες'] = months_series
-            grouped['Ημέρες'] = days_series
-
-            # Μορφοποίηση ημερομηνιών ξανά σε dd/mm/yyyy
-            grouped['Από'] = grouped['Από_dt'].dt.strftime('%d/%m/%Y')
-            grouped['Έως'] = grouped['Έως_dt'].dt.strftime('%d/%m/%Y')
-            grouped = grouped.drop(columns=['Από_dt', 'Έως_dt'])
-            
-            # Μετράμε τις εγγραφές για κάθε συνδυασμό (Κλάδος, Ταμείο)
-            record_counts = summary_df.groupby(group_keys).size().reset_index(name='Αριθμός Εγγραφών')
-            
-            # Συνδυάζουμε τα δεδομένα
-            summary_final = grouped.merge(record_counts, on=group_keys, how='left')
-            
-            # Προσθήκη περιγραφής από το Παράρτημα
-            if 'Κωδικός Κλάδων / Πακέτων Κάλυψης' in df.columns and 'Περιγραφή' in df.columns:
-                # Δημιουργούμε DataFrame για merge (διαφορετικό από το dictionary description_map)
-                desc_df_merge = df[['Κωδικός Κλάδων / Πακέτων Κάλυψης', 'Περιγραφή']].copy()
-                desc_df_merge = desc_df_merge.dropna(subset=['Κωδικός Κλάδων / Πακέτων Κάλυψης', 'Περιγραφή'])
-                desc_df_merge = desc_df_merge[desc_df_merge['Κωδικός Κλάδων / Πακέτων Κάλυψης'] != '']
-                desc_df_merge = desc_df_merge[desc_df_merge['Περιγραφή'] != '']
-                # Αφαιρούμε duplicates - κρατάμε την πρώτη περιγραφή για κάθε κωδικό
-                desc_df_merge = desc_df_merge.drop_duplicates(subset=['Κωδικός Κλάδων / Πακέτων Κάλυψης'])
-                desc_df_merge.columns = ['Κλάδος/Πακέτο Κάλυψης', 'Περιγραφή']
-                
-                # Κανονικοποίηση τιμών για matching
-                desc_df_merge['Κλάδος/Πακέτο Κάλυψης'] = desc_df_merge['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
-                
-                # Merge με τη συνοπτική αναφορά
-                summary_final = summary_final.merge(desc_df_merge, on='Κλάδος/Πακέτο Κάλυψης', how='left')
-            
-            # Αναδιατάσσουμε τις στήλες - Περιγραφή δεξιά από Κλάδος/Πακέτο
-            columns_order = ['Κλάδος/Πακέτο Κάλυψης']
-            if 'Ταμείο' in summary_final.columns:
-                columns_order.append('Ταμείο')
-            if 'Περιγραφή' in summary_final.columns:
-                columns_order.append('Περιγραφή')
-            columns_order += ['Από', 'Έως', 'Συνολικές ημέρες', 'Έτη', 'Μήνες', 'Ημέρες', 
-                             'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
-            summary_final = summary_final[columns_order]
-            
-            # Δημιουργούμε αντίγραφο για εμφάνιση με μορφοποίηση
-            display_summary = summary_final.copy()
-            
-            # Εφαρμόζουμε μορφοποίηση νομισμάτων μόνο για εμφάνιση
-            display_summary['Μικτές αποδοχές'] = display_summary['Μικτές αποδοχές'].apply(format_currency)
-            display_summary['Συνολικές εισφορές'] = display_summary['Συνολικές εισφορές'].apply(format_currency)
-            
-            # Εφαρμόζουμε ελληνική μορφοποίηση για αριθμητικές στήλες
-            numeric_columns_summary = ['Συνολικές ημέρες', 'Έτη', 'Μήνες', 'Ημέρες', 'Αριθμός Εγγραφών']
-            for col in numeric_columns_summary:
-                if col in display_summary.columns:
-                    # Έτη και Μήνες με 1 δεκαδικό, οι υπόλοιπες χωρίς δεκαδικά
-                    decimals = 1 if col in ['Έτη', 'Μήνες'] else 0
-                    display_summary[col] = display_summary[col].apply(lambda x: format_number_greek(x, decimals=decimals) if pd.notna(x) and x != '' else x)
-            
-            # Εμφάνιση του πίνακα
-            st.dataframe(
-                display_summary,
-                use_container_width=True
-            )
-            register_view("Συνοπτική Αναφορά", display_summary)
-            render_print_button(
-                "print_summary",
-                "Συνοπτική Αναφορά",
-                display_summary,
-                description="Συνοπτική απεικόνιση ανά Κλάδο/Πακέτο Κάλυψης για τις περιόδους που εμφανίζονται, καθώς και άθροισμα αποδοχών και εισφορών (μόνο των εγγραφών σε €)."
-            )
-        else:
-            st.warning("Η στήλη 'Κλάδος/Πακέτο Κάλυψης' δεν βρέθηκε στα δεδομένα.")
+    with tab_totals:
+        render_totals_tab(
+            df, description_map,
+            key_prefix="totals",
+            register_view_fn=register_view,
+            has_parallel=has_parallel,
+            has_parallel_2017=has_parallel_2017,
+            has_multi=has_multi,
+        )
     
     if False:  # Καταργημένη καρτέλα: Ετήσια Αναφορά
         # Ετήσια Αναφορά - Ομαδοποίηση με βάση έτος, ταμείο και κλάδο/πακέτο

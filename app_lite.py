@@ -26,6 +26,7 @@ from app_final import (
     build_parallel_print_df,
     build_parallel_2017_print_df,
     build_multi_employment_print_df,
+    render_totals_tab,
 )
 
 st.set_page_config(
@@ -413,6 +414,14 @@ if section == "all":
         show_count_totals_only=False
     )
 
+    # Καρτέλες: Διαγνωστικοί Έλεγχοι, Σύνολα
+    tab_checks, tab_totals = st.tabs(["Διαγνωστικοί Έλεγχοι", "Σύνολα"])
+    with tab_checks:
+        st.markdown("### Σύνοψη - Βασικοί έλεγχοι δεδομένων")
+        st.dataframe(audit_df, use_container_width=True)
+    with tab_totals:
+        render_totals_tab(df, description_map, key_prefix="lite_totals")
+
     sections = []
     sections.append(
         build_print_section_html(
@@ -427,14 +436,14 @@ if section == "all":
     if not display_summary.empty:
         sections.append(
             build_print_section_html(
-                "Συνοπτική Αναφορά",
+                "Συνολα - Ομαδοποίηση κατά Κλάδο/Πακέτο (και Ταμείο)",
                 display_summary,
                 description="Συνοπτική απεικόνιση ανά Κλάδο/Πακέτο Κάλυψης και Ταμείο.",
                 heading_tag="h2"
             )
         )
     else:
-        sections.append("<section class='print-section'><h2>Συνοπτική Αναφορά</h2><p class='print-description'>Δεν βρέθηκαν δεδομένα.</p></section>")
+        sections.append("<section class='print-section'><h2>Συνολα - Ομαδοποίηση κατά Κλάδο/Πακέτο (και Ταμείο)</h2><p class='print-description'>Δεν βρέθηκαν δεδομένα.</p></section>")
     sections.append("<div class='page-break'></div>")
     if not final_display_df.empty:
         count_table_html = build_yearly_print_html(
