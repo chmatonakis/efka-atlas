@@ -26,7 +26,6 @@ from app_final import (
     build_parallel_print_df,
     build_parallel_2017_print_df,
     build_multi_employment_print_df,
-    render_totals_tab,
 )
 
 st.set_page_config(
@@ -413,14 +412,6 @@ if section == "all":
         description_map=description_map,
         show_count_totals_only=False
     )
-
-    # Καρτέλες: Διαγνωστικοί Έλεγχοι, Σύνολα
-    tab_checks, tab_totals = st.tabs(["Διαγνωστικοί Έλεγχοι", "Σύνολα"])
-    with tab_checks:
-        st.markdown("### Σύνοψη - Βασικοί έλεγχοι δεδομένων")
-        st.dataframe(audit_df, use_container_width=True)
-    with tab_totals:
-        render_totals_tab(df, description_map, key_prefix="lite_totals")
 
     sections = []
     sections.append(
