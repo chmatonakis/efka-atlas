@@ -30,6 +30,8 @@ from app_final import (
     build_parallel_print_df,
     build_parallel_2017_print_df,
     build_multi_employment_print_df,
+    compute_complex_file_metrics,
+    should_show_complex_file_warning,
 )
 
 st.set_page_config(
@@ -463,6 +465,13 @@ description_map = build_description_map(df)
 excluded_packages = {"Α", "Λ", "Υ", "Ο", "Χ", "026", "899"}
 excluded_packages_label = ", ".join(sorted(excluded_packages))
 LITE_EXCLUSION_NOTE = f'<div class="lite-exclusion-note">Εξαιρούνται από την καταμέτρηση: {excluded_packages_label}</div>'
+COMPLEX_FILE_WARNING_HTML = (
+    '<div class="complex-file-warning" style="'
+    'background:#fef2f2;border:2px solid #dc2626;border-radius:8px;padding:12px 16px;margin-bottom:16px;'
+    'color:#991b1b;font-weight:700;font-size:1rem;">'
+    '⚠️ Προσοχή: Περίπλοκο αρχείο — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.'
+    '</div>'
+)
 if 'Κλάδος/Πακέτο Κάλυψης' in df.columns:
     pkg_series = df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
     count_df = df[~pkg_series.isin(excluded_packages)].copy()
@@ -807,6 +816,12 @@ if section == "all":
             description_map=description_map,
             show_count_totals_only=False
         )
+        show_complex_warning = False
+        try:
+            n_agg, n_limits_25, n_unpaid = compute_complex_file_metrics(df)
+            show_complex_warning = should_show_complex_file_warning(n_agg, n_limits_25, n_unpaid)
+        except Exception:
+            pass
 
         # --- Build tab entries: (id, label, html_content) ---
         tab_entries = []
@@ -960,6 +975,9 @@ if section == "all":
                 tab_entries.insert(1, ("timeline", "Χρονοδιάγραμμα", timeline_html))
         except Exception:
             pass
+
+        if show_complex_warning:
+            tab_entries = [(tid, label, COMPLEX_FILE_WARNING_HTML + content) for tid, label, content in tab_entries]
 
         return audit_df, display_summary, final_display_df, print_style_rows, tab_entries
 

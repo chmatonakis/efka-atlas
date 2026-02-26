@@ -2343,6 +2343,115 @@ def compute_applied_monthly_day_caps(data_df: pd.DataFrame) -> list[dict]:
     capped = capped.sort_values(['Έτος', 'Μήνας', 'Ταμείο', 'Πακέτο'])
     return capped[['Έτος', 'Μήνας', 'Ταμείο', 'Πακέτο', 'Ημέρες']].to_dict('records')
 
+
+def compute_complex_file_metrics(data_df: pd.DataFrame) -> tuple[int, int, int]:
+    """
+    Υπολογίζει μετρήσεις για το προειδοποιητικό «Περίπλοκο αρχείο».
+    Επιστρέφει (n_aggregated, n_limits_25, n_unpaid_months).
+    """
+    n_agg, n_limits_25, n_unpaid = 0, 0, 0
+    # 1. Ενοποιημένα διαστήματα (Check 9 λογική)
+    try:
+        if 'Από' in data_df.columns and 'Έως' in data_df.columns:
+            t_df = data_df.copy()
+            t_df['D_From'] = pd.to_datetime(t_df['Από'], format='%d/%m/%Y', errors='coerce')
+            t_df['D_To'] = pd.to_datetime(t_df['Έως'], format='%d/%m/%Y', errors='coerce')
+            t_df['Duration'] = (t_df['D_To'] - t_df['D_From']).dt.days + 1
+            def _get_num(val):
+                try: return clean_numeric_value(val) or 0
+                except Exception: return 0
+            def _is_expected_oaee(r):
+                tam = str(r.get('Ταμείο', '')).upper()
+                if 'ΟΑΕΕ' not in tam: return False
+                m_val, d_val = _get_num(r.get('Μήνες')), _get_num(r.get('Ημέρες'))
+                if m_val and m_val <= 2:
+                    if d_val and abs(d_val - m_val * 25) <= 1: return True
+                    if not d_val and r.get('Duration', 0) <= 62: return True
+                return False
+            def _is_expected_tsm(r):
+                tam = str(r.get('Ταμείο', '')).upper()
+                if 'ΤΣΜΕΔΕ' not in tam: return False
+                m_val, d_val = _get_num(r.get('Μήνες')), _get_num(r.get('Ημέρες'))
+                d_from, d_to = r.get('D_From'), r.get('D_To')
+                if pd.notna(d_from) and pd.notna(d_to) and d_from.year == d_to.year:
+                    sem1 = (d_from.month == 1 and d_to.month == 6)
+                    sem2 = (d_from.month == 7 and d_to.month == 12)
+                    if sem1 or sem2:
+                        if m_val == 6 and (not d_val or abs(d_val - 150) <= 2): return True
+                        if not m_val and 150 <= r.get('Duration', 0) <= 190: return True
+                return False
+            agg_recs = t_df[(t_df['Duration'] > 31) & (t_df['D_To'] < pd.Timestamp('2002-01-01'))].copy()
+            if not agg_recs.empty:
+                agg_recs = agg_recs[~agg_recs.apply(lambda r: _is_expected_oaee(r) or _is_expected_tsm(r), axis=1)]
+            n_agg = len(agg_recs) if not agg_recs.empty else 0
+    except Exception:
+        pass
+    # 2. Όρια 25
+    try:
+        capped = compute_applied_monthly_day_caps(data_df)
+        n_limits_25 = len(capped) if capped else 0
+    except Exception:
+        pass
+    # 3. Απλήρωτοι μήνες (από καταμέτρηση, 1995+, K/ΚΣ/ΜΕ)
+    try:
+        days_df, contrib_df = get_count_allocation(data_df)
+        if not days_df.empty and not contrib_df.empty:
+            try:
+                years = pd.to_numeric(days_df['ΕΤΟΣ'], errors='coerce')
+                mask_1995 = years >= 1995
+            except Exception:
+                mask_1995 = pd.Series(True, index=days_df.index)
+            days_df = days_df[mask_1995].reset_index(drop=True)
+            contrib_df = contrib_df[mask_1995].reset_index(drop=True)
+            if not days_df.empty:
+                K = days_df['ΚΛΑΔΟΣ/ΠΑΚΕΤΟ'].astype(str).str.strip().str.upper()
+                T = days_df['Ταμείο'].astype(str).str.strip().str.upper()
+                cond_oaee = (K.isin(['K', 'Κ'])) & (T.str.contains('OAEE|ΟΑΕΕ|TEBE|ΤΕΒΕ|TAE|ΤΑΕ', na=False))
+                cond_tsmede = (K.isin(['ΚΣ', 'KS'])) & (T.str.contains('ΤΣΜΕΔΕ|TSMEDE', na=False))
+                cond_oga = (K.isin(['K', 'Κ'])) & (T.str.contains('ΟΓΑ|OGA', na=False))
+                cond_tsay = (K.isin(['ME', 'ΜΕ'])) & (T.str.contains('ΤΣΑΥ|TSAY', na=False))
+                month_cols_int = [c for c in days_df.columns if isinstance(c, int)] or list(range(1, 13))
+                def _count_unpaid(days_row, contrib_row):
+                    cnt = 0
+                    for m in month_cols_int:
+                        d, c = days_row.get(m, 0), contrib_row.get(m, 0)
+                        if pd.isna(d): d = 0
+                        if pd.isna(c): c = 0
+                        try: d_val = float(d) if d != '' else 0; c_val = float(c) if c != '' else 0
+                        except (TypeError, ValueError): d_val, c_val = 0, 0
+                        if d_val > 0 and (c_val == 0 or abs(c_val) < 1e-6): cnt += 1
+                    return cnt
+                for cond in [cond_oaee, cond_tsmede, cond_oga, cond_tsay]:
+                    if cond.any():
+                        sub_d = days_df.loc[cond].reset_index(drop=True)
+                        sub_c = contrib_df.loc[cond].reset_index(drop=True)
+                        for i in range(len(sub_d)):
+                            n_unpaid += _count_unpaid(sub_d.iloc[i], sub_c.iloc[i])
+    except Exception:
+        pass
+    return n_agg, n_limits_25, n_unpaid
+
+
+def should_show_complex_file_warning(n_aggregated: int, n_limits_25: int, n_unpaid_months: int) -> bool:
+    """
+    True αν πρέπει να εμφανιστεί το προειδοποιητικό «Περίπλοκο αρχείο».
+    Κριτήρια: (πάνω από 10 ενοπ. + πάνω από 30 απλήρωτοι + πάνω από 10 όρια 25) ή ανά δύο,
+    ή πάνω από 15 ενοποιημένα, ή πάνω από 15 όρια 25.
+    """
+    if n_aggregated > 15 or n_limits_25 > 15:
+        return True
+    over_10_agg = n_aggregated > 10
+    over_30_unpaid = n_unpaid_months > 30
+    over_10_limits = n_limits_25 > 10
+    if over_10_agg and over_30_unpaid:
+        return True
+    if over_10_agg and over_10_limits:
+        return True
+    if over_30_unpaid and over_10_limits:
+        return True
+    return False
+
+
 def compute_summary_capped_days_by_group(
     summary_df: pd.DataFrame,
     group_keys: list[str],
@@ -2958,75 +3067,102 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
             'Εύρημα': 'Σφάλμα ελέγχου', 'Λεπτομέρειες': str(e), 'Ενέργειες': '-'
         })
 
-    # Check 4: Unpaid OAEE / TSMEDE / OGA / TSAY (πάντα εμφανίζεται στη Σύνοψη)
+    # Check 4: Απλήρωτες εισφορές — από την καταμέτρηση (επιμέρισμα μηνών/εισφορών), όχι από το κεντρικό df
     check4_added = False
     try:
-        contrib_col = 'Συνολικές εισφορές' if 'Συνολικές εισφορές' in data_df.columns else ('Συνολικές Εισφορές' if 'Συνολικές Εισφορές' in data_df.columns else None)
-        if 'Κλάδος/Πακέτο Κάλυψης' in data_df.columns and contrib_col:
-            def clean_money_chk(x):
-                if isinstance(x, str):
-                    if 'DRX' in x or 'ΔΡΧ' in x:
-                        return 0.0
-                    return clean_numeric_value(x, exclude_drx=True)
-                return x
-
-            t_df = data_df.copy()
-            t_df['C'] = t_df[contrib_col].apply(clean_money_chk)
-            t_df['K'] = t_df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip().str.upper()
-            t_df['T'] = t_df['Ταμείο'].astype(str).str.strip().upper() if 'Ταμείο' in t_df.columns else ''
-
-            # Ορισμός συνθηκών για κάθε ταμείο
-            cond_oaee = (t_df['K'].isin(['K', 'Κ'])) & (t_df['T'].str.contains('OAEE|ΟΑΕΕ|TEBE|ΤΕΒΕ|TAE|ΤΑΕ', na=False))
-            cond_tsmede = (t_df['K'].isin(['ΚΣ', 'KS'])) & (t_df['T'].str.contains('ΤΣΜΕΔΕ|TSMEDE', na=False))
-            cond_oga = (t_df['K'].isin(['K', 'Κ'])) & (t_df['T'].str.contains('ΟΓΑ|OGA', na=False))
-            cond_tsay = (t_df['K'].isin(['ME', 'ΜΕ'])) & (t_df['T'].str.contains('ΤΣΑΥ|TSAY', na=False))
-
-            unpaid = t_df[(cond_oaee | cond_tsmede | cond_oga | cond_tsay) & (t_df['C'] == 0)]
-
-            if not unpaid.empty:
-                # Ομαδοποίηση ανά ταμείο για αναφορά
-                fund_details = []
-                
-                # Helper για καταμέτρηση ανά κατηγορία
-                def get_fund_unpaid(condition, label):
-                    u = t_df[condition & (t_df['C'] == 0)]
-                    if not u.empty:
-                        return f"{len(u)} μήνες {label}"
-                    return None
-
-                f_oaee = get_fund_unpaid(cond_oaee, "ΟΑΕΕ (Κ)")
-                f_tsmede = get_fund_unpaid(cond_tsmede, "ΤΣΜΕΔΕ (ΚΣ)")
-                f_oga = get_fund_unpaid(cond_oga, "ΟΓΑ (Κ)")
-                f_tsay = get_fund_unpaid(cond_tsay, "ΤΣΑΥ (ΜΕ)")
-
-                all_funds = [x for x in [f_oaee, f_tsmede, f_oga, f_tsay] if x]
-                details_msg = ", ".join(all_funds) + " με μηδενική εισφορά."
-
-                # Προσθήκη ενδεικτικών μηνών
-                months = []
-                for _, r in unpaid.head(5).iterrows(): # Πρώτοι 5 για συντομία
-                    try:
-                        d = pd.to_datetime(r['Από'], format='%d/%m/%Y', errors='coerce')
-                        if pd.notna(d):
-                            months.append(d.strftime('%m/%Y'))
-                    except:
-                        pass
-                
-                if months:
-                    details_msg += f"<br><span style='font-size: 0.85rem; color: #666;'>Ενδεικτικά: ({', '.join(months)}...)</span>"
-
-                audit_rows.append({
-                    'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές',
-                    'Εύρημα': 'Εντοπίστηκαν',
-                    'Λεπτομέρειες': details_msg,
-                    'Ενέργειες': 'Ελέγξτε για τυχόν οφειλές στα αντίστοιχα ταμεία'
-                })
-            else:
-                audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': 'Καμία', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+        days_df, contrib_df = get_count_allocation(data_df)
+        if days_df.empty or contrib_df.empty:
+            audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': '-', 'Λεπτομέρειες': 'Δεν υπάρχουν στοιχεία καταμέτρησης (Από, Έως, Ημέρες)', 'Ενέργειες': '-'})
             check4_added = True
         else:
-            audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': '-', 'Λεπτομέρειες': 'Δεν υπάρχουν στοιχεία Κλάδος/Πακέτο ή Συνολικές εισφορές', 'Ενέργειες': '-'})
-            check4_added = True
+            # Μόνο από 1995 και μετά
+            try:
+                years = pd.to_numeric(days_df['ΕΤΟΣ'], errors='coerce')
+                mask_1995 = years >= 1995
+            except Exception:
+                mask_1995 = pd.Series(True, index=days_df.index)
+            days_df = days_df[mask_1995].reset_index(drop=True)
+            contrib_df = contrib_df[mask_1995].reset_index(drop=True)
+            if days_df.empty:
+                audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': 'Καμία', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                check4_added = True
+            else:
+                K = days_df['ΚΛΑΔΟΣ/ΠΑΚΕΤΟ'].astype(str).str.strip().str.upper()
+                T = days_df['ΤΑΜΕΙΟ'].astype(str).str.strip().str.upper()
+                cond_oaee = (K.isin(['K', 'Κ'])) & (T.str.contains('OAEE|ΟΑΕΕ|TEBE|ΤΕΒΕ|TAE|ΤΑΕ', na=False))
+                cond_tsmede = (K.isin(['ΚΣ', 'KS'])) & (T.str.contains('ΤΣΜΕΔΕ|TSMEDE', na=False))
+                cond_oga = (K.isin(['K', 'Κ'])) & (T.str.contains('ΟΓΑ|OGA', na=False))
+                cond_tsay = (K.isin(['ME', 'ΜΕ'])) & (T.str.contains('ΤΣΑΥ|TSAY', na=False))
+                month_cols_int = [c for c in days_df.columns if isinstance(c, int)]
+                if not month_cols_int:
+                    month_cols_int = list(range(1, 13))
+
+                def _count_unpaid_months(days_row, contrib_row):
+                    n = 0
+                    for m in month_cols_int:
+                        d = days_row.get(m, 0)
+                        c = contrib_row.get(m, 0)
+                        if pd.isna(d): d = 0
+                        if pd.isna(c): c = 0
+                        try:
+                            d_val = float(d) if d != '' else 0
+                            c_val = float(c) if c != '' else 0
+                        except (TypeError, ValueError):
+                            d_val, c_val = 0, 0
+                        if d_val > 0 and (c_val == 0 or abs(c_val) < 1e-6):
+                            n += 1
+                    return n
+
+                def _sum_unpaid_for_cond(cond, label):
+                    if not cond.any():
+                        return None
+                    sub_d = days_df.loc[cond].reset_index(drop=True)
+                    sub_c = contrib_df.loc[cond].reset_index(drop=True)
+                    total = 0
+                    for i in range(len(sub_d)):
+                        total += _count_unpaid_months(sub_d.iloc[i], sub_c.iloc[i])
+                    return f"{total} μήνες {label}" if total > 0 else None
+
+                f_oaee = _sum_unpaid_for_cond(cond_oaee, "ΟΑΕΕ (Κ)")
+                f_tsmede = _sum_unpaid_for_cond(cond_tsmede, "ΤΣΜΕΔΕ (ΚΣ)")
+                f_oga = _sum_unpaid_for_cond(cond_oga, "ΟΓΑ (Κ)")
+                f_tsay = _sum_unpaid_for_cond(cond_tsay, "ΤΣΑΥ (ΜΕ)")
+                all_funds = [x for x in [f_oaee, f_tsmede, f_oga, f_tsay] if x]
+                if all_funds:
+                    details_msg = ", ".join(all_funds) + " με ημέρες αλλά χωρίς εισφορές."
+                    any_cond = cond_oaee | cond_tsmede | cond_oga | cond_tsay
+                    sample_d = days_df.loc[any_cond].reset_index(drop=True)
+                    sample_c = contrib_df.loc[any_cond].reset_index(drop=True)
+                    unpaid_pairs = []  # (year, month) για ταξινόμηση
+                    for i in range(len(sample_d)):
+                        dr, cr = sample_d.iloc[i], sample_c.iloc[i]
+                        try:
+                            yr = int(dr.get('ΕΤΟΣ', 0)) if pd.notna(dr.get('ΕΤΟΣ')) else 0
+                        except (TypeError, ValueError):
+                            yr = 0
+                        for m in month_cols_int[:12]:
+                            d = dr.get(m, 0)
+                            c = cr.get(m, 0)
+                            try:
+                                d_val = float(d) if d != '' else 0
+                                c_val = float(c) if c != '' else 0
+                            except (TypeError, ValueError):
+                                d_val, c_val = 0, 0
+                            if d_val > 0 and (c_val == 0 or abs(c_val) < 1e-6) and yr:
+                                unpaid_pairs.append((yr, m))
+                    unpaid_pairs.sort(key=lambda x: (x[0], x[1]), reverse=True)
+                    months_sample = [f"{m:02d}/{yr}" for yr, m in unpaid_pairs[:20]]
+                    if months_sample:
+                        details_msg += f"<br><span style='font-size: 0.85rem; color: #666;'>Ενδεικτικά (από πιο πρόσφατους): {', '.join(months_sample)}{'...' if len(unpaid_pairs) > 20 else ''}</span>"
+                    audit_rows.append({
+                        'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές',
+                        'Εύρημα': 'Εντοπίστηκαν',
+                        'Λεπτομέρειες': details_msg,
+                        'Ενέργειες': 'Ελέγξτε για τυχόν οφειλές στα αντίστοιχα ταμεία'
+                    })
+                else:
+                    audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': 'Καμία', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                check4_added = True
     except Exception:
         pass
     if not check4_added:
@@ -3451,6 +3587,103 @@ def build_summary_grouped_display(summary_df: pd.DataFrame, source_df: pd.DataFr
             )
 
     return display_summary
+
+
+def get_count_allocation(count_df: pd.DataFrame, description_map: dict[str, str] | None = None):
+    """
+    Επιστρέφει την καταμέτρηση που επιμερίζει ημέρες και εισφορές ανά μήνα (ίδια λογική με build_count_report).
+    Επιστρέφει (days_df, contrib_df) με στήλες ΕΤΟΣ, ΤΑΜΕΙΟ, ΚΛΑΔΟΣ/ΠΑΚΕΤΟ, ..., 1, 2, ..., 12.
+    """
+    required_cols = ['Από', 'Έως', 'Ημέρες']
+    if not all(col in count_df.columns for col in required_cols):
+        return pd.DataFrame(), pd.DataFrame()
+    counting_rows = []
+    def _get_num(val):
+        try: return clean_numeric_value(val) or 0
+        except Exception: return 0
+    def _is_expected_oaee(r, duration_days):
+        tam = str(r.get('Ταμείο', '')).upper()
+        if 'ΟΑΕΕ' not in tam: return False
+        months_val, days_val = _get_num(r.get('Μήνες')), _get_num(r.get('Ημέρες'))
+        if months_val and months_val <= 2:
+            if days_val and abs(days_val - months_val * 25) <= 1: return True
+            if not days_val and duration_days <= 62: return True
+        return False
+    def _is_expected_tsm(r, duration_days, start_dt, end_dt):
+        tam = str(r.get('Ταμείο', '')).upper()
+        if 'ΤΣΜΕΔΕ' not in tam: return False
+        months_val, days_val = _get_num(r.get('Μήνες')), _get_num(r.get('Ημέρες'))
+        if pd.notna(start_dt) and pd.notna(end_dt) and start_dt.year == end_dt.year:
+            sem1, sem2 = (start_dt.month == 1 and end_dt.month == 6), (start_dt.month == 7 and end_dt.month == 12)
+            if sem1 or sem2:
+                if months_val == 6 and (not days_val or abs(days_val - 150) <= 2): return True
+                if not months_val and 150 <= duration_days <= 190: return True
+        return False
+    for _, row in count_df.iterrows():
+        try:
+            if pd.isna(row['Από']) or pd.isna(row['Έως']): continue
+            start_dt = pd.to_datetime(row['Από'], format='%d/%m/%Y', errors='coerce')
+            end_dt = pd.to_datetime(row['Έως'], format='%d/%m/%Y', errors='coerce')
+            if pd.isna(start_dt) or pd.isna(end_dt): continue
+            duration_days = (end_dt - start_dt).days + 1
+            is_pre2002 = end_dt < pd.Timestamp('2002-01-01')
+            expected_agg = _is_expected_oaee(row, duration_days) or _is_expected_tsm(row, duration_days, start_dt, end_dt)
+            days_val = 0
+            if 'Ημέρες' in row and pd.notna(row['Ημέρες']) and str(row['Ημέρες']).strip() != '':
+                d = clean_numeric_value(row['Ημέρες'])
+                if d is not None and d != 0: days_val += d
+            if 'Έτη' in row and pd.notna(row['Έτη']):
+                y = clean_numeric_value(row['Έτη'])
+                if y is not None and y != 0: days_val += y * 300
+            if 'Μήνες' in row and pd.notna(row['Μήνες']):
+                m = clean_numeric_value(row['Μήνες'])
+                if m is not None and m != 0: days_val += m * 25
+            raw_gross = str(row.get('Μικτές αποδοχές', ''))
+            gross_val = 0.0 if ('ΔΡΧ' in raw_gross.upper() or 'DRX' in raw_gross.upper()) else (clean_numeric_value(raw_gross, exclude_drx=True) or 0.0)
+            raw_contrib = str(row.get('Συνολικές εισφορές', ''))
+            contrib_val = 0.0 if ('ΔΡΧ' in raw_contrib.upper() or 'DRX' in raw_contrib.upper()) else (clean_numeric_value(raw_contrib, exclude_drx=True) or 0.0)
+            sign = get_negative_amount_sign(gross_val, contrib_val)
+            if sign == -1: days_val = -abs(days_val)
+            tameio = str(row.get('Ταμείο', '')).strip()
+            insurance_type = str(row.get('Τύπος Ασφάλισης', '')).strip()
+            employer = str(row.get('Α-Μ εργοδότη', '')).strip()
+            klados = str(row.get('Κλάδος/Πακέτο Κάλυψης', '')).strip()
+            klados_desc = description_map.get(klados, '') if isinstance(description_map, dict) else ''
+            earnings_type = str(row.get('Τύπος Αποδοχών', '')).strip()
+            curr = start_dt.replace(day=1)
+            end_month_dt = end_dt.replace(day=1)
+            months_list = []
+            while curr <= end_month_dt:
+                months_list.append(curr)
+                curr = curr.replace(year=curr.year + 1, month=1) if curr.month == 12 else curr.replace(month=curr.month + 1)
+            num_months = len(months_list)
+            if num_months == 0: continue
+            days_per_month = days_val / num_months
+            contrib_per_month = contrib_val / num_months
+            for m_dt in months_list:
+                counting_rows.append({
+                    'ΕΤΟΣ': m_dt.year, 'ΤΑΜΕΙΟ': tameio, 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ': insurance_type,
+                    'ΕΡΓΟΔΟΤΗΣ': employer, 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ': klados, 'ΠΕΡΙΓΡΑΦΗ': klados_desc, 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': earnings_type,
+                    'Μήνας_Num': m_dt.month, 'Ημέρες': days_per_month, 'Εισφορές_Part': contrib_per_month
+                })
+        except Exception:
+            continue
+    if not counting_rows:
+        return pd.DataFrame(), pd.DataFrame()
+    c_df = pd.DataFrame(counting_rows)
+    pivot_df = c_df.groupby(['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ', 'Μήνας_Num'])['Ημέρες'].sum().reset_index()
+    contrib_df = c_df.groupby(['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ', 'Μήνας_Num'])['Εισφορές_Part'].sum().reset_index()
+    days_pivot = pivot_df.pivot(index=['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'], columns='Μήνας_Num', values='Ημέρες').fillna(0)
+    contrib_pivot = contrib_df.pivot(index=['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'], columns='Μήνας_Num', values='Εισφορές_Part').fillna(0)
+    for m in range(1, 13):
+        if m not in days_pivot.columns: days_pivot[m] = 0
+        if m not in contrib_pivot.columns: contrib_pivot[m] = 0
+    month_cols_int = sorted([c for c in days_pivot.columns if isinstance(c, int)])
+    contrib_pivot = contrib_pivot.reindex(days_pivot.index).fillna(0)
+    days_out = days_pivot.reset_index()[['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'] + month_cols_int]
+    contrib_out = contrib_pivot.reset_index()[['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'] + month_cols_int]
+    return days_out, contrib_out
+
 
 def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] | None = None, show_count_totals_only: bool = False):
     required_cols = ['Από', 'Έως', 'Ημέρες']
@@ -4492,10 +4725,19 @@ def show_results_page(df, filename):
         except:
             pass
 
+    # Μετρήσεις για προειδοποίηση «Περίπλοκο αρχείο»
+    try:
+        n_agg, n_limits_25, n_unpaid = compute_complex_file_metrics(df)
+        st.session_state['show_complex_file_warning'] = should_show_complex_file_warning(n_agg, n_limits_25, n_unpaid)
+    except Exception:
+        st.session_state['show_complex_file_warning'] = False
+
     # Δημιουργία tabs
     tab_summary, tab_ai_summary, tab_totals, tab_count, tab_gaps, tab_apd, tab_parallel, tab_parallel_2017, tab_multi, tab_more = st.tabs(list(tab_titles.values()))
 
     with tab_more:
+        if st.session_state.get('show_complex_file_warning'):
+            st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
         sub_tab_main, sub_tab_annex = st.tabs(["Κύρια Δεδομένα", "Παράρτημα"])
         with sub_tab_main:
             # Κύρια δεδομένα (χωρίς τις στήλες από τελευταίες σελίδες)
@@ -4696,6 +4938,8 @@ def show_results_page(df, filename):
             )
 
         with tab_ai_summary:
+            if st.session_state.get('show_complex_file_warning'):
+                st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
             st.markdown("### AI Σύνοψη Φακέλου (BETA)")
             ai_row1, ai_row2, ai_row3 = st.columns([2, 0.7, 1])
             with ai_row1:
@@ -4855,7 +5099,8 @@ def show_results_page(df, filename):
                 st.info("Δεν βρέθηκαν επιπλέον πίνακες από τις τελευταίες σελίδες.")
     
     with tab_summary:
-
+        if st.session_state.get('show_complex_file_warning'):
+            st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
         # --- Audit Report Integration ---
         if not df.empty and 'Από' in df.columns:
             def generate_audit_report_local(data_df, extra_data_df=None):
@@ -4967,47 +5212,81 @@ def show_results_page(df, filename):
                         'Εύρημα': 'Σφάλμα ελέγχου', 'Λεπτομέρειες': str(e), 'Ενέργειες': '-'
                     })
 
-                # Check 4: Unpaid OAEE / TSMEDE / OGA / TSAY (πάντα εμφανίζεται)
+                # Check 4: Απλήρωτες εισφορές — από καταμέτρηση (επιμέρισμα μηνών/εισφορών)
                 check4_added = False
                 try:
-                    contrib_col = 'Συνολικές εισφορές' if 'Συνολικές εισφορές' in data_df.columns else ('Συνολικές Εισφορές' if 'Συνολικές Εισφορές' in data_df.columns else None)
-                    if 'Κλάδος/Πακέτο Κάλυψης' in data_df.columns and contrib_col:
-                        def clean_money_chk(x):
-                            if isinstance(x, str):
-                                if 'DRX' in x or 'ΔΡΧ' in x: return 0.0
-                                return clean_numeric_value(x, exclude_drx=True)
-                            return x
-                        
-                        t_df = data_df.copy()
-                        t_df['C'] = t_df[contrib_col].apply(clean_money_chk)
-                        t_df['K'] = t_df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip().str.upper()
-                        t_df['T'] = t_df['Ταμείο'].astype(str).str.strip().upper() if 'Ταμείο' in t_df.columns else ''
-                        cond_oaee = (t_df['K'].isin(['K', 'Κ'])) & (t_df['T'].str.contains('OAEE|ΟΑΕΕ|TEBE|ΤΕΒΕ|TAE|ΤΑΕ', na=False))
-                        cond_tsmede = (t_df['K'].isin(['ΚΣ', 'KS'])) & (t_df['T'].str.contains('ΤΣΜΕΔΕ|TSMEDE', na=False))
-                        cond_oga = (t_df['K'].isin(['K', 'Κ'])) & (t_df['T'].str.contains('ΟΓΑ|OGA', na=False))
-                        cond_tsay = (t_df['K'].isin(['ME', 'ΜΕ'])) & (t_df['T'].str.contains('ΤΣΑΥ|TSAY', na=False))
-                        unpaid = t_df[(cond_oaee | cond_tsmede | cond_oga | cond_tsay) & (t_df['C'] == 0)]
-                        
-                        if not unpaid.empty:
-                            def get_fund_unpaid(cond, label):
-                                u = t_df[cond & (t_df['C'] == 0)]
-                                return f"{len(u)} μήνες {label}" if not u.empty else None
-                            all_f = [x for x in [get_fund_unpaid(cond_oaee,"ΟΑΕΕ (Κ)"), get_fund_unpaid(cond_tsmede,"ΤΣΜΕΔΕ (ΚΣ)"), get_fund_unpaid(cond_oga,"ΟΓΑ (Κ)"), get_fund_unpaid(cond_tsay,"ΤΣΑΥ (ΜΕ)")] if x]
-                            details_msg = ", ".join(all_f) + " με μηδενική εισφορά."
-                            months = []
-                            for _, r in unpaid.head(5).iterrows():
-                                try:
-                                    d = pd.to_datetime(r['Από'], format='%d/%m/%Y', errors='coerce')
-                                    if pd.notna(d): months.append(d.strftime('%m/%Y'))
-                                except: pass
-                            if months: details_msg += f"<br><span style='font-size:0.85rem;color:#666;'>Ενδεικτικά: ({', '.join(months)}...)</span>"
-                            audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': 'Εντοπίστηκαν', 'Λεπτομέρειες': details_msg, 'Ενέργειες': 'Ελέγξτε για τυχόν οφειλές στα αντίστοιχα ταμεία'})
-                        else:
-                            audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': 'Καμία', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                    days_df, contrib_df = get_count_allocation(data_df)
+                    if days_df.empty or contrib_df.empty:
+                        audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': '-', 'Λεπτομέρειες': 'Δεν υπάρχουν στοιχεία καταμέτρησης (Από, Έως, Ημέρες)', 'Ενέργειες': '-'})
                         check4_added = True
                     else:
-                        audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': '-', 'Λεπτομέρειες': 'Δεν υπάρχουν στοιχεία Κλάδος/Πακέτο ή Συνολικές εισφορές', 'Ενέργειες': '-'})
-                        check4_added = True
+                        try:
+                            years = pd.to_numeric(days_df['ΕΤΟΣ'], errors='coerce')
+                            mask_1995 = years >= 1995
+                        except Exception:
+                            mask_1995 = pd.Series(True, index=days_df.index)
+                        days_df = days_df[mask_1995].reset_index(drop=True)
+                        contrib_df = contrib_df[mask_1995].reset_index(drop=True)
+                        if days_df.empty:
+                            audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': 'Καμία', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                            check4_added = True
+                        else:
+                            K = days_df['ΚΛΑΔΟΣ/ΠΑΚΕΤΟ'].astype(str).str.strip().str.upper()
+                            T = days_df['ΤΑΜΕΙΟ'].astype(str).str.strip().str.upper()
+                            cond_oaee = (K.isin(['K', 'Κ'])) & (T.str.contains('OAEE|ΟΑΕΕ|TEBE|ΤΕΒΕ|TAE|ΤΑΕ', na=False))
+                            cond_tsmede = (K.isin(['ΚΣ', 'KS'])) & (T.str.contains('ΤΣΜΕΔΕ|TSMEDE', na=False))
+                            cond_oga = (K.isin(['K', 'Κ'])) & (T.str.contains('ΟΓΑ|OGA', na=False))
+                            cond_tsay = (K.isin(['ME', 'ΜΕ'])) & (T.str.contains('ΤΣΑΥ|TSAY', na=False))
+                            month_cols_int = [c for c in days_df.columns if isinstance(c, int)] or list(range(1, 13))
+                            def _count_unpaid(days_row, contrib_row):
+                                n = 0
+                                for m in month_cols_int:
+                                    d = days_row.get(m, 0); c = contrib_row.get(m, 0)
+                                    if pd.isna(d): d = 0
+                                    if pd.isna(c): c = 0
+                                    try: d_val = float(d) if d != '' else 0; c_val = float(c) if c != '' else 0
+                                    except (TypeError, ValueError): d_val, c_val = 0, 0
+                                    if d_val > 0 and (c_val == 0 or abs(c_val) < 1e-6): n += 1
+                                return n
+                            def _sum_unpaid(cond, label):
+                                if not cond.any(): return None
+                                sub_d = days_df.loc[cond].reset_index(drop=True)
+                                sub_c = contrib_df.loc[cond].reset_index(drop=True)
+                                total = sum(_count_unpaid(sub_d.iloc[i], sub_c.iloc[i]) for i in range(len(sub_d)))
+                                return f"{total} μήνες {label}" if total > 0 else None
+                            f_oaee = _sum_unpaid(cond_oaee, "ΟΑΕΕ (Κ)")
+                            f_tsmede = _sum_unpaid(cond_tsmede, "ΤΣΜΕΔΕ (ΚΣ)")
+                            f_oga = _sum_unpaid(cond_oga, "ΟΓΑ (Κ)")
+                            f_tsay = _sum_unpaid(cond_tsay, "ΤΣΑΥ (ΜΕ)")
+                            all_f = [x for x in [f_oaee, f_tsmede, f_oga, f_tsay] if x]
+                            if all_f:
+                                details_msg = ", ".join(all_f) + " με ημέρες αλλά χωρίς εισφορές."
+                                any_cond = cond_oaee | cond_tsmede | cond_oga | cond_tsay
+                                sub_d = days_df.loc[any_cond].reset_index(drop=True)
+                                sub_c = contrib_df.loc[any_cond].reset_index(drop=True)
+                                unpaid_pairs = []
+                                for i in range(len(sub_d)):
+                                    dr, cr = sub_d.iloc[i], sub_c.iloc[i]
+                                    try:
+                                        yr = int(dr.get('ΕΤΟΣ', 0)) if pd.notna(dr.get('ΕΤΟΣ')) else 0
+                                    except (TypeError, ValueError):
+                                        yr = 0
+                                    for m in month_cols_int:
+                                        d = dr.get(m, 0); c = cr.get(m, 0)
+                                        if pd.isna(d): d = 0
+                                        if pd.isna(c): c = 0
+                                        try: d_val = float(d) if d != '' else 0; c_val = float(c) if c != '' else 0
+                                        except (TypeError, ValueError): d_val, c_val = 0, 0
+                                        if d_val > 0 and (c_val == 0 or abs(c_val) < 1e-6) and yr:
+                                            unpaid_pairs.append((yr, m))
+                                unpaid_pairs.sort(key=lambda x: (x[0], x[1]), reverse=True)
+                                months_sample = [f"{m:02d}/{yr}" for yr, m in unpaid_pairs[:20]]
+                                if months_sample:
+                                    details_msg += f"<br><span style='font-size:0.85rem;color:#666;'>Ενδεικτικά (από πιο πρόσφατους): {', '.join(months_sample)}{'...' if len(unpaid_pairs) > 20 else ''}</span>"
+                                audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': 'Εντοπίστηκαν', 'Λεπτομέρειες': details_msg, 'Ενέργειες': 'Ελέγξτε για τυχόν οφειλές στα αντίστοιχα ταμεία'})
+                            else:
+                                audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': 'Καμία', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                            check4_added = True
                 except Exception: pass
                 if not check4_added:
                     audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': '-', 'Λεπτομέρειες': 'Δεν βρέθηκαν', 'Ενέργειες': '-'})
@@ -5397,6 +5676,8 @@ def show_results_page(df, filename):
             st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
 
     with tab_totals:
+        if st.session_state.get('show_complex_file_warning'):
+            st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
         render_totals_tab(
             df, description_map,
             key_prefix="totals",
@@ -5998,6 +6279,8 @@ def show_results_page(df, filename):
             st.warning("Οι στήλες 'Από' και 'Έως' δεν βρέθηκαν στα δεδομένα.")
     
     with tab_gaps:
+        if st.session_state.get('show_complex_file_warning'):
+            st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
         # Αναφορά Κενών Διαστήματων
         st.markdown("### Αναφορά Κενών Διαστήματων και διαστημάτων χωρίς ημέρες ασφάλισης")
         st.info("Σκοπός: Εντοπίζει χρονικά διαστήματα που δεν εμφανίζονται καθόλου στο ΑΤΛΑΣ από την έναρξη της ασφάλισης έως σήμερα.")
@@ -6081,6 +6364,8 @@ def show_results_page(df, filename):
             st.warning("Οι στήλες 'Από' και 'Έως' δεν βρέθηκαν στα δεδομένα.")
     
     with tab_apd:
+        if st.session_state.get('show_complex_file_warning'):
+            st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
         # Ανάλυση ΑΠΔ - Αντίγραφο από Κύρια Δεδομένα χωρίς Α/Α και Σελίδα
         apd_columns = [col for col in df.columns if col not in ['Φορέας', 'Κωδικός Κλάδων / Πακέτων Κάλυψης', 'Περιγραφή', 'Κωδικός Τύπου Αποδοχών', 'Σελίδα']]
         apd_df = df[apd_columns] if apd_columns else df
@@ -6878,6 +7163,8 @@ def show_results_page(df, filename):
         )
 
     with tab_count:
+        if st.session_state.get('show_complex_file_warning'):
+            st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
         st.markdown("### Καταμέτρηση Ημερών Ασφάλισης")
         info_col, warn_col, exclude_col = st.columns([1.6, 1.9, 1.5])
         with info_col:
@@ -7614,6 +7901,8 @@ def show_results_page(df, filename):
             st.warning("Λείπουν οι απαραίτητες στήλες (Από, Έως, Ημέρες) για την καταμέτρηση.")
     
     with tab_parallel:
+        if st.session_state.get('show_complex_file_warning'):
+            st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
         st.markdown("### Παράλληλη Ασφάλιση (ΙΚΑ & ΟΑΕΕ / ΟΑΕΕ & ΤΣΜΕΔΕ / ΟΓΑ & ΙΚΑ/ΟΑΕΕ)")
         parallel_df = exclude_unused_packages(df.copy())
         required_cols = ['Από', 'Έως', 'Ημέρες']
@@ -8093,6 +8382,8 @@ def show_results_page(df, filename):
             st.warning("Λείπουν απαραίτητες στήλες.")
 
     with tab_parallel_2017:
+        if st.session_state.get('show_complex_file_warning'):
+            st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
         st.markdown("### Παράλληλη Απασχόληση 2017+ (ΙΚΑ & ΕΦΚΑ ΜΗ ΜΙΣΘΩΤΗ / ΕΦΚΑ ΜΙΣΘΩΤΗ & ΕΦΚΑ ΜΗ ΜΙΣΘΩΤΗ)")
         parallel_df = exclude_unused_packages(df.copy())
         required_cols = ['Από', 'Έως', 'Ημέρες']
@@ -8370,6 +8661,8 @@ def show_results_page(df, filename):
             st.warning("Λείπουν απαραίτητες στήλες.")
 
     with tab_multi:
+        if st.session_state.get('show_complex_file_warning'):
+            st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
         st.markdown("### Πολλαπλή Απασχόληση (Πολλαπλοί Εργοδότες)")
         multi_df = exclude_unused_packages(df.copy())
         required_cols = ['Από', 'Έως', 'Ημέρες']
