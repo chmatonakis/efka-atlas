@@ -578,9 +578,11 @@ def build_yearly_print_html(
     extra_group_cols: list[str] | None = None,
     bold_columns: list[str] | None = None,
     col_width_overrides: dict[str, str] | None = None,
+    collapse_cols: list[str] | None = None,
 ) -> str:
     """Σπάει DataFrame ανά έτος (+ extra_group_cols) σε ξεχωριστούς πίνακες.
     Αφαιρεί τις στήλες ομαδοποίησης από τον πίνακα. Κρατά total-rows μέσα στο group τους.
+    collapse_cols: στήλες που εμφανίζονται μία φορά (κενό όταν επαναλαμβάνεται) με bold.
     """
     if year_column not in dataframe.columns:
         return build_print_table_html(dataframe, style_rows, wrap_cells=wrap_cells,
@@ -618,7 +620,7 @@ def build_yearly_print_html(
             if current_rows and current_key:
                 sections.append(_render_year_section(
                     dataframe, current_rows, current_key, all_group_cols,
-                    style_rows, wrap_cells, bold_columns, col_width_overrides
+                    style_rows, wrap_cells, bold_columns, col_width_overrides, collapse_cols
                 ))
             current_key = row_key
             current_rows = [idx]
@@ -628,7 +630,7 @@ def build_yearly_print_html(
     if current_rows and current_key:
         sections.append(_render_year_section(
             dataframe, current_rows, current_key, all_group_cols,
-            style_rows, wrap_cells, bold_columns, col_width_overrides
+            style_rows, wrap_cells, bold_columns, col_width_overrides, collapse_cols
         ))
 
     return "\n".join(sections)
@@ -643,15 +645,35 @@ def _render_year_section(
     wrap_cells: bool,
     bold_columns: list[str] | None = None,
     col_width_overrides: dict[str, str] | None = None,
+    collapse_cols: list[str] | None = None,
 ) -> str:
     subset = dataframe.iloc[row_indices].copy()
     for col in drop_columns:
         if col in subset.columns:
             subset = subset.drop(columns=[col])
 
-    sub_styles = None
-    if style_rows:
-        sub_styles = []
+    _collapse = [c for c in (collapse_cols or []) if c in subset.columns]
+    sub_styles = []
+    if _collapse:
+        subset = subset.reset_index(drop=True)
+        sort_cols = [c for c in _collapse if c in subset.columns]
+        if sort_cols:
+            subset = subset.sort_values(sort_cols, kind='stable').reset_index(drop=True)
+        prev_vals = {c: None for c in _collapse}
+        for i in range(len(subset)):
+            row_style = {}
+            for col in _collapse:
+                val = subset.iloc[i][col]
+                val_str = str(val).strip() if pd.notna(val) else ''
+                prev_str = str(prev_vals.get(col) or '').strip()
+                if val_str == prev_str:
+                    subset.iloc[i, subset.columns.get_loc(col)] = ''
+                else:
+                    if val_str:
+                        prev_vals[col] = val
+                        row_style[col] = 'font-weight: 700'
+            sub_styles.append(row_style)
+    elif style_rows:
         for idx in row_indices:
             if idx < len(style_rows):
                 row_style = dict(style_rows[idx])
@@ -660,6 +682,9 @@ def _render_year_section(
                 sub_styles.append(row_style)
             else:
                 sub_styles.append({})
+
+    if not sub_styles:
+        sub_styles = None
 
     table_html = build_print_table_html(
         subset.reset_index(drop=True), sub_styles, wrap_cells=wrap_cells,
@@ -1336,7 +1361,7 @@ def clean_numeric_value(value, exclude_drx=False):
         return 0.0
 
 def get_negative_amount_sign(gross_val, contrib_val) -> int:
-    """Επιστρέφει -1 όταν υπάρχουν αρνητικά ποσά (αναστροφή εγγραφής)."""
+    """Επιστρέφει -1 όταν υπάρχουν αρνητικά ποσά (διαγραφή εγγραφής)."""
     try:
         if (gross_val is not None and gross_val < 0) or (contrib_val is not None and contrib_val < 0):
             return -1
@@ -1364,6 +1389,44 @@ def apply_negative_time_sign(df: pd.DataFrame,
             df[col] = df[col].apply(clean_numeric_value)
             df[col] = df[col] * sign_series
     return df
+
+def find_negative_entries(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Εντοπίζει εγγραφές με αρνητικές αποδοχές ή εισφορές (διαγραφές χρόνου).
+    Επιστρέφει DataFrame με τις σχετικές εγγραφές, έτοιμο για εμφάνιση.
+    """
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return pd.DataFrame()
+
+    gross_col = 'Μικτές αποδοχές' if 'Μικτές αποδοχές' in df.columns else None
+    contrib_col = 'Συνολικές εισφορές' if 'Συνολικές εισφορές' in df.columns else (
+        'Συνολικές Εισφορές' if 'Συνολικές Εισφορές' in df.columns else None)
+
+    if not gross_col and not contrib_col:
+        return pd.DataFrame()
+
+    neg_mask = pd.Series(False, index=df.index)
+    if gross_col:
+        neg_mask = neg_mask | df[gross_col].apply(lambda x: (clean_numeric_value(x, exclude_drx=True) or 0) < 0)
+    if contrib_col:
+        neg_mask = neg_mask | df[contrib_col].apply(lambda x: (clean_numeric_value(x, exclude_drx=True) or 0) < 0)
+
+    neg_df = df[neg_mask]
+    if neg_df.empty:
+        return pd.DataFrame()
+
+    columns_to_show = []
+    for col in ['Από', 'Έως', 'Ταμείο', 'Τύπος Ασφάλισης', 'Κλάδος/Πακέτο Κάλυψης',
+                 'Α-Μ εργοδότη', 'Έτη', 'Μήνες', 'Ημέρες']:
+        if col in neg_df.columns:
+            columns_to_show.append(col)
+    if gross_col:
+        columns_to_show.append(gross_col)
+    if contrib_col:
+        columns_to_show.append(contrib_col)
+
+    return neg_df[columns_to_show].copy()
+
 
 def find_gaps_in_insurance_data(df):
     """
@@ -1435,6 +1498,84 @@ def find_gaps_in_insurance_data(df):
     gaps_df_result = gaps_df_result.drop('Από_DateTime', axis=1)
     
     return gaps_df_result
+
+
+def find_zero_duration_intervals(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Εντοπίζει διαστήματα που εμφανίζονται στο ΑΤΛΑΣ αλλά χωρίς τιμές σε Έτη/Μήνες/Ημέρες.
+    Επιστρέφει DataFrame έτοιμο για εμφάνιση.
+    """
+    if 'Από' not in df.columns or 'Έως' not in df.columns:
+        return pd.DataFrame()
+
+    zero_duration_df = df.copy()
+    zero_duration_df['Από_DateTime'] = pd.to_datetime(zero_duration_df['Από'], format='%d/%m/%Y', errors='coerce')
+    zero_duration_df['Έως_DateTime'] = pd.to_datetime(zero_duration_df['Έως'], format='%d/%m/%Y', errors='coerce')
+    zero_duration_df = zero_duration_df.dropna(subset=['Από_DateTime', 'Έως_DateTime'])
+
+    duration_columns = ['Έτη', 'Μήνες', 'Ημέρες']
+    for col in duration_columns:
+        if col not in zero_duration_df.columns:
+            zero_duration_df[col] = 0
+        numeric_col = f"__{col}_numeric"
+        zero_duration_df[numeric_col] = zero_duration_df[col].apply(clean_numeric_value)
+
+    zero_duration_df['__duration_sum'] = (
+        zero_duration_df['__Έτη_numeric'] +
+        zero_duration_df['__Μήνες_numeric'] +
+        zero_duration_df['__Ημέρες_numeric']
+    )
+
+    if not zero_duration_df.empty:
+        zero_duration_df['__duration_sum_group'] = zero_duration_df.groupby(
+            ['Από_DateTime', 'Έως_DateTime']
+        )['__duration_sum'].transform('sum')
+
+    zero_duration_df = zero_duration_df[
+        (zero_duration_df['__duration_sum'] == 0) &
+        (zero_duration_df['__duration_sum_group'] == 0)
+    ]
+
+    if zero_duration_df.empty:
+        return pd.DataFrame()
+
+    columns_to_show = ['Από', 'Έως']
+    optional_columns = [
+        'Ταμείο',
+        'Τύπος Ασφάλισης',
+        'Κλάδος/Πακέτο Κάλυψης',
+        'Τύπος Αποδοχών',
+        'Περιγραφή Τύπου Αποδοχών',
+        'Α-Μ εργοδότη'
+    ]
+    for col in optional_columns + duration_columns:
+        if col in zero_duration_df.columns and col not in columns_to_show:
+            columns_to_show.append(col)
+
+    earnings_columns = [
+        c for c in ['Τύπος Αποδοχών', 'Περιγραφή Τύπου Αποδοχών']
+        if c in columns_to_show
+    ]
+    if earnings_columns and 'Κλάδος/Πακέτο Κάλυψης' in columns_to_show:
+        insert_pos = columns_to_show.index('Κλάδος/Πακέτο Κάλυψης') + 1
+        for col in earnings_columns:
+            columns_to_show.remove(col)
+        for offset, col in enumerate(earnings_columns):
+            columns_to_show.insert(insert_pos + offset, col)
+
+    zero_display_df = zero_duration_df[columns_to_show].copy()
+    drop_helpers = [c for c in zero_display_df.columns if c.startswith('__')]
+    zero_display_df = zero_display_df.drop(columns=drop_helpers, errors='ignore')
+
+    if 'Έτη' in zero_display_df.columns:
+        zero_display_df['Έτη'] = zero_display_df['Έτη'].apply(lambda x: format_number_greek(x, decimals=1) if str(x).strip() not in ['', '-'] else '')
+    if 'Μήνες' in zero_display_df.columns:
+        zero_display_df['Μήνες'] = zero_display_df['Μήνες'].apply(lambda x: format_number_greek(x, decimals=1) if str(x).strip() not in ['', '-'] else '')
+    if 'Ημέρες' in zero_display_df.columns:
+        zero_display_df['Ημέρες'] = zero_display_df['Ημέρες'].apply(lambda x: format_number_greek(x, decimals=0) if str(x).strip() not in ['', '-'] else '')
+
+    return zero_display_df
+
 
 def normalize_column_name(name):
     """
@@ -1813,8 +1954,16 @@ def compute_parallel_months_2017(base_df: pd.DataFrame) -> list[tuple[int, int]]
     return valid_months
 
 
+EXCLUDED_PACKAGES_PARALLEL = {'Α', 'Λ', 'Υ', 'Ο', 'Χ', '026', '899'}
+
+
 def _build_monthly_rows_for_parallel(df: pd.DataFrame, description_map: dict | None = None) -> list[dict]:
-    """Κοινή λογική ανάλυσης ανά μήνα για Παράλληλη Ασφάλιση / Απασχόληση."""
+    """Κοινή λογική ανάλυσης ανά μήνα για Παράλληλη Ασφάλιση / Απασχόληση.
+    Εξαιρούνται τα πακέτα Α, Λ, Υ, Ο, Χ, 026, 899 (όπως στην καταμέτρηση).
+    """
+    if not df.empty and 'Κλάδος/Πακέτο Κάλυψης' in df.columns:
+        pkg = df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
+        df = df[~pkg.isin(EXCLUDED_PACKAGES_PARALLEL)].copy()
     rows: list[dict] = []
     for _, row in df.iterrows():
         try:
@@ -2114,7 +2263,7 @@ def compute_applied_monthly_day_caps(data_df: pd.DataFrame) -> list[dict]:
     if not required_cols.issubset(set(data_df.columns)):
         return []
 
-    excluded_packages = {'Α', 'Λ', 'Υ', 'Ο', 'Χ', '899'}
+    excluded_packages = {'Α', 'Λ', 'Υ', 'Ο', 'Χ', '026', '899'}
     monthly_rows: list[dict] = []
 
     for _, row in data_df.iterrows():
@@ -2763,9 +2912,12 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
     except Exception:
         pass
 
-    # Check 3: Gaps
+    # Check 3: Gaps και Διαστήματα χωρίς ημέρες ασφάλισης
     try:
         gaps = find_gaps_in_insurance_data(data_df)
+        zero_duration = find_zero_duration_intervals(data_df)
+
+        parts = []
         if not gaps.empty:
             gap_details = []
             for _, g in gaps.iterrows():
@@ -2778,11 +2930,21 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
                     )
                 else:
                     gap_details.append(f"Από {g['Από']} έως {g['Έως']} ({duration} ημερολογιακές ημέρες)")
+            parts.append(("Κενά διαστήματα", f"{len(gaps)} Διάστημα(τα)", "<br>".join(gap_details)))
 
+        if not zero_duration.empty:
+            zero_details = []
+            for _, z in zero_duration.iterrows():
+                zero_details.append(f"Από {z['Από']} έως {z['Έως']}")
+            parts.append(("Διαστήματα χωρίς ημέρες", f"{len(zero_duration)} Εγγραφή(ές)", "<br>".join(zero_details)))
+
+        if parts:
+            eurimata = "; ".join(p[1] for p in parts)
+            leptonereies = "<br><br>".join(f"<strong>{p[0]}:</strong> {p[2]}" for p in parts)
             audit_rows.append({
                 'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης',
-                'Εύρημα': f"{len(gaps)} Διάστημα(τα)",
-                'Λεπτομέρειες': "<br>".join(gap_details),
+                'Εύρημα': eurimata,
+                'Λεπτομέρειες': leptonereies,
                 'Ενέργειες': 'Ελέγξτε την καρτέλα "Κενά Διαστήματα"'
             })
         else:
@@ -2796,9 +2958,11 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
             'Εύρημα': 'Σφάλμα ελέγχου', 'Λεπτομέρειες': str(e), 'Ενέργειες': '-'
         })
 
-    # Check 4: Unpaid OAEE / TSMEDE / OGA / TSAY
+    # Check 4: Unpaid OAEE / TSMEDE / OGA / TSAY (πάντα εμφανίζεται στη Σύνοψη)
+    check4_added = False
     try:
-        if 'Κλάδος/Πακέτο Κάλυψης' in data_df.columns and 'Συνολικές εισφορές' in data_df.columns:
+        contrib_col = 'Συνολικές εισφορές' if 'Συνολικές εισφορές' in data_df.columns else ('Συνολικές Εισφορές' if 'Συνολικές Εισφορές' in data_df.columns else None)
+        if 'Κλάδος/Πακέτο Κάλυψης' in data_df.columns and contrib_col:
             def clean_money_chk(x):
                 if isinstance(x, str):
                     if 'DRX' in x or 'ΔΡΧ' in x:
@@ -2807,7 +2971,7 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
                 return x
 
             t_df = data_df.copy()
-            t_df['C'] = t_df['Συνολικές εισφορές'].apply(clean_money_chk)
+            t_df['C'] = t_df[contrib_col].apply(clean_money_chk)
             t_df['K'] = t_df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip().str.upper()
             t_df['T'] = t_df['Ταμείο'].astype(str).str.strip().upper() if 'Ταμείο' in t_df.columns else ''
 
@@ -2859,8 +3023,14 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
                 })
             else:
                 audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': 'Καμία', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+            check4_added = True
+        else:
+            audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': '-', 'Λεπτομέρειες': 'Δεν υπάρχουν στοιχεία Κλάδος/Πακέτο ή Συνολικές εισφορές', 'Ενέργειες': '-'})
+            check4_added = True
     except Exception:
         pass
+    if not check4_added:
+        audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': '-', 'Λεπτομέρειες': 'Δεν βρέθηκαν', 'Ενέργειες': '-'})
 
     # Check 5: Parallel Insurance (Month-based Logic)
     try:
@@ -3136,6 +3306,36 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
             audit_rows.append({
                 'A/A': 10,
                 'Έλεγχος': 'Εφαρμογή ορίου 25 ημερών',
+                'Εύρημα': 'Καμία',
+                'Λεπτομέρειες': '-',
+                'Ενέργειες': '-'
+            })
+    except Exception:
+        pass
+
+    # Check 12: Αρνητικοί χρόνοι / Διαγραφές εγγραφών
+    try:
+        neg_df = find_negative_entries(data_df)
+        if not neg_df.empty:
+            neg_details = []
+            for _, nr in neg_df.head(10).iterrows():
+                apo = str(nr.get('Από', '')).strip()
+                eos = str(nr.get('Έως', '')).strip()
+                tameio = str(nr.get('Ταμείο', '')).strip()
+                neg_details.append(f"{apo} - {eos} ({tameio})")
+            if len(neg_df) > 10:
+                neg_details.append(f"...και ακόμη {len(neg_df) - 10}")
+            audit_rows.append({
+                'A/A': 12,
+                'Έλεγχος': 'Αρνητικοί χρόνοι / Διαγραφές',
+                'Εύρημα': f"{len(neg_df)} εγγραφή(ές)",
+                'Λεπτομέρειες': "<br>".join(neg_details),
+                'Ενέργειες': 'Εγγραφές με αρνητικές αποδοχές ή εισφορές — πιθανή διαγραφή χρόνου ασφάλισης'
+            })
+        else:
+            audit_rows.append({
+                'A/A': 12,
+                'Έλεγχος': 'Αρνητικοί χρόνοι / Διαγραφές',
                 'Εύρημα': 'Καμία',
                 'Λεπτομέρειες': '-',
                 'Ενέργειες': '-'
@@ -3977,13 +4177,18 @@ def show_results_page(df, filename):
     # Συλλογή προβολών για εξαγωγή μεμονωμένων πινάκων
     view_exports = {}
 
-    excluded_packages = {"Α", "Λ", "Υ", "Ο", "Χ", "899"}
+    excluded_packages = {"Α", "Λ", "Υ", "Ο", "Χ", "026", "899"}
     excluded_packages_label = ", ".join(sorted(excluded_packages))
 
     def exclude_unused_packages(dataframe: pd.DataFrame) -> pd.DataFrame:
-        if 'Κλάδος/Πακέτο Κάλυψης' not in dataframe.columns:
+        pkg_col = None
+        for c in ['Κλάδος/Πακέτο Κάλυψης', 'Κλάδος/Πακέτο', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ']:
+            if c in dataframe.columns:
+                pkg_col = c
+                break
+        if pkg_col is None:
             return dataframe
-        pkg_series = dataframe['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
+        pkg_series = dataframe[pkg_col].astype(str).str.strip()
         return dataframe[~pkg_series.isin(excluded_packages)]
 
     def register_view(label: str, data: pd.DataFrame):
@@ -4216,10 +4421,11 @@ def show_results_page(df, filename):
     has_multi = False
 
     if not df.empty and 'Από' in df.columns:
-        # 1. Κενά
+        # 1. Κενά (κενά διαστήματα ή διαστήματα χωρίς ημέρες)
         try:
             gaps_found = find_gaps_in_insurance_data(df)
-            if not gaps_found.empty:
+            zero_duration_found = find_zero_duration_intervals(df)
+            if not gaps_found.empty or not zero_duration_found.empty:
                 tab_titles["gaps"] = "❗ Κενά"
         except: pass
 
@@ -4715,13 +4921,15 @@ def show_results_page(df, filename):
                         })
                 except Exception: pass
 
-                # Check 3: Gaps
+                # Check 3: Gaps και Διαστήματα χωρίς ημέρες ασφάλισης
                 try:
                     gaps = find_gaps_in_insurance_data(data_df)
+                    zero_duration = find_zero_duration_intervals(data_df)
+
+                    parts = []
                     if not gaps.empty:
                         gap_details = []
                         for _, g in gaps.iterrows():
-                            # Fix column name access
                             duration = g.get('Ημερολογιακές ημέρες', '')
                             insured_days_est = g.get('Ημέρες Ασφ.')
                             if pd.notna(insured_days_est):
@@ -4731,27 +4939,39 @@ def show_results_page(df, filename):
                                 )
                             else:
                                 gap_details.append(f"Από {g['Από']} έως {g['Έως']} ({duration} ημερολογιακές ημέρες)")
-                        
+                        parts.append(("Κενά διαστήματα", f"{len(gaps)} Διάστημα(τα)", "<br>".join(gap_details)))
+
+                    if not zero_duration.empty:
+                        zero_details = []
+                        for _, z in zero_duration.iterrows():
+                            zero_details.append(f"Από {z['Από']} έως {z['Έως']}")
+                        parts.append(("Διαστήματα χωρίς ημέρες", f"{len(zero_duration)} Εγγραφή(ές)", "<br>".join(zero_details)))
+
+                    if parts:
+                        eurimata = "; ".join(p[1] for p in parts)
+                        leptonereies = "<br><br>".join(f"<strong>{p[0]}:</strong> {p[2]}" for p in parts)
                         audit_rows.append({
-                            'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης', 
-                            'Εύρημα': f"{len(gaps)} Διάστημα(τα)", 
-                            'Λεπτομέρειες': "<br>".join(gap_details),
+                            'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης',
+                            'Εύρημα': eurimata,
+                            'Λεπτομέρειες': leptonereies,
                             'Ενέργειες': 'Ελέγξτε την καρτέλα "Κενά Διαστήματα"'
                         })
                     else:
                         audit_rows.append({
-                            'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης', 
+                            'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης',
                             'Εύρημα': 'Κανένα', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'
                         })
                 except Exception as e:
-                     audit_rows.append({
-                        'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης', 
+                    audit_rows.append({
+                        'A/A': 3, 'Έλεγχος': 'Κενά ασφάλισης',
                         'Εύρημα': 'Σφάλμα ελέγχου', 'Λεπτομέρειες': str(e), 'Ενέργειες': '-'
                     })
 
-                # Check 4: Unpaid OAEE
+                # Check 4: Unpaid OAEE / TSMEDE / OGA / TSAY (πάντα εμφανίζεται)
+                check4_added = False
                 try:
-                    if 'Κλάδος/Πακέτο Κάλυψης' in data_df.columns and 'Συνολικές εισφορές' in data_df.columns:
+                    contrib_col = 'Συνολικές εισφορές' if 'Συνολικές εισφορές' in data_df.columns else ('Συνολικές Εισφορές' if 'Συνολικές Εισφορές' in data_df.columns else None)
+                    if 'Κλάδος/Πακέτο Κάλυψης' in data_df.columns and contrib_col:
                         def clean_money_chk(x):
                             if isinstance(x, str):
                                 if 'DRX' in x or 'ΔΡΧ' in x: return 0.0
@@ -4759,33 +4979,38 @@ def show_results_page(df, filename):
                             return x
                         
                         t_df = data_df.copy()
-                        t_df['C'] = t_df['Συνολικές εισφορές'].apply(clean_money_chk)
+                        t_df['C'] = t_df[contrib_col].apply(clean_money_chk)
                         t_df['K'] = t_df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip().str.upper()
-                        unpaid = t_df[(t_df['K'].isin(['K', 'Κ'])) & (t_df['C'] == 0)]
+                        t_df['T'] = t_df['Ταμείο'].astype(str).str.strip().upper() if 'Ταμείο' in t_df.columns else ''
+                        cond_oaee = (t_df['K'].isin(['K', 'Κ'])) & (t_df['T'].str.contains('OAEE|ΟΑΕΕ|TEBE|ΤΕΒΕ|TAE|ΤΑΕ', na=False))
+                        cond_tsmede = (t_df['K'].isin(['ΚΣ', 'KS'])) & (t_df['T'].str.contains('ΤΣΜΕΔΕ|TSMEDE', na=False))
+                        cond_oga = (t_df['K'].isin(['K', 'Κ'])) & (t_df['T'].str.contains('ΟΓΑ|OGA', na=False))
+                        cond_tsay = (t_df['K'].isin(['ME', 'ΜΕ'])) & (t_df['T'].str.contains('ΤΣΑΥ|TSAY', na=False))
+                        unpaid = t_df[(cond_oaee | cond_tsmede | cond_oga | cond_tsay) & (t_df['C'] == 0)]
                         
                         if not unpaid.empty:
+                            def get_fund_unpaid(cond, label):
+                                u = t_df[cond & (t_df['C'] == 0)]
+                                return f"{len(u)} μήνες {label}" if not u.empty else None
+                            all_f = [x for x in [get_fund_unpaid(cond_oaee,"ΟΑΕΕ (Κ)"), get_fund_unpaid(cond_tsmede,"ΤΣΜΕΔΕ (ΚΣ)"), get_fund_unpaid(cond_oga,"ΟΓΑ (Κ)"), get_fund_unpaid(cond_tsay,"ΤΣΑΥ (ΜΕ)")] if x]
+                            details_msg = ", ".join(all_f) + " με μηδενική εισφορά."
                             months = []
-                            for _, r in unpaid.iterrows():
+                            for _, r in unpaid.head(5).iterrows():
                                 try:
                                     d = pd.to_datetime(r['Από'], format='%d/%m/%Y', errors='coerce')
-                                    if pd.notna(d):
-                                        months.append(d.strftime('%m/%Y'))
+                                    if pd.notna(d): months.append(d.strftime('%m/%Y'))
                                 except: pass
-                            
-                            months_str = ", ".join(months) if months else ""
-                            details_msg = f"{len(unpaid)} μήνες ΟΑΕΕ (Κ) με μηδενική εισφορά."
-                            if months_str:
-                                details_msg += f"<br><span style='font-size: 0.85rem; color: #666;'>({months_str})</span>"
-
-                            audit_rows.append({
-                                'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 
-                                'Εύρημα': 'Εντοπίστηκαν', 
-                                'Λεπτομέρειες': details_msg,
-                                'Ενέργειες': 'Ελέγξτε για τυχόν οφειλές στον ΟΑΕΕ'
-                            })
+                            if months: details_msg += f"<br><span style='font-size:0.85rem;color:#666;'>Ενδεικτικά: ({', '.join(months)}...)</span>"
+                            audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': 'Εντοπίστηκαν', 'Λεπτομέρειες': details_msg, 'Ενέργειες': 'Ελέγξτε για τυχόν οφειλές στα αντίστοιχα ταμεία'})
                         else:
                             audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': 'Καμία', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                        check4_added = True
+                    else:
+                        audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': '-', 'Λεπτομέρειες': 'Δεν υπάρχουν στοιχεία Κλάδος/Πακέτο ή Συνολικές εισφορές', 'Ενέργειες': '-'})
+                        check4_added = True
                 except Exception: pass
+                if not check4_added:
+                    audit_rows.append({'A/A': 4, 'Έλεγχος': 'Απλήρωτες εισφορές', 'Εύρημα': '-', 'Λεπτομέρειες': 'Δεν βρέθηκαν', 'Ενέργειες': '-'})
 
                 # Check 5: Parallel Insurance (Month-based Logic)
                 try:
@@ -5055,6 +5280,30 @@ def show_results_page(df, filename):
                 except Exception:
                     pass
 
+                # Check 12: Αρνητικοί χρόνοι / Διαγραφές εγγραφών
+                try:
+                    neg_df = find_negative_entries(data_df)
+                    if not neg_df.empty:
+                        neg_details = []
+                        for _, nr in neg_df.head(10).iterrows():
+                            apo = str(nr.get('Από', '')).strip()
+                            eos = str(nr.get('Έως', '')).strip()
+                            tameio = str(nr.get('Ταμείο', '')).strip()
+                            neg_details.append(f"{apo} - {eos} ({tameio})")
+                        if len(neg_df) > 10:
+                            neg_details.append(f"...και ακόμη {len(neg_df) - 10}")
+                        audit_rows.append({
+                            'A/A': 12,
+                            'Έλεγχος': 'Αρνητικοί χρόνοι / Διαγραφές',
+                            'Εύρημα': f"{len(neg_df)} εγγραφή(ές)",
+                            'Λεπτομέρειες': "<br>".join(neg_details),
+                            'Ενέργειες': 'Εγγραφές με αρνητικές αποδοχές ή εισφορές — πιθανή διαγραφή χρόνου ασφάλισης'
+                        })
+                    else:
+                        audit_rows.append({'A/A': 12, 'Έλεγχος': 'Αρνητικοί χρόνοι / Διαγραφές', 'Εύρημα': 'Καμία', 'Λεπτομέρειες': '-', 'Ενέργειες': '-'})
+                except Exception:
+                    pass
+
                 return pd.DataFrame(audit_rows)
 
             st.markdown("### Βασικοί έλεγχοι δεδομένων")
@@ -5138,9 +5387,9 @@ def show_results_page(df, filename):
                     r = audit_df[audit_df['A/A'] == aa]
                     if not r.empty: render_check(r.iloc[0])
 
-            # Column 3: 9
+            # Column 3: 9, 10, 12
             with ac3:
-                for aa in [9, 10]:
+                for aa in [9, 10, 12]:
                     r = audit_df[audit_df['A/A'] == aa]
                     if not r.empty: render_check(r.iloc[0])
             
@@ -5808,82 +6057,11 @@ def show_results_page(df, filename):
 
             # Δεύτερος πίνακας: Δηλωμένα διαστήματα χωρίς Έτη/Μήνες/Ημέρες
             st.markdown("#### Διαστήματα χωρίς ημέρες ασφάλισης")
-            zero_duration_df = df.copy()
+            zero_display_df = find_zero_duration_intervals(df)
 
-            # Κρατάμε μόνο γραμμές με έγκυρες ημερομηνίες
-            zero_duration_df['Από_DateTime'] = pd.to_datetime(zero_duration_df['Από'], format='%d/%m/%Y', errors='coerce')
-            zero_duration_df['Έως_DateTime'] = pd.to_datetime(zero_duration_df['Έως'], format='%d/%m/%Y', errors='coerce')
-            zero_duration_df = zero_duration_df.dropna(subset=['Από_DateTime', 'Έως_DateTime'])
-
-            # Δημιουργία αριθμητικών τιμών για Έτη/Μήνες/Ημέρες (αν δεν υπάρχουν, θεωρούμε 0)
-            duration_columns = ['Έτη', 'Μήνες', 'Ημέρες']
-            for col in duration_columns:
-                if col not in zero_duration_df.columns:
-                    zero_duration_df[col] = 0
-                numeric_col = f"__{col}_numeric"
-                zero_duration_df[numeric_col] = zero_duration_df[col].apply(clean_numeric_value)
-
-            # Υπολογίζουμε συνολική διάρκεια ανά γραμμή
-            zero_duration_df['__duration_sum'] = (
-                zero_duration_df['__Έτη_numeric'] +
-                zero_duration_df['__Μήνες_numeric'] +
-                zero_duration_df['__Ημέρες_numeric']
-            )
-
-            # Προσδιορίζουμε αν για το ίδιο διάστημα (Από/Έως) υπάρχει κάπου αλλού μη μηδενική διάρκεια
-            if not zero_duration_df.empty:
-                zero_duration_df['__duration_sum_group'] = zero_duration_df.groupby(
-                    ['Από_DateTime', 'Έως_DateTime']
-                )['__duration_sum'].transform('sum')
-
-            # Επιλογή μόνο διαστημάτων όπου τόσο η τρέχουσα γραμμή όσο και το σύνολο του διαστήματος είναι μηδενικά
-            zero_duration_df = zero_duration_df[
-                (zero_duration_df['__duration_sum'] == 0) &
-                (zero_duration_df['__duration_sum_group'] == 0)
-            ]
-
-            if zero_duration_df.empty:
+            if zero_display_df.empty:
                 st.success("Δεν βρέθηκαν διαστήματα χωρίς δηλωμένη διάρκεια.")
             else:
-                columns_to_show = ['Από', 'Έως']
-                optional_columns = [
-                    'Ταμείο',
-                    'Τύπος Ασφάλισης',
-                    'Κλάδος/Πακέτο Κάλυψης',
-                    'Τύπος Αποδοχών',
-                    'Περιγραφή Τύπου Αποδοχών',
-                    'Α-Μ εργοδότη'
-                ]
-                for col in optional_columns + duration_columns:
-                    if col in zero_duration_df.columns and col not in columns_to_show:
-                        columns_to_show.append(col)
-
-                # Μετακινούμε τις στήλες Τύπος Αποδοχών ώστε να εμφανίζονται μετά το Κλάδος/Πακέτο
-                earnings_columns = [
-                    c for c in ['Τύπος Αποδοχών', 'Περιγραφή Τύπου Αποδοχών']
-                    if c in columns_to_show
-                ]
-                if earnings_columns and 'Κλάδος/Πακέτο Κάλυψης' in columns_to_show:
-                    insert_pos = columns_to_show.index('Κλάδος/Πακέτο Κάλυψης') + 1
-                    for col in earnings_columns:
-                        columns_to_show.remove(col)
-                    for offset, col in enumerate(earnings_columns):
-                        columns_to_show.insert(insert_pos + offset, col)
-
-                zero_display_df = zero_duration_df[columns_to_show].copy()
-
-                # Αφαιρούμε τα βοηθητικά πεδία
-                drop_helpers = [c for c in zero_display_df.columns if c.startswith('__')]
-                zero_display_df = zero_display_df.drop(columns=drop_helpers, errors='ignore')
-
-                # Μορφοποίηση αριθμών
-                if 'Έτη' in zero_display_df.columns:
-                    zero_display_df['Έτη'] = zero_display_df['Έτη'].apply(lambda x: format_number_greek(x, decimals=1) if str(x).strip() not in ['', '-'] else '')
-                if 'Μήνες' in zero_display_df.columns:
-                    zero_display_df['Μήνες'] = zero_display_df['Μήνες'].apply(lambda x: format_number_greek(x, decimals=1) if str(x).strip() not in ['', '-'] else '')
-                if 'Ημέρες' in zero_display_df.columns:
-                    zero_display_df['Ημέρες'] = zero_display_df['Ημέρες'].apply(lambda x: format_number_greek(x, decimals=0) if str(x).strip() not in ['', '-'] else '')
-
                 st.warning(
                     "Οι παρακάτω εγγραφές έχουν βρεθεί στο ΑΤΛΑΣ αλλά δεν περιλαμβάνουν καμία τιμή σε Έτη/Μήνες/Ημέρες. "
                     "Ενδέχεται να χρειαστεί επαλήθευση με τα πρωτογενή στοιχεία."
@@ -7437,7 +7615,7 @@ def show_results_page(df, filename):
     
     with tab_parallel:
         st.markdown("### Παράλληλη Ασφάλιση (ΙΚΑ & ΟΑΕΕ / ΟΑΕΕ & ΤΣΜΕΔΕ / ΟΓΑ & ΙΚΑ/ΟΑΕΕ)")
-        parallel_df = df.copy()
+        parallel_df = exclude_unused_packages(df.copy())
         required_cols = ['Από', 'Έως', 'Ημέρες']
         
         if all(col in parallel_df.columns for col in required_cols):
@@ -7491,7 +7669,9 @@ def show_results_page(df, filename):
                         tameio = str(row.get('Ταμείο', '')).strip()
                         insurance_type = str(row.get('Τύπος Ασφάλισης', '')).strip()
                         employer = str(row.get('Α-Μ εργοδότη', '')).strip()
-                        klados = str(row.get('Κλάδος/Πακέτο Κάλυψης', '')).strip()
+                        klados = str(row.get('Κλάδος/Πακέτο Κάλυψης', row.get('Κλάδος/Πακέτο', ''))).strip()
+                        if klados in excluded_packages:
+                            continue
                         klados_desc = description_map.get(klados, '') if 'description_map' in locals() else ''
                         earnings_type = str(row.get('Τύπος Αποδοχών', '')).strip()
                         foreas = str(row.get('Φορέας', '')).strip()
@@ -7914,7 +8094,7 @@ def show_results_page(df, filename):
 
     with tab_parallel_2017:
         st.markdown("### Παράλληλη Απασχόληση 2017+ (ΙΚΑ & ΕΦΚΑ ΜΗ ΜΙΣΘΩΤΗ / ΕΦΚΑ ΜΙΣΘΩΤΗ & ΕΦΚΑ ΜΗ ΜΙΣΘΩΤΗ)")
-        parallel_df = df.copy()
+        parallel_df = exclude_unused_packages(df.copy())
         required_cols = ['Από', 'Έως', 'Ημέρες']
 
         if all(col in parallel_df.columns for col in required_cols):
@@ -7956,7 +8136,9 @@ def show_results_page(df, filename):
                         tameio = str(row.get('Ταμείο', '')).strip()
                         insurance_type = str(row.get('Τύπος Ασφάλισης', '')).strip()
                         employer = str(row.get('Α-Μ εργοδότη', '')).strip()
-                        klados = str(row.get('Κλάδος/Πακέτο Κάλυψης', '')).strip()
+                        klados = str(row.get('Κλάδος/Πακέτο Κάλυψης', row.get('Κλάδος/Πακέτο', ''))).strip()
+                        if klados in excluded_packages:
+                            continue
                         klados_desc = description_map.get(klados, '') if 'description_map' in locals() else ''
                         earnings_type = str(row.get('Τύπος Αποδοχών', '')).strip()
                         foreas = str(row.get('Φορέας', '')).strip()
@@ -8140,21 +8322,42 @@ def show_results_page(df, filename):
                         if c in display_df.columns:
                             display_df[c] = display_df[c].apply(format_currency)
 
+                    # Ομαδοποίηση οπτική: Έτος και Ταμείο μια φορά με bold (όπως Παράλληλη ≤2016)
+                    display_df = display_df.sort_values(['Έτος', 'Ταμείο', 'Τύπος Ασφάλισης', 'Εργοδότης', 'Κλάδος/Πακέτο'])
+                    prev_etos, prev_tameio = None, None
+                    for idx in display_df.index:
+                        curr_etos = display_df.at[idx, 'Έτος']
+                        curr_tameio = display_df.at[idx, 'Ταμείο']
+                        if curr_etos == prev_etos:
+                            display_df.at[idx, 'Έτος'] = ''
+                            if curr_tameio == prev_tameio:
+                                display_df.at[idx, 'Ταμείο'] = ''
+                            else:
+                                prev_tameio = curr_tameio
+                        else:
+                            prev_etos, prev_tameio = curr_etos, curr_tameio
+
+                    agg_flags = display_df['Is_Aggregate'].copy()
+                    display_df_show = display_df.drop(columns=['Is_Aggregate'])
+
                     def style_parallel_2017(row):
-                        is_agg = row.get('Is_Aggregate', False)
+                        is_agg = agg_flags.get(row.name, False) if hasattr(row, 'name') else False
                         styles = []
-                        for _ in row.index:
-                            styles.append('background-color: #fff9c4' if is_agg else '')
+                        for col in row.index:
+                            s = 'background-color: #fff9c4; ' if is_agg else ''
+                            if col in ['Έτος', 'Ταμείο'] and str(row.get(col, '')).strip() != '':
+                                s += 'font-weight: bold; '
+                            styles.append(s)
                         return styles
 
-                    styler = display_df.drop(columns=['Is_Aggregate']).style.apply(style_parallel_2017, axis=1)
+                    styler = display_df_show.style.apply(style_parallel_2017, axis=1)
                     st.dataframe(styler, use_container_width=True, hide_index=True)
                     st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
-                    register_view("Παράλληλη_Απασχόληση_2017+", display_df.drop(columns=['Is_Aggregate']))
+                    register_view("Παράλληλη_Απασχόληση_2017+", display_df_show)
                     render_print_button(
                         "print_parallel_2017",
                         "Παράλληλη Απασχόληση 2017+",
-                        display_df.drop(columns=['Is_Aggregate']),
+                        display_df_show,
                         description="Πίνακας Παράλληλης Απασχόλησης 2017+ (ΙΚΑ/ΕΦΚΑ Μισθωτή & ΕΦΚΑ Μη Μισθωτή).",
                         yearly=True,
                         year_column='Έτος'
@@ -8168,7 +8371,7 @@ def show_results_page(df, filename):
 
     with tab_multi:
         st.markdown("### Πολλαπλή Απασχόληση (Πολλαπλοί Εργοδότες)")
-        multi_df = df.copy()
+        multi_df = exclude_unused_packages(df.copy())
         required_cols = ['Από', 'Έως', 'Ημέρες']
         
         if all(col in multi_df.columns for col in required_cols):
@@ -8222,7 +8425,9 @@ def show_results_page(df, filename):
                         tameio = str(row.get('Ταμείο', '')).strip()
                         insurance_type = str(row.get('Τύπος Ασφάλισης', '')).strip()
                         employer = str(row.get('Α-Μ εργοδότη', '')).strip()
-                        klados = str(row.get('Κλάδος/Πακέτο Κάλυψης', '')).strip()
+                        klados = str(row.get('Κλάδος/Πακέτο Κάλυψης', row.get('Κλάδος/Πακέτο', ''))).strip()
+                        if klados in excluded_packages:
+                            continue
                         klados_desc = description_map.get(klados, '') if 'description_map' in locals() else ''
                         earnings_type = str(row.get('Τύπος Αποδοχών', '')).strip()
                         foreas = str(row.get('Φορέας', '')).strip()
