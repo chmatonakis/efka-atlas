@@ -550,7 +550,7 @@ def build_print_filters_html(filters: list[str] | None = None) -> str:
 def get_print_disclaimer_html() -> str:
     return (
         "<div class='print-disclaimer'>"
-        "<strong>ΣΗΜΑΝΤΙΚΉ ΣΗΜΕΙΩΣΗ:</strong> Η παρούσα αναφορά βασίζεται αποκλειστικά στα δεδομένα που εμφανίζονται στο αρχείο ΑΤΛΑΣ/e-ΕΦΚΑ και αποτελεί απλή επεξεργασία των καταγεγραμμένων εγγραφών. "
+        "<strong>ΣΗΜΑΝΤΙΚH ΣΗΜΕΙΩΣΗ:</strong> Η παρούσα αναφορά βασίζεται αποκλειστικά στα δεδομένα που εμφανίζονται στο αρχείο ΑΤΛΑΣ/e-ΕΦΚΑ και αποτελεί απλή επεξεργασία των καταγεγραμμένων εγγραφών. "
         "Η πλατφόρμα ΑΤΛΑΣ μπορεί να περιέχει κενά ή σφάλματα και η αναφορά αυτή δεν υποκαθιστά νομική ή οικονομική συμβουλή σε καμία περίπτωση. "
         "Για θέματα συνταξιοδότησης και οριστικές απαντήσεις αρμόδιος παραμένει αποκλειστικά ο e-ΕΦΚΑ."
         "</div>"
@@ -4263,6 +4263,7 @@ def render_totals_tab(
         summary_df = summary_df[summary_df['Ταμείο'].isin(selected_tameia)]
     if 'Κλάδος/Πακέτο Κάλυψης' in summary_df.columns and selected_klados:
         summary_df = summary_df[summary_df['Κλάδος/Πακέτο Κάλυψης'].isin(selected_klados)]
+    summary_df_for_dk = summary_df.copy()
     if from_summary_str:
         try:
             from_dt = pd.to_datetime(from_summary_str, format='%d/%m/%Y')
@@ -4400,6 +4401,84 @@ def render_totals_tab(
         display_summary,
         description="Συνοπτική απεικόνιση ανά Κλάδο/Πακέτο Κάλυψης για τις περιόδους που εμφανίζονται, καθώς και άθροισμα αποδοχών και εισφορών (μόνο των εγγραφών σε €)."
     )
+
+    # --- Σημαντικά διαστήματα (από μεμονωμένες εγγραφές) ---
+    if selected_klados and not summary_df_for_dk.empty:
+        rdf = summary_df_for_dk.copy()
+        rdf['_apo'] = pd.to_datetime(rdf.get('Από'), format='%d/%m/%Y', errors='coerce')
+        rdf['_eos'] = pd.to_datetime(rdf.get('Έως'), format='%d/%m/%Y', errors='coerce')
+        rdf = rdf.dropna(subset=['_apo'])
+        for _nc in ['Ημέρες', 'Μήνες', 'Έτη']:
+            if _nc in rdf.columns:
+                rdf[_nc] = rdf[_nc].apply(lambda x: clean_numeric_value(x) or 0)
+        rdf = apply_negative_time_sign(rdf)
+        rdf['_d'] = (
+            rdf['Ημέρες'].fillna(0) +
+            rdf['Μήνες'].fillna(0) * month_days +
+            rdf['Έτη'].fillna(0) * year_days
+        ).clip(lower=0)
+
+        import unicodedata
+        def _strip_accents_dk(s):
+            return ''.join(c for c in unicodedata.normalize('NFD', str(s)) if unicodedata.category(c) != 'Mn')
+        _varea_codes = set()
+        if description_map:
+            for _code, _desc in description_map.items():
+                if 'ΒΑΡΕ' in _strip_accents_dk(_desc).upper():
+                    _varea_codes.add(str(_code).strip())
+        _pkg_col = 'Κλάδος/Πακέτο Κάλυψης'
+        rdf['_is_varea'] = rdf[_pkg_col].astype(str).str.strip().isin(_varea_codes) if _pkg_col in rdf.columns else False
+
+        _today = pd.Timestamp.today().normalize()
+        _cy = _today.year
+        _d2002 = pd.Timestamp('2002-01-01')
+        _five = pd.Timestamp(f'{_cy - 4}-01-01')
+        _barea_days = 6205
+        _window_end = _today
+        _window_start = _today - pd.Timedelta(days=_barea_days)
+        _d2014 = pd.Timestamp('2014-12-31')
+        _max_year = rdf['_eos'].dt.year.max()
+
+        dk_calc1 = int(rdf.loc[rdf['_apo'] >= _d2002, '_d'].sum())
+        dk_calc3 = int(rdf.loc[rdf['_apo'] >= _five, '_d'].sum())
+        dk_calc4 = 0
+        if pd.notna(_max_year):
+            _max_year = int(_max_year)
+            dk_calc4 = int(rdf.loc[
+                (rdf['_apo'] >= pd.Timestamp(f'{_max_year - 4}-01-01')) &
+                (rdf['_eos'] <= pd.Timestamp(f'{_max_year}-12-31')),
+                '_d'
+            ].sum())
+        dk_calc5 = int(rdf.loc[rdf['_eos'] <= _d2014, '_d'].sum())
+        _period_days = (rdf['_eos'] - rdf['_apo']).dt.days + 1
+        _overlap_start = rdf['_apo'].clip(lower=_window_start)
+        _overlap_end = rdf['_eos'].clip(upper=_window_end)
+        _overlap_days = ((_overlap_end - _overlap_start).dt.days + 1).clip(lower=0)
+        _ratio = (_overlap_days / _period_days).fillna(0)
+        dk_calc6 = int((rdf['_d'] * _ratio).where(rdf['_is_varea'], 0).round(0).sum())
+        dk_calc7a = int(rdf.loc[rdf['_eos'] <= pd.Timestamp('2010-12-31'), '_d'].sum())
+        dk_calc7b = int(rdf.loc[rdf['_eos'] <= pd.Timestamp('2011-12-31'), '_d'].sum())
+        dk_calc7c = int(rdf.loc[rdf['_eos'] <= pd.Timestamp('2012-12-31'), '_d'].sum())
+
+        def _fmt_dk(v):
+            return format_number_greek(v, decimals=0) if v > 0 else "—"
+
+        with st.expander("📊 Σημαντικά διαστήματα", expanded=True):
+            dk_items = [
+                ("1. Ημέρες από 1/1/2002 έως σήμερα", _fmt_dk(dk_calc1)),
+                ("2. Μήνες από 1/1/2002 (ημέρες / 25)", format_number_greek(round(dk_calc1 / 25, 1), decimals=1) if dk_calc1 > 0 else "—"),
+                ("3. Τελευταία 5 έτη από σήμερα", _fmt_dk(dk_calc3)),
+                (f"4. Τελευταία 5 έτη από τελευταίο ({_max_year if pd.notna(_max_year) else '—'})", _fmt_dk(dk_calc4)),
+                ("5. Ημέρες έως 31/12/2014", _fmt_dk(dk_calc5)),
+                ("6. Βαρέα τα τελευταία 17 έτη από σήμερα (6205 ημέρες)", _fmt_dk(dk_calc6)),
+                ("7a. Ημέρες έως 31/12/2010", _fmt_dk(dk_calc7a)),
+                ("7b. Ημέρες έως 31/12/2011", _fmt_dk(dk_calc7b)),
+                ("7c. Ημέρες έως 31/12/2012", _fmt_dk(dk_calc7c)),
+            ]
+            dk_cols_ui = st.columns(3)
+            for i, (label, value) in enumerate(dk_items):
+                with dk_cols_ui[i % 3]:
+                    st.metric(label, value)
 
 
 def show_results_page(df, filename):

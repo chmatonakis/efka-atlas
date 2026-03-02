@@ -32,6 +32,9 @@ from app_final import (
     build_multi_employment_print_df,
     compute_complex_file_metrics,
     should_show_complex_file_warning,
+    clean_numeric_value,
+    apply_negative_time_sign,
+    APODOXES_DESCRIPTIONS,
 )
 
 st.set_page_config(
@@ -608,7 +611,113 @@ def _build_timeline_html(source_df):
     """
 
 
-def _build_totals_with_filters(display_summary, warning_types=None):
+def _precompute_date_keys(raw_df, group_keys, desc_map=None, month_days=25, year_days=300):
+    """Υπολογισμός date-key values ανά ομάδα (πακέτο+ταμείο) από τις μεμονωμένες εγγραφές."""
+    import unicodedata
+    rdf = raw_df.copy()
+    pkg_col = 'Κλάδος/Πακέτο Κάλυψης'
+    rdf[pkg_col] = rdf[pkg_col].astype(str).str.strip()
+    rdf['_apo'] = pd.to_datetime(rdf.get('Από'), format='%d/%m/%Y', errors='coerce')
+    rdf['_eos'] = pd.to_datetime(rdf.get('Έως'), format='%d/%m/%Y', errors='coerce')
+    rdf = rdf.dropna(subset=['_apo'])
+
+    for col in ['Ημέρες', 'Μήνες', 'Έτη']:
+        if col in rdf.columns:
+            rdf[col] = rdf[col].apply(lambda x: clean_numeric_value(x) or 0)
+    rdf = apply_negative_time_sign(rdf)
+    rdf['_d'] = (
+        rdf['Ημέρες'].fillna(0) +
+        rdf['Μήνες'].fillna(0) * month_days +
+        rdf['Έτη'].fillna(0) * year_days
+    ).clip(lower=0)
+
+    def _strip_accents(s):
+        return ''.join(c for c in unicodedata.normalize('NFD', str(s)) if unicodedata.category(c) != 'Mn')
+
+    desc_map = desc_map or {}
+    varea_codes = set()
+    for code, desc in desc_map.items():
+        if 'ΒΑΡΕ' in _strip_accents(desc).upper():
+            varea_codes.add(str(code).strip())
+    rdf['_is_varea'] = rdf[pkg_col].isin(varea_codes)
+
+    today = pd.Timestamp.today().normalize()
+    cy = today.year
+    d2002 = pd.Timestamp('2002-01-01')
+    five = pd.Timestamp(f'{cy - 4}-01-01')
+    BAREA_DAYS = 6205
+    window_end = today
+    window_start = today - pd.Timedelta(days=BAREA_DAYS)
+    d2014 = pd.Timestamp('2014-12-31')
+    d2010 = pd.Timestamp('2010-12-31')
+    d2011 = pd.Timestamp('2011-12-31')
+    d2012 = pd.Timestamp('2012-12-31')
+    max_y = rdf['_eos'].dt.year.max()
+    five_last = pd.Timestamp(f'{int(max_y) - 4}-01-01') if pd.notna(max_y) else pd.NaT
+    last_end = pd.Timestamp(f'{int(max_y)}-12-31') if pd.notna(max_y) else pd.NaT
+
+    d = rdf['_d']
+    rdf['dk1'] = d.where(rdf['_apo'] >= d2002, 0)
+    rdf['dk3'] = d.where(rdf['_apo'] >= five, 0)
+    rdf['dk4'] = d.where((rdf['_apo'] >= five_last) & (rdf['_eos'] <= last_end), 0) if pd.notna(five_last) else 0
+    rdf['dk5'] = d.where(rdf['_eos'] <= d2014, 0)
+    period_days = (rdf['_eos'] - rdf['_apo']).dt.days + 1
+    overlap_start = rdf['_apo'].clip(lower=window_start)
+    overlap_end = rdf['_eos'].clip(upper=window_end)
+    overlap_days = ((overlap_end - overlap_start).dt.days + 1).clip(lower=0)
+    ratio = (overlap_days / period_days).fillna(0)
+    rdf['dk6'] = (rdf['_d'] * ratio).where(rdf['_is_varea'], 0).round(0)
+    rdf['dk7a'] = d.where(rdf['_eos'] <= d2010, 0)
+    rdf['dk7b'] = d.where(rdf['_eos'] <= d2011, 0)
+    rdf['dk7c'] = d.where(rdf['_eos'] <= d2012, 0)
+
+    dk_cols = ['dk1', 'dk3', 'dk4', 'dk5', 'dk6', 'dk7a', 'dk7b', 'dk7c']
+    existing_keys = [k for k in group_keys if k in rdf.columns]
+    result = rdf.groupby(existing_keys)[dk_cols].sum().reset_index()
+    for c in dk_cols:
+        result[c] = result[c].round(0).astype(int)
+    return result
+
+
+def _totals_raw_records_for_js(raw_df, month_days=25, year_days=300):
+    """Λίστα ωμών εγγραφών για client-side φιλτράρισμα ημερομηνιών (Lite)."""
+    if raw_df is None or raw_df.empty:
+        return []
+    pkg_col = 'Κλάδος/Πακέτο Κάλυψης'
+    tameio_col = 'Ταμείο'
+    if pkg_col not in raw_df.columns:
+        return []
+    rdf = raw_df.copy()
+    rdf[pkg_col] = rdf[pkg_col].astype(str).str.strip()
+    rdf['_apo'] = pd.to_datetime(rdf.get('Από'), format='%d/%m/%Y', errors='coerce')
+    rdf['_eos'] = pd.to_datetime(rdf.get('Έως'), format='%d/%m/%Y', errors='coerce')
+    rdf = rdf.dropna(subset=['_apo'])
+    for col in ['Ημέρες', 'Μήνες', 'Έτη']:
+        if col in rdf.columns:
+            rdf[col] = rdf[col].apply(lambda x: clean_numeric_value(x) or 0)
+    rdf = apply_negative_time_sign(rdf)
+    rdf['_h'] = (
+        rdf['Ημέρες'].fillna(0) +
+        rdf['Μήνες'].fillna(0) * month_days +
+        rdf['Έτη'].fillna(0) * year_days
+    ).clip(lower=0).round(0).astype(int)
+    out = []
+    for _, row in rdf.iterrows():
+        apo_str = row.get('Από')
+        eos_str = row.get('Έως')
+        if pd.isna(apo_str) or pd.isna(eos_str):
+            continue
+        out.append({
+            'p': str(row[pkg_col]).strip(),
+            't': str(row.get(tameio_col, '')).strip() if tameio_col in rdf.columns else '',
+            'apo': str(apo_str).strip(),
+            'eos': str(eos_str).strip(),
+            'h': int(row['_h']),
+        })
+    return out
+
+
+def _build_totals_with_filters(display_summary, raw_df=None, desc_map=None, warning_types=None):
     """Κατασκευή της ενότητας Σύνολα με φίλτρα Πακέτο, Ταμείο, Από-Έως (default κενά, πολλαπλή επιλογή).
     warning_types: λίστα από strings όπως ['παράλληλη ασφάλιση', 'πολλαπλή απασχόληση', 'παράλληλη απασχόληση 2017+']
     """
@@ -617,23 +726,39 @@ def _build_totals_with_filters(display_summary, warning_types=None):
     apo_col = "Από"
     eos_col = "Έως"
     hmeres_col = "Συνολικές ημέρες"
+    perigrafi_col = "Περιγραφή"
 
     # Μοναδικές τιμές για τα dropdowns
     paketo_vals = sorted(display_summary[paketo_col].dropna().astype(str).str.strip().unique().tolist()) if paketo_col in display_summary.columns else []
     tameio_vals = sorted(display_summary[tameio_col].dropna().astype(str).str.strip().unique().tolist()) if tameio_col in display_summary.columns else []
 
-    # HTML για φίλτρα (checkboxes, default κενά)
-    def _checkboxes(name, values, data_attr):
-        if not values:
+    # Λίστες (value, label) για εμφάνιση: κωδικός + περιγραφή όπου υπάρχει
+    desc_map = desc_map or {}
+    paketo_options = []
+    for v in paketo_vals:
+        desc = (desc_map.get(v) or "").strip()
+        label = f"{v} – {desc}" if desc else v
+        paketo_options.append((v, label))
+    tameio_options = [(v, v) for v in tameio_vals]  # Ταμείο: μόνο κωδικός (χωρίς ξεχωριστό desc_map)
+
+    # HTML για φίλτρα: custom dropdown με checkboxes (εμφάνιση κωδικός – περιγραφή)
+    def _dropdown_checkboxes(name, options, data_attr):
+        if not options:
             return ""
         items = "".join(
-            f'<label class="filter-cb"><input type="checkbox" name="{name}" value="{html_mod.escape(str(v))}" data-attr="{data_attr}">{html_mod.escape(str(v))}</label>'
-            for v in values
+            f'<label class="filter-cb"><input type="checkbox" name="{name}" value="{html_mod.escape(str(val))}" data-attr="{data_attr}">{html_mod.escape(label)}</label>'
+            for val, label in options
         )
-        return f'<div class="filter-group"><span class="filter-label">{name}:</span><div class="filter-options">{items}</div></div>'
+        return f'''<div class="filter-group filter-dropdown" data-filter-name="{html_mod.escape(name)}">
+  <span class="filter-label">{html_mod.escape(name)}:</span>
+  <div class="filter-dropdown-trigger" tabindex="0" role="button" aria-haspopup="listbox" aria-expanded="false" title="Επιλέξτε {html_mod.escape(name)}">Επιλέξτε {html_mod.escape(name)}…</div>
+  <div class="filter-dropdown-panel" role="listbox">
+    <div class="filter-options">{items}</div>
+  </div>
+</div>'''
 
-    paketo_filters = _checkboxes("Πακέτο", paketo_vals, "paketo")
-    tameio_filters = _checkboxes("Ταμείο", tameio_vals, "tameio")
+    paketo_filters = _dropdown_checkboxes("Πακέτο", paketo_options, "paketo")
+    tameio_filters = _dropdown_checkboxes("Ταμείο", tameio_options, "tameio")
     date_filters = '''
     <div class="filter-group">
       <span class="filter-label">Από (ηη/μμ/εεεε):</span>
@@ -678,6 +803,21 @@ def _build_totals_with_filters(display_summary, warning_types=None):
     </div>
     '''
 
+    # Pre-compute date-key values per group from raw records
+    group_keys = [paketo_col]
+    if tameio_col in display_summary.columns:
+        group_keys.append(tameio_col)
+    dk_map = {}
+    dk_cols = ['dk1', 'dk3', 'dk4', 'dk5', 'dk6', 'dk7a', 'dk7b', 'dk7c']
+    if raw_df is not None and not raw_df.empty:
+        try:
+            dk_df = _precompute_date_keys(raw_df, group_keys, desc_map=desc_map)
+            for _, dkrow in dk_df.iterrows():
+                key = tuple(str(dkrow.get(k, '')).strip() for k in group_keys)
+                dk_map[key] = {c: int(dkrow.get(c, 0)) for c in dk_cols}
+        except Exception:
+            pass
+
     # Πίνακας με data attributes σε κάθε γραμμή (συμπεριλαμβανομένου data-hmeres για άθροισμα)
     headers_html = "".join(f"<th>{html_mod.escape(str(h))}</th>" for h in display_summary.columns)
     rows_parts = []
@@ -687,16 +827,46 @@ def _build_totals_with_filters(display_summary, warning_types=None):
         apo_val = str(row.get(apo_col, "")).strip() if apo_col in row.index else ""
         eos_val = str(row.get(eos_col, "")).strip() if eos_col in row.index else ""
         hmeres_raw = _parse_greek_number(row.get(hmeres_col, 0)) if hmeres_col in row.index else 0
+        perigrafi_val = str(row.get(perigrafi_col, "")).strip() if perigrafi_col in row.index else ""
         is_total = any(str(v).strip().startswith("Σύνολο") for v in row.values)
         tr_cls = ' class="total-row"' if is_total else ""
-        data_attrs = f' data-paketo="{html_mod.escape(paketo_val)}" data-tameio="{html_mod.escape(tameio_val)}" data-apo="{html_mod.escape(apo_val)}" data-eos="{html_mod.escape(eos_val)}" data-hmeres="{int(hmeres_raw)}"'
+        key = tuple(str(row.get(k, '')).strip() for k in group_keys)
+        dk_vals = dk_map.get(key, {})
+        dk_attrs = " ".join(f'data-{c}="{dk_vals.get(c, 0)}"' for c in dk_cols)
+        data_attrs = f' data-paketo="{html_mod.escape(paketo_val)}" data-tameio="{html_mod.escape(tameio_val)}" data-apo="{html_mod.escape(apo_val)}" data-eos="{html_mod.escape(eos_val)}" data-hmeres="{int(hmeres_raw)}" {dk_attrs}'
         tds = "".join(f"<td>{'' if pd.isna(v) else html_mod.escape(str(v))}</td>" for v in row.values)
         rows_parts.append(f"<tr{tr_cls}{data_attrs}>{tds}</tr>")
     table_body = "".join(rows_parts)
     custom_table = f'<table class="print-table wrap-cells" id="totals-filter-table"><thead><tr>{headers_html}</tr></thead><tbody>{table_body}</tbody></table>'
 
+    raw_records_js = json.dumps(_totals_raw_records_for_js(raw_df)).replace("</script>", "<\\/script>")
+    dk_map_js = json.dumps({"{}|{}".format(k[0], k[1] if len(k) > 1 else ""): v for k, v in dk_map.items()}).replace("</script>", "<\\/script>")
+    desc_map_js = json.dumps(desc_map or {}).replace("</script>", "<\\/script>")
+
+    calcs_panel = '''
+    <div id="date-key-calcs" class="date-key-panel">
+      <h3 class="date-key-title">Σημαντικά διαστήματα</h3>
+      <p class="date-key-desc">Ενημερώνονται αυτόματα με βάση τα επιλεγμένα πακέτα κάλυψης.</p>
+      <div class="date-key-grid">
+        <div class="date-key-item"><span class="date-key-num">1</span><div><div class="date-key-label">Ημέρες από 1/1/2002 έως σήμερα</div><div class="date-key-value" id="calc-1">—</div></div></div>
+        <div class="date-key-item"><span class="date-key-num">2</span><div><div class="date-key-label">Μήνες από 1/1/2002 έως σήμερα (ημέρες / 25)</div><div class="date-key-value" id="calc-2">—</div></div></div>
+        <div class="date-key-item"><span class="date-key-num">3</span><div><div class="date-key-label">Συνολικές ημέρες τα τελευταία 5 ημερολογιακά έτη από σήμερα</div><div class="date-key-value" id="calc-3">—</div></div></div>
+        <div class="date-key-item"><span class="date-key-num">4</span><div><div class="date-key-label">Συνολικές ημέρες τα τελευταία 5 ημερολογιακά έτη από το τελευταίο έτος</div><div class="date-key-value" id="calc-4">—</div></div></div>
+        <div class="date-key-item"><span class="date-key-num">5</span><div><div class="date-key-label">Ημέρες έως 31/12/2014</div><div class="date-key-value" id="calc-5">—</div></div></div>
+        <div class="date-key-item"><span class="date-key-num">6</span><div><div class="date-key-label">Βαρέα τα τελευταία 17 έτη από σήμερα (6205 ημέρες)</div><div class="date-key-value" id="calc-6">—</div></div></div>
+        <div class="date-key-item"><span class="date-key-num">7a</span><div><div class="date-key-label">Ημέρες έως 31/12/2010</div><div class="date-key-value" id="calc-7a">—</div></div></div>
+        <div class="date-key-item"><span class="date-key-num">7b</span><div><div class="date-key-label">Ημέρες έως 31/12/2011</div><div class="date-key-value" id="calc-7b">—</div></div></div>
+        <div class="date-key-item"><span class="date-key-num">7c</span><div><div class="date-key-label">Ημέρες έως 31/12/2012</div><div class="date-key-value" id="calc-7c">—</div></div></div>
+      </div>
+    </div>
+    '''
+
     js = """
     (function(){
+      var _totalsRawRecords = """ + raw_records_js + """;
+      var _totalsDkMap = """ + dk_map_js + """;
+      var _totalsDescMap = """ + desc_map_js + """;
+
       function parseDate(str) {
         if (!str || str === '') return null;
         var parts = str.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})$/);
@@ -726,29 +896,78 @@ def _build_totals_with_filters(display_summary, warning_types=None):
         var hasSelection = paketoChecked.length > 0;
         var totalHmeres = 0;
 
-        rows.forEach(function(tr) {
-          var paketo = (tr.getAttribute('data-paketo') || '').trim();
-          var tameio = (tr.getAttribute('data-tameio') || '').trim();
-          var apoStr = (tr.getAttribute('data-apo') || '').trim();
-          var eosStr = (tr.getAttribute('data-eos') || '').trim();
+        if (Array.isArray(_totalsRawRecords) && _totalsRawRecords.length > 0) {
+          var filtered = _totalsRawRecords.filter(function(rec) {
+            var pOk = paketoChecked.length === 0 || paketoChecked.indexOf(rec.p) !== -1;
+            var tOk = tameioChecked.length === 0 || tameioChecked.indexOf(rec.t) !== -1;
+            if (!pOk || !tOk) return false;
+            var recApo = parseDate(rec.apo);
+            var recEos = parseDate(rec.eos);
+            if (!recApo || !recEos) return false;
+            if (apoDate && recEos < apoDate) return false;
+            if (eosDate && recApo > eosDate) return false;
+            return true;
+          });
+          var groups = {};
+          filtered.forEach(function(rec) {
+            var key = rec.p + '|' + rec.t;
+            if (!groups[key]) groups[key] = { p: rec.p, t: rec.t, apo: rec.apo, eos: rec.eos, h: 0 };
+            var g = groups[key];
+            g.h += rec.h;
+            if (rec.apo && (!g.apo || parseDate(rec.apo) < parseDate(g.apo))) g.apo = rec.apo;
+            if (rec.eos && (!g.eos || parseDate(rec.eos) > parseDate(g.eos))) g.eos = rec.eos;
+          });
+          var groupList = Object.keys(groups).map(function(k) { return groups[k]; });
+          groupList.forEach(function(g) { totalHmeres += g.h; });
 
-          var paketoOk = paketoChecked.length === 0 || paketoChecked.indexOf(paketo) !== -1;
-          var tameioOk = tameioChecked.length === 0 || tameioChecked.indexOf(tameio) !== -1;
-
-          var apoRow = parseDate(apoStr);
-          var eosRow = parseDate(eosStr);
-          var rangeOk = true;
-          if (apoDate) rangeOk = rangeOk && eosRow && eosRow >= apoDate;
-          if (eosDate) rangeOk = rangeOk && apoRow && apoRow <= eosDate;
-
-          var visible = paketoOk && tameioOk && rangeOk;
-          tr.style.display = visible ? '' : 'none';
-          if (visible) {
-            var h = parseInt(tr.getAttribute('data-hmeres') || '0', 10);
-            totalHmeres += h;
+          var tbody = document.querySelector('#totals-filter-table tbody');
+          var thead = document.querySelector('#totals-filter-table thead');
+          if (tbody && thead) {
+            var headerCells = thead.querySelectorAll('th');
+            var colCount = headerCells.length;
+            var newRows = [];
+            groupList.forEach(function(g) {
+              var y = Math.floor(g.h / 300);
+              var rem = g.h % 300;
+              var m = Math.floor(rem / 25);
+              var d = Math.round(rem % 25);
+              var desc = (typeof _totalsDescMap === 'object' && _totalsDescMap[g.p]) ? _totalsDescMap[g.p] : '';
+              desc = String(desc).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+              var dk = (typeof _totalsDkMap === 'object' && _totalsDkMap[g.p + '|' + g.t]) ? _totalsDkMap[g.p + '|' + g.t] : {};
+              var dkAttrs = ['dk1','dk3','dk4','dk5','dk6','dk7a','dk7b','dk7c'].map(function(k) { return 'data-' + k + '=\"' + (dk[k] || 0) + '\"'; }).join(' ');
+              var cells = [g.p, g.t, desc, g.apo, g.eos, formatGreekInt(g.h), formatGreekDec(y), formatGreekDec(m), formatGreekDec(d), '—', '—', '—'];
+              var tdHtml = cells.slice(0, colCount).map(function(c) { return '<td>' + (c || '') + '</td>'; }).join('');
+              newRows.push('<tr data-paketo=\"' + (g.p || '').replace(/"/g, '&quot;') + '\" data-tameio=\"' + (g.t || '').replace(/"/g, '&quot;') + '\" data-apo=\"' + (g.apo || '').replace(/"/g, '&quot;') + '\" data-eos=\"' + (g.eos || '').replace(/"/g, '&quot;') + '\" data-hmeres=\"' + g.h + '\" ' + dkAttrs + '>' + tdHtml + '</tr>');
+            });
+            tbody.innerHTML = newRows.join('');
+            rows = tbody.querySelectorAll('tr');
           }
-        });
+        } else {
+          rows.forEach(function(tr) {
+            var paketo = (tr.getAttribute('data-paketo') || '').trim();
+            var tameio = (tr.getAttribute('data-tameio') || '').trim();
+            var apoStr = (tr.getAttribute('data-apo') || '').trim();
+            var eosStr = (tr.getAttribute('data-eos') || '').trim();
 
+            var paketoOk = paketoChecked.length === 0 || paketoChecked.indexOf(paketo) !== -1;
+            var tameioOk = tameioChecked.length === 0 || tameioChecked.indexOf(tameio) !== -1;
+
+            var apoRow = parseDate(apoStr);
+            var eosRow = parseDate(eosStr);
+            var rangeOk = true;
+            if (apoDate) rangeOk = rangeOk && eosRow && eosRow >= apoDate;
+            if (eosDate) rangeOk = rangeOk && apoRow && apoRow <= eosDate;
+
+            var visible = paketoOk && tameioOk && rangeOk;
+            tr.style.display = visible ? '' : 'none';
+            if (visible) {
+              var h = parseInt(tr.getAttribute('data-hmeres') || '0', 10);
+              totalHmeres += h;
+            }
+          });
+        }
+
+        rows = document.querySelectorAll('#totals-filter-table tbody tr');
         var elHmeres = document.getElementById('totals-sum-hmeres');
         var elEti = document.getElementById('totals-sum-eti');
         if (elHmeres && elEti) {
@@ -760,15 +979,68 @@ def _build_totals_with_filters(display_summary, warning_types=None):
             elEti.textContent = totalHmeres > 0 ? formatGreekDec(totalHmeres / 300) : '—';
           }
         }
+
+        // Date-key calculations (pre-computed in Python, stored as data-dk* attributes)
+        var dkKeys = ['dk1','dk3','dk4','dk5','dk6','dk7a','dk7b','dk7c'];
+        var dkSums = {};
+        dkKeys.forEach(function(k) { dkSums[k] = 0; });
+        rows.forEach(function(tr) {
+          if (tr.classList.contains('total-row') || tr.style.display === 'none') return;
+          dkKeys.forEach(function(k) {
+            dkSums[k] += parseInt(tr.getAttribute('data-' + k) || '0', 10);
+          });
+        });
+        function setDkc(id, val) {
+          var el = document.getElementById(id);
+          if (el) el.textContent = hasSelection && val > 0 ? formatGreekInt(val) : '—';
+        }
+        setDkc('calc-1', dkSums.dk1);
+        var el2 = document.getElementById('calc-2');
+        if (el2) el2.textContent = hasSelection && dkSums.dk1 > 0 ? formatGreekDec(dkSums.dk1 / 25) : '—';
+        setDkc('calc-3', dkSums.dk3);
+        setDkc('calc-4', dkSums.dk4);
+        setDkc('calc-5', dkSums.dk5);
+        setDkc('calc-6', dkSums.dk6);
+        setDkc('calc-7a', dkSums.dk7a);
+        setDkc('calc-7b', dkSums.dk7b);
+        setDkc('calc-7c', dkSums.dk7c);
       }
+      if (typeof updateFilterDropdownLabels === 'function') updateFilterDropdownLabels();
 
       document.querySelectorAll('.totals-filters input').forEach(function(inp) {
         inp.addEventListener('change', applyTotalsFilters);
       });
       document.querySelectorAll('.totals-filters input.filter-date').forEach(function(inp) {
         inp.addEventListener('input', applyTotalsFilters);
+        inp.addEventListener('change', applyTotalsFilters);
+      });
+      function updateFilterDropdownLabels() {
+        document.querySelectorAll('.totals-filters .filter-dropdown').forEach(function(dd) {
+          var name = dd.getAttribute('data-filter-name') || '';
+          var trigger = dd.querySelector('.filter-dropdown-trigger');
+          if (!trigger) return;
+          var count = dd.querySelectorAll('input[type="checkbox"]:checked').length;
+          if (count === 0) trigger.textContent = 'Επιλέξτε ' + name + '…';
+          else if (count === 1) trigger.textContent = '1 επιλεγμένο';
+          else trigger.textContent = count + ' επιλεγμένα';
+        });
+      }
+      document.querySelectorAll('.totals-filters .filter-dropdown-trigger').forEach(function(tr) {
+        tr.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var dd = tr.closest('.filter-dropdown');
+          if (dd) dd.classList.toggle('open');
+          tr.setAttribute('aria-expanded', dd && dd.classList.contains('open') ? 'true' : 'false');
+        });
+      });
+      document.addEventListener('click', function() {
+        document.querySelectorAll('.totals-filters .filter-dropdown.open').forEach(function(dd) { dd.classList.remove('open'); dd.querySelector('.filter-dropdown-trigger').setAttribute('aria-expanded', 'false'); });
+      });
+      document.querySelectorAll('.totals-filters .filter-dropdown-panel').forEach(function(panel) {
+        panel.addEventListener('click', function(e) { e.stopPropagation(); });
       });
       applyTotalsFilters();
+      updateFilterDropdownLabels();
     })();
     """
 
@@ -779,6 +1051,7 @@ def _build_totals_with_filters(display_summary, warning_types=None):
       {info_banner}
       {filters_bar}
       {custom_table}
+      {calcs_panel}
       <script>{js}</script>
     </section>
     """
@@ -848,7 +1121,7 @@ if section == "all":
             pass
 
         if not display_summary.empty:
-            totals_html = _build_totals_with_filters(display_summary, warning_types=warning_types)
+            totals_html = _build_totals_with_filters(display_summary, raw_df=df, desc_map=description_map, warning_types=warning_types)
             tab_entries.append(("totals", "Σύνολα", totals_html))
 
         if not final_display_df.empty:
@@ -993,9 +1266,9 @@ if section == "all":
         for i, (tid, label, _) in enumerate(tab_entries)
     )
 
-    # --- Tab panes (με σημείωση εξαίρεσης πάνω δεξιά σε κάθε tab) ---
+    # --- Tab panes (ημείωση εξαίρεσης μόνο στο tab Καταμέτρηση) ---
     tab_panes = "\n".join(
-        f'<div id="pane-{tid}" class="tab-pane{" active" if i == 0 else ""}">{LITE_EXCLUSION_NOTE}{content}</div>'
+        f'<div id="pane-{tid}" class="tab-pane{" active" if i == 0 else ""}">{(LITE_EXCLUSION_NOTE if tid == "count" else "")}{content}</div>'
         for i, (tid, _, content) in enumerate(tab_entries)
     )
 
@@ -1010,10 +1283,10 @@ if section == "all":
             "Σύνολα - Ομαδοποίηση κατά Κλάδο/Πακέτο (και Ταμείο)", display_summary,
             description="Συνοπτική απεικόνιση ανά Κλάδο/Πακέτο Κάλυψης και Ταμείο.", heading_tag="h2"
         )
-    rest_for_print = [LITE_EXCLUSION_NOTE + content for (tid, _, content) in tab_entries[1:] if tid != "totals"]
-    all_sections_print = LITE_EXCLUSION_NOTE + synopsis_print
+    rest_for_print = [(LITE_EXCLUSION_NOTE if tid == "count" else "") + content for (tid, _, content) in tab_entries[1:] if tid != "totals"]
+    all_sections_print = synopsis_print
     if totals_print:
-        all_sections_print += "\n<div class='page-break'></div>\n" + LITE_EXCLUSION_NOTE + totals_print
+        all_sections_print += "\n<div class='page-break'></div>\n" + totals_print
     if rest_for_print:
         all_sections_print += "\n<div class='page-break'></div>\n" + "\n<div class='page-break'></div>\n".join(rest_for_print)
 
@@ -1023,6 +1296,55 @@ if section == "all":
 
     # --- Clean print HTML (all sections, no sidebar, compact) ---
     print_name = f"<div class='prt-name'>{safe_name}</div>" if safe_name else ""
+    # Στυλ εκτύπωσης (ίδια μορφή για συνολική και μεμονωμένη εκτύπωση)
+    print_styles_content = """
+@media print { @page { size: A4 landscape; margin: 8mm; } }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: "Fira Sans", sans-serif; color: #222; margin: 0; padding: 12px 16px; font-size: 11px; line-height: 1.4; background: #ffffff; }
+.prt-name { text-align: center; font-size: 18px; font-weight: 800; margin-bottom: 2px; }
+.prt-title { text-align: center; font-size: 14px; font-weight: 600; color: #555; margin-bottom: 14px; }
+.page-break { page-break-after: always; }
+.print-section { margin-bottom: 16px; }
+.print-section h2 { font-size: 13px; font-weight: 700; color: #111; margin: 0 0 4px 0; padding-bottom: 3px; border-bottom: 1.5px solid #333; }
+.print-description { font-size: 10px; color: #666; font-style: italic; margin: 0 0 6px 0; }
+table.print-table { border-collapse: collapse; width: 100%; font-size: 10px; table-layout: fixed; }
+table.print-table thead th {
+  background: #f3f4f6; border-bottom: 1px solid #bbb; padding: 3px 3px;
+  text-align: left; font-weight: 700; font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+table.print-table tbody td {
+  border-bottom: 0.5px solid #ddd; padding: 2px 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+table.print-table tbody tr:nth-child(even) td { background: #fafafa; }
+table.print-table tbody td:first-child { font-weight: 700; }
+table.print-table tbody tr.total-row td { background: #dbeafe !important; font-weight: 700 !important; border-top: 1px solid #93c5fd; }
+table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { white-space: normal; word-break: break-word; }
+.year-section { margin-bottom: 10px; }
+.year-heading { font-size: 12px; font-weight: 800; padding: 4px 0 2px 0; border-bottom: 1.5px solid #6f42c1; margin-bottom: 3px; }
+.print-disclaimer { font-size: 9px; color: #888; margin-top: 16px; padding-top: 8px; border-top: 1px solid #ddd; line-height: 1.4; }
+.print-disclaimer strong { color: #444; }
+.lite-exclusion-note { text-align: right; font-size: 9px; color: #64748b; font-style: italic; margin-bottom: 4px; }
+.tl-container { position: relative; padding-bottom: 28px; }
+.tl-row { display: flex; align-items: center; margin-bottom: 4px; min-height: 16px; }
+.tl-label { width: 140px; min-width: 140px; font-size: 8px; font-weight: 600; color: #334155; text-align: right; padding-right: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-label-gap { color: #dc2626; }
+.tl-track { position: relative; flex: 1; height: 14px; background: #f1f5f9; border-radius: 3px; }
+.tl-bar { position: absolute; top: 1px; height: 12px; border-radius: 2px; opacity: 0.85; }
+.tl-bar:hover { opacity: 1; box-shadow: 0 0 4px rgba(0,0,0,0.3); z-index: 2; }
+.tl-gap { background: repeating-linear-gradient(45deg, #fca5a5, #fca5a5 2px, #fecaca 2px, #fecaca 4px) !important; border: 1px solid #ef4444; opacity: 0.7; }
+.tl-axis { position: relative; height: 20px; margin-left: 148px; margin-top: 2px; border-top: 1px solid #cbd5e1; }
+.tl-tick { position: absolute; top: 2px; font-size: 7px; color: #64748b; transform: translateX(-50%); }
+.tl-tick::before { content: ''; position: absolute; top: -4px; left: 50%; width: 1px; height: 4px; background: #cbd5e1; }
+.tl-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; font-size: 8px; }
+.tl-legend-item { display: inline-flex; align-items: center; gap: 3px; color: #334155; }
+.tl-legend-dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.audit-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.audit-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; }
+.audit-card-header { font-size: 11px; font-weight: 700; color: #334155; margin-bottom: 6px; }
+.audit-card-result { font-size: 13px; font-weight: 600; color: #111; }
+.audit-card-details { font-size: 10px; color: #64748b; line-height: 1.4; }
+"""
     print_html = f"""<!DOCTYPE html>
 <html lang="el">
 <head>
@@ -1030,47 +1352,7 @@ if section == "all":
 <title>ATLAS Lite - Εκτύπωση</title>
 <link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
-@media print {{ @page {{ size: A4 landscape; margin: 8mm; }} }}
-* {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{ font-family: "Fira Sans", sans-serif; color: #222; margin: 0; padding: 12px 16px; font-size: 11px; line-height: 1.4; background: #ffffff; }}
-.prt-name {{ text-align: center; font-size: 18px; font-weight: 800; margin-bottom: 2px; }}
-.prt-title {{ text-align: center; font-size: 14px; font-weight: 600; color: #555; margin-bottom: 14px; }}
-.page-break {{ page-break-after: always; }}
-.print-section {{ margin-bottom: 16px; }}
-.print-section h2 {{ font-size: 13px; font-weight: 700; color: #111; margin: 0 0 4px 0; padding-bottom: 3px; border-bottom: 1.5px solid #333; }}
-.print-description {{ font-size: 10px; color: #666; font-style: italic; margin: 0 0 6px 0; }}
-table.print-table {{ border-collapse: collapse; width: 100%; font-size: 10px; table-layout: fixed; }}
-table.print-table thead th {{
-  background: #f3f4f6; border-bottom: 1px solid #bbb; padding: 3px 3px;
-  text-align: left; font-weight: 700; font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}}
-table.print-table tbody td {{
-  border-bottom: 0.5px solid #ddd; padding: 2px 3px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}}
-table.print-table tbody tr:nth-child(even) td {{ background: #fafafa; }}
-table.print-table tbody td:first-child {{ font-weight: 700; }}
-table.print-table tbody tr.total-row td {{ background: #dbeafe !important; font-weight: 700 !important; border-top: 1px solid #93c5fd; }}
-table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td {{ white-space: normal; word-break: break-word; }}
-.year-section {{ margin-bottom: 10px; }}
-.year-heading {{ font-size: 12px; font-weight: 800; padding: 4px 0 2px 0; border-bottom: 1.5px solid #6f42c1; margin-bottom: 3px; }}
-.print-disclaimer {{ font-size: 9px; color: #888; margin-top: 16px; padding-top: 8px; border-top: 1px solid #ddd; line-height: 1.4; }}
-.print-disclaimer strong {{ color: #444; }}
-.lite-exclusion-note {{ text-align: right; font-size: 9px; color: #64748b; font-style: italic; margin-bottom: 4px; }}
-.tl-container {{ position: relative; padding-bottom: 28px; }}
-.tl-row {{ display: flex; align-items: center; margin-bottom: 4px; min-height: 16px; }}
-.tl-label {{ width: 140px; min-width: 140px; font-size: 8px; font-weight: 600; color: #334155; text-align: right; padding-right: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-.tl-label-gap {{ color: #dc2626; }}
-.tl-track {{ position: relative; flex: 1; height: 14px; background: #f1f5f9; border-radius: 3px; }}
-.tl-bar {{ position: absolute; top: 1px; height: 12px; border-radius: 2px; opacity: 0.85; }}
-.tl-bar:hover {{ opacity: 1; box-shadow: 0 0 4px rgba(0,0,0,0.3); z-index: 2; }}
-.tl-gap {{ background: repeating-linear-gradient(45deg, #fca5a5, #fca5a5 2px, #fecaca 2px, #fecaca 4px) !important; border: 1px solid #ef4444; opacity: 0.7; }}
-.tl-axis {{ position: relative; height: 20px; margin-left: 148px; margin-top: 2px; border-top: 1px solid #cbd5e1; }}
-.tl-tick {{ position: absolute; top: 2px; font-size: 7px; color: #64748b; transform: translateX(-50%); }}
-.tl-tick::before {{ content: ''; position: absolute; top: -4px; left: 50%; width: 1px; height: 4px; background: #cbd5e1; }}
-.tl-legend {{ display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; font-size: 8px; }}
-.tl-legend-item {{ display: inline-flex; align-items: center; gap: 3px; color: #334155; }}
-.tl-legend-dot {{ width: 10px; height: 10px; border-radius: 2px; display: inline-block; }}
+{print_styles_content}
 </style>
 </head>
 <body onload="window.print();">
@@ -1084,8 +1366,11 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td {{ 
 
     # Escape print HTML for embedding in JS
     print_js = json.dumps(print_html).replace("</script>", "<\\/script>")
+    print_styles_js = json.dumps(print_styles_content).replace("</script>", "<\\/script>")
     dl_safe = re.sub(r'[<>:"/\\|?*]', '', (client_value or "Αναφορά").strip())[:60].strip() or "Αναφορά"
-    download_filename_js = json.dumps(f"ATLAS_Lite_{dl_safe}.html")
+    download_filename_js = json.dumps(f"{dl_safe} - Atlas Lite.html")
+    client_name_js = json.dumps(client_name.strip() if client_name.strip() else "").replace("</script>", "<\\/script>")
+    apodoxes_descriptions_js = json.dumps(APODOXES_DESCRIPTIONS).replace("</script>", "<\\/script>")
 
     # --- Interactive viewer HTML (sidebar + tabs) ---
     html_doc = f"""<!DOCTYPE html>
@@ -1093,7 +1378,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td {{ 
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ATLAS Lite - Αναφορά</title>
+<title>ATLAS Lite - Προεργασία φακέλου</title>
 <link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
@@ -1155,6 +1440,91 @@ table.print-table tbody tr:hover td {{ background: #f8fafc; }}
 table.print-table tbody td:first-child {{ font-weight: 700; color: #1e293b; }}
 table.print-table tbody tr.total-row td {{ background: #dbeafe !important; color: #1e293b; font-weight: 700 !important; border-top: 1px solid #93c5fd; }}
 table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td {{ white-space: normal; word-break: break-word; }}
+
+/* Table fullscreen + print section */
+.table-container {{ position: relative; }}
+.print-section {{ position: relative; }}
+.section-actions {{
+  position: absolute; top: 6px; right: 6px; z-index: 5;
+  display: flex; align-items: center; gap: 8px;
+  opacity: 0.85; transition: opacity 0.2s;
+}}
+.table-container:hover .section-actions, .print-section:hover > .section-actions {{ opacity: 1; }}
+.btn-fs, .btn-print-tab {{
+  width: 40px; height: 40px; border-radius: 8px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; transition: opacity 0.2s, background 0.15s, transform 0.15s;
+  font-size: 18px; line-height: 1;
+}}
+.btn-fs {{
+  background: #e0e7ff; border-color: #a5b4fc; color: #4338ca;
+}}
+.btn-fs:hover {{ background: #6366f1; color: #fff; border-color: #4f46e5; transform: scale(1.1); }}
+.btn-print-tab {{
+  background: #f0fdf4; border-color: #86efac; color: #15803d;
+}}
+.btn-print-tab:hover {{ background: #22c55e; color: #fff; border-color: #16a34a; transform: scale(1.1); }}
+.table-fullscreen .section-actions {{ display: none; }}
+.table-fullscreen {{
+  position: fixed; inset: 0; z-index: 10000; background: #fff;
+  display: flex; flex-direction: column;
+}}
+.table-fullscreen .fs-toolbar {{
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 24px; border-bottom: 2px solid #e2e8f0; background: #f8fafc; flex-shrink: 0;
+}}
+.table-fullscreen .fs-title {{ font-size: 16px; font-weight: 700; color: #1e293b; }}
+.table-fullscreen .fs-toolbar-actions {{ display: flex; align-items: center; gap: 10px; }}
+.table-fullscreen .fs-print-btn {{
+  background: #dcfce7; border: 1px solid #86efac; border-radius: 8px;
+  padding: 8px 16px; font-size: 14px; font-weight: 600; color: #15803d;
+  cursor: pointer; display: flex; align-items: center; gap: 6px;
+  transition: background 0.15s, color 0.15s;
+}}
+.table-fullscreen .fs-print-btn:hover {{ background: #22c55e; color: #fff; border-color: #16a34a; }}
+.table-fullscreen .fs-close {{
+  background: #fee2e2; border: 1px solid #fca5a5; border-radius: 8px;
+  width: 38px; height: 38px; cursor: pointer; display: flex; align-items: center;
+  justify-content: center; font-size: 20px; color: #dc2626; transition: all 0.15s;
+}}
+.table-fullscreen .fs-close:hover {{ background: #dc2626; color: #fff; }}
+.table-fullscreen .fs-body {{
+  flex: 1; overflow: auto; padding: 16px 24px;
+}}
+.table-fullscreen .fs-body table.print-table {{
+  table-layout: auto; font-size: 14px;
+}}
+.table-fullscreen .fs-body table.print-table colgroup {{ display: table-column-group; }}
+.table-fullscreen .fs-body table.print-table colgroup col {{ width: auto !important; }}
+.table-fullscreen .fs-body table.print-table thead th {{ padding: 12px 14px; font-size: 13px; position: sticky; top: 0; z-index: 2; background: #f8fafc; }}
+.table-fullscreen .fs-body table.print-table tbody td {{ padding: 10px 14px; }}
+/* Custom tooltip για Τύπο Αποδοχών (καταμέτρηση) */
+.apodoxes-tooltip {{
+  position: fixed;
+  z-index: 100000;
+  max-width: 340px;
+  padding: 14px 18px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: #1e293b;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.14), 0 4px 16px rgba(99,102,241,0.08);
+  border: 1px solid #e2e8f0;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease, transform 0.15s ease;
+  transform: translateY(4px);
+}}
+.apodoxes-tooltip.visible {{
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}}
+.has-apodoxes-tooltip {{ cursor: help; }}
+@media print {{ .section-actions {{ display: none !important; }} .btn-fs {{ display: none !important; }} .btn-print-tab {{ display: none !important; }} .apodoxes-tooltip {{ display: none !important; }} }}
+
 .year-section {{ margin-bottom: 20px; }}
 .year-heading {{ font-size: 15px; font-weight: 800; color: #1e293b; padding: 8px 0 4px 0; border-bottom: 2px solid #6366f1; margin-bottom: 6px; }}
 .print-disclaimer {{ font-size: 12px; color: #64748b; margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; line-height: 1.6; }}
@@ -1194,7 +1564,25 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td {{ 
 .totals-filters .filter-cb {{ display: flex; align-items: center; gap: 10px; font-size: 16px; color: #334155; cursor: pointer; white-space: nowrap; line-height: 1.4; }}
 .totals-filters .filter-cb input[type="checkbox"] {{ width: 20px; height: 20px; min-width: 20px; min-height: 20px; cursor: pointer; accent-color: #6366f1; }}
 .totals-filters .filter-date {{ padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 16px; }}
-@media print {{ .totals-filters {{ display: none !important; }} .totals-info-bar {{ display: none !important; }} .lite-exclusion-note {{ font-size: 9px; margin-bottom: 4px; }} }}
+.totals-filters .filter-dropdown {{ position: relative; }}
+.totals-filters .filter-dropdown-trigger {{ display: inline-flex; align-items: center; min-width: 200px; padding: 10px 14px; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 16px; color: #334155; cursor: pointer; user-select: none; }}
+.totals-filters .filter-dropdown-trigger:hover {{ border-color: #6366f1; }}
+.totals-filters .filter-dropdown-trigger::after {{ content: ''; margin-left: auto; border: 6px solid transparent; border-top-color: #64748b; }}
+.totals-filters .filter-dropdown-panel {{ display: none; position: absolute; top: 100%; left: 0; margin-top: 4px; min-width: 280px; max-height: 320px; overflow-y: auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.12); z-index: 100; }}
+.totals-filters .filter-dropdown.open .filter-dropdown-panel {{ display: block; }}
+.totals-filters .filter-dropdown.open .filter-dropdown-trigger {{ border-color: #6366f1; }}
+.totals-filters .filter-dropdown .filter-options {{ max-height: 280px; flex-direction: column; flex-wrap: nowrap; padding: 8px; }}
+.totals-filters .filter-dropdown .filter-cb {{ white-space: normal; }}
+/* Date-key calculations panel */
+.date-key-panel {{ margin-top: 24px; padding: 20px 24px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; }}
+.date-key-title {{ font-size: 16px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }}
+.date-key-desc {{ font-size: 12px; color: #64748b; margin-bottom: 16px; font-style: italic; }}
+.date-key-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }}
+.date-key-item {{ display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; }}
+.date-key-num {{ width: 30px; height: 30px; background: #6366f1; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }}
+.date-key-label {{ font-size: 13px; color: #475569; line-height: 1.3; }}
+.date-key-value {{ font-size: 20px; font-weight: 800; color: #1e293b; margin-top: 2px; }}
+@media print {{ .totals-filters {{ display: none !important; }} .totals-info-bar {{ display: none !important; }} .date-key-panel {{ break-inside: avoid; }} .lite-exclusion-note {{ font-size: 9px; margin-bottom: 4px; }} }}
 
 /* Copyable values */
 .copy-target {{ cursor: pointer; position: relative; transition: background-color 0.15s; }}
@@ -1218,7 +1606,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td {{ 
 <body>
 <div class="app-layout">
   <nav class="sidebar">
-    <div class="sidebar-header">ATLAS lite<small>Αναφορά</small></div>
+    <div class="sidebar-header">ATLAS lite<small>Προεργασία φακέλου</small></div>
     <div class="sidebar-nav">{nav_items}</div>
     <div class="sidebar-footer">
       <button type="button" class="btn-action btn-save" onclick="downloadFullHtml();">Πλήρης Αποθήκευση</button>
@@ -1234,7 +1622,64 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td {{ 
   </main>
 </div>
 <div id="toast-container"></div>
+<div id="apodoxes-tooltip" class="apodoxes-tooltip" aria-hidden="true"></div>
 <script>
+var _apodoxesDescriptions = {apodoxes_descriptions_js};
+function applyApodoxesTooltips() {{
+  var pane = document.getElementById('pane-count');
+  if (!pane) return;
+  var tooltipEl = document.getElementById('apodoxes-tooltip');
+  if (!tooltipEl) {{
+    tooltipEl = document.createElement('div');
+    tooltipEl.id = 'apodoxes-tooltip';
+    tooltipEl.className = 'apodoxes-tooltip';
+    tooltipEl.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(tooltipEl);
+  }}
+  function showTip(td, text) {{
+    if (!text) return;
+    tooltipEl.textContent = text;
+    tooltipEl.classList.add('visible');
+    tooltipEl.setAttribute('aria-hidden', 'false');
+    tooltipEl.offsetHeight;
+    var rect = td.getBoundingClientRect();
+    var tipRect = tooltipEl.getBoundingClientRect();
+    var left = rect.left + (rect.width / 2) - (tipRect.width / 2);
+    var top = rect.top - tipRect.height - 10;
+    if (top < 8) {{ top = rect.bottom + 10; }}
+    left = Math.max(12, Math.min(left, window.innerWidth - tipRect.width - 12));
+    tooltipEl.style.left = left + 'px';
+    tooltipEl.style.top = top + 'px';
+  }}
+  function hideTip() {{
+    tooltipEl.classList.remove('visible');
+    tooltipEl.setAttribute('aria-hidden', 'true');
+  }}
+  pane.querySelectorAll('table.print-table').forEach(function(tbl) {{
+    var headers = tbl.querySelectorAll('thead th');
+    var colIndex = -1;
+    for (var i = 0; i < headers.length; i++) {{
+      var t = (headers[i].textContent || '').trim();
+      if (t.indexOf('ΑΠΟΔΟΧΩΝ') !== -1 || t.indexOf('Τύπος Αποδοχών') !== -1) {{ colIndex = i; break; }}
+    }}
+    if (colIndex < 0) return;
+    tbl.querySelectorAll('tbody tr').forEach(function(tr) {{
+      var td = tr.querySelectorAll('td')[colIndex];
+      if (td) {{
+        var code = (td.textContent || '').trim();
+        var key = code.length === 1 && /^\\d$/.test(code) ? '0' + code : code;
+        var desc = _apodoxesDescriptions[key] || _apodoxesDescriptions[code] || '';
+        if (desc) {{
+          td.classList.add('has-apodoxes-tooltip');
+          td.setAttribute('data-tooltip', desc);
+          td.removeAttribute('title');
+          td.addEventListener('mouseenter', function() {{ showTip(td, desc); }});
+          td.addEventListener('mouseleave', hideTip);
+        }}
+      }}
+    }});
+  }});
+}}
 function showTab(tabId) {{
   document.querySelectorAll('.tab-pane').forEach(function(p) {{ p.classList.remove('active'); }});
   document.querySelectorAll('.nav-item').forEach(function(a) {{ a.classList.remove('active'); }});
@@ -1242,8 +1687,133 @@ function showTab(tabId) {{
   var link = document.querySelector('.nav-item[data-tab="' + tabId + '"]');
   if (pane) pane.classList.add('active');
   if (link) link.classList.add('active');
+  if (tabId === 'count') applyApodoxesTooltips();
 }}
+document.addEventListener('DOMContentLoaded', function() {{ applyApodoxesTooltips(); }});
+// --- Εκτύπωση μόνο ενός section (ίδιο στυλ με συνολική εκτύπωση) ---
+function buildSinglePrintDoc(title, bodyContent) {{
+  var styles = typeof _printStyles === 'string' ? _printStyles : '';
+  var name = (typeof _clientName === 'string' ? _clientName : '').trim();
+  var fullTitle = (name ? name + ' - ' + (title || '') + ' - ' : (title || 'ΑΤΛΑΣ Lite') + ' - ') + 'Atlas Lite';
+  var safeTitle = fullTitle.replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  var safeName = name.replace(/</g, '&lt;').replace(/&/g, '&amp;');
+  var nameBlock = name ? '<div class="prt-name">' + safeName + '</div>' : '';
+  return '<!DOCTYPE html><html lang="el"><head><meta charset="utf-8"><title>' + safeTitle + '</title>' +
+    '<link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700&display=swap" rel="stylesheet">' +
+    '<style>' + styles + '</style></head><body>' +
+    nameBlock +
+    '<div class="prt-title">Ασφαλιστικό Βιογραφικό ATLAS</div>' +
+    bodyContent +
+    '<div style="margin-top:12px;font-size:9px;color:#888;text-align:left;">© Syntaksi Pro - my advisor</div></body></html>';
+}}
+function printSection(el) {{
+  var source = el.classList && el.classList.contains('print-section') ? el : (el.closest && el.closest('.print-section') || el);
+  var clone = source.cloneNode(true);
+  clone.querySelectorAll('.section-actions, .btn-fs, .btn-print-tab').forEach(function(n) {{ n.remove(); }});
+  var title = (clone.querySelector('h2') && clone.querySelector('h2').textContent) || 'ΑΤΛΑΣ Lite';
+  var bodyContent;
+  var totalsTable = clone.querySelector('#totals-filter-table');
+  if (totalsTable) {{
+    var h2Text = (clone.querySelector('h2') && clone.querySelector('h2').textContent) || 'Σύνολα';
+    bodyContent = '<div class="print-section"><h2>' + h2Text.replace(/</g, '&lt;') + '</h2>' + totalsTable.outerHTML + '</div>';
+  }} else {{
+    bodyContent = clone.outerHTML;
+  }}
+  var printDoc = buildSinglePrintDoc(title, bodyContent);
+  var w = window.open('', '_blank');
+  w.document.write(printDoc);
+  w.document.close();
+  w.focus();
+  setTimeout(function() {{ w.print(); w.close(); }}, 400);
+}}
+// --- Table fullscreen ---
+function openTableFs(el) {{
+  var overlay = document.createElement('div');
+  overlay.className = 'table-fullscreen';
+  overlay.id = 'fs-overlay';
+
+  var section = el.classList.contains('print-section') ? el : el.closest('.print-section');
+  var source = section || el;
+  var heading = source.querySelector ? source.querySelector('h2') : null;
+  var titleText = heading ? heading.textContent : 'Πίνακας';
+
+  var hasInteractive = source.querySelector && source.querySelector('script');
+
+  var toolbar = document.createElement('div');
+  toolbar.className = 'fs-toolbar';
+  toolbar.innerHTML = '<span class="fs-title">' + titleText + '</span>';
+  var actions = document.createElement('div');
+  actions.className = 'fs-toolbar-actions';
+  var printBtn = document.createElement('button');
+  printBtn.className = 'fs-print-btn';
+  printBtn.innerHTML = '🖨 Εκτύπωση';
+  printBtn.title = 'Εκτύπωση μόνο αυτής της καρτέλας';
+  printBtn.onclick = function() {{
+    var bodyEl = overlay.querySelector('.fs-body');
+    if (bodyEl) {{
+      var clone = bodyEl.cloneNode(true);
+      clone.querySelectorAll('.section-actions, .btn-fs, .btn-print-tab').forEach(function(n) {{ n.remove(); }});
+      var totalsTable = clone.querySelector('#totals-filter-table');
+      var bodyContent = totalsTable
+        ? '<div class="print-section"><h2>' + (titleText.replace(/</g, '&lt;') || 'Σύνολα') + '</h2>' + totalsTable.outerHTML + '</div>'
+        : clone.innerHTML;
+      var printDoc = buildSinglePrintDoc(titleText, bodyContent);
+      var w = window.open('', '_blank');
+      w.document.write(printDoc);
+      w.document.close();
+      w.focus();
+      setTimeout(function() {{ w.print(); w.close(); }}, 400);
+    }}
+  }};
+  actions.appendChild(printBtn);
+  var closeBtn = document.createElement('button');
+  closeBtn.className = 'fs-close';
+  closeBtn.innerHTML = '✕';
+  closeBtn.title = 'Κλείσιμο (Esc)';
+  closeBtn.onclick = closeTableFs;
+  actions.appendChild(closeBtn);
+  toolbar.appendChild(actions);
+
+  var body = document.createElement('div');
+  body.className = 'fs-body';
+
+  if (hasInteractive) {{
+    var placeholder = document.createElement('div');
+    placeholder.id = 'fs-placeholder';
+    placeholder.style.display = 'none';
+    source.parentNode.insertBefore(placeholder, source);
+    body.appendChild(source);
+    overlay._fsSource = source;
+    overlay._fsPlaceholder = placeholder;
+  }} else {{
+    body.appendChild(source.cloneNode(true));
+  }}
+
+  overlay.appendChild(toolbar);
+  overlay.appendChild(body);
+  document.body.appendChild(overlay);
+  document.body.style.overflow = 'hidden';
+}}
+
+function closeTableFs() {{
+  var overlay = document.getElementById('fs-overlay');
+  if (overlay) {{
+    if (overlay._fsSource && overlay._fsPlaceholder) {{
+      overlay._fsPlaceholder.parentNode.insertBefore(overlay._fsSource, overlay._fsPlaceholder);
+      overlay._fsPlaceholder.remove();
+    }}
+    overlay.remove();
+    document.body.style.overflow = '';
+  }}
+}}
+
+document.addEventListener('keydown', function(e) {{
+  if (e.key === 'Escape') closeTableFs();
+}});
+
 var _printHtml = {print_js};
+var _printStyles = {print_styles_js};
+var _clientName = {client_name_js};
 var _downloadFilename = {download_filename_js};
 function openPrint() {{
   var blob = new Blob([_printHtml], {{ type: 'text/html;charset=utf-8' }});
@@ -1294,10 +1864,50 @@ document.addEventListener('click', function(e) {{
   }}
 }});
 
-// Add copy-target class to relevant elements
 document.addEventListener('DOMContentLoaded', function() {{
-  // 1. Στήλες πινάκων που θέλουμε να είναι clickable
-  // Μπορείτε να προσθέσετε ή να αφαιρέσετε ονόματα στηλών εδώ
+  // Κουμπιά Εκτύπωση + Πλήρης οθόνη ανά print-section
+  document.querySelectorAll('.print-section').forEach(function(sec) {{
+    var actions = document.createElement('div');
+    actions.className = 'section-actions';
+    var printBtn = document.createElement('button');
+    printBtn.className = 'btn-print-tab';
+    printBtn.innerHTML = '🖨';
+    printBtn.title = 'Εκτύπωση μόνο αυτής της καρτέλας';
+    printBtn.onclick = function(e) {{ e.stopPropagation(); printSection(sec); }};
+    var fsBtn = document.createElement('button');
+    fsBtn.className = 'btn-fs';
+    fsBtn.innerHTML = '⛶';
+    fsBtn.title = 'Πλήρης οθόνη';
+    fsBtn.onclick = function(e) {{ e.stopPropagation(); openTableFs(sec); }};
+    actions.appendChild(printBtn);
+    actions.appendChild(fsBtn);
+    sec.appendChild(actions);
+  }});
+  // Standalone tables not inside a .print-section
+  document.querySelectorAll('table.print-table').forEach(function(tbl) {{
+    if (tbl.closest('.print-section')) return;
+    var wrapper = document.createElement('div');
+    wrapper.className = 'table-container';
+    tbl.parentNode.insertBefore(wrapper, tbl);
+    wrapper.appendChild(tbl);
+    var actions = document.createElement('div');
+    actions.className = 'section-actions';
+    var printBtn = document.createElement('button');
+    printBtn.className = 'btn-print-tab';
+    printBtn.innerHTML = '🖨';
+    printBtn.title = 'Εκτύπωση μόνο αυτής της καρτέλας';
+    printBtn.onclick = function(e) {{ e.stopPropagation(); printSection(tbl); }};
+    var fsBtn = document.createElement('button');
+    fsBtn.className = 'btn-fs';
+    fsBtn.innerHTML = '⛶';
+    fsBtn.title = 'Πλήρης οθόνη';
+    fsBtn.onclick = function(e) {{ e.stopPropagation(); openTableFs(tbl); }};
+    actions.appendChild(printBtn);
+    actions.appendChild(fsBtn);
+    wrapper.appendChild(actions);
+  }});
+
+  // Copy-target: στήλες πινάκων clickable
   var targetColumns = [
     'Συνολικές ημέρες',
     'Μικτές αποδοχές',
