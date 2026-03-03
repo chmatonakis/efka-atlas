@@ -556,6 +556,13 @@ def get_print_disclaimer_html() -> str:
         "</div>"
     )
 
+# Σημείωση για καρτέλα/εκτύπωση Κενά (κενά και διαστήματα χωρίς ημέρες)
+GAPS_NOTE = (
+    "Τα διαστήματα χωρίς ημέρες ασφάλισης αναφέρονται αυτούσια στο αρχείο ΑΤΛΑΣ χωρίς ημέρες ασφάλισης. "
+    "Ωστόσο, δεν αποτελούν εξ ορισμού κενό διάστημα καθώς μπορεί να επικαλύπτονται μερικώς από άλλες εγγραφές που να έχουν ημέρες ασφάλισης. "
+    "Απαιτείται λεπτομερής έλεγχος."
+)
+
 def build_print_section_html(
     title: str,
     dataframe: pd.DataFrame,
@@ -805,6 +812,7 @@ def build_print_html(
     extra_group_cols: list[str] | None = None,
     bold_columns: list[str] | None = None,
     col_width_overrides: dict[str, str] | None = None,
+    footer_note: str | None = None,
 ) -> str:
     client_name = (client_name or '').strip()
     client_amka = (client_amka or '').strip()
@@ -825,7 +833,10 @@ def build_print_html(
             bold_columns=bold_columns, col_width_overrides=col_width_overrides
         )
     disclaimer_html = get_print_disclaimer_html()
-
+    footer_note_html = (
+        f"<p class='print-description' style='margin-top:1.25em; padding:0.5em 0; border-top:1px solid #e2e8f0; font-size:0.95em;'>{html.escape(footer_note)}</p>"
+        if footer_note else ""
+    )
     body_html = (
         f"{name_html}"
         f"{amka_html}"
@@ -834,6 +845,7 @@ def build_print_html(
         f"{description_html}"
         f"{filters_html}"
         f"{table_html}"
+        f"{footer_note_html}"
         f"{disclaimer_html}"
     )
     return wrap_print_html(title, body_html, auto_print, scale)
@@ -851,6 +863,7 @@ def render_print_button(
     extra_group_cols: list[str] | None = None,
     bold_columns: list[str] | None = None,
     col_width_overrides: dict[str, str] | None = None,
+    footer_note: str | None = None,
 ) -> None:
     col_spacer, col_btn = st.columns([1, 0.12])
     with col_btn:
@@ -878,6 +891,7 @@ def render_print_button(
                 extra_group_cols=extra_group_cols,
                 bold_columns=bold_columns,
                 col_width_overrides=col_width_overrides,
+                footer_note=footer_note,
             )
 
             # Δημιουργία JavaScript που θα ανοίξει νέο tab με auto-print
@@ -4817,7 +4831,7 @@ def show_results_page(df, filename):
     with tab_more:
         if st.session_state.get('show_complex_file_warning'):
             st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
-        sub_tab_main, sub_tab_annex = st.tabs(["Κύρια Δεδομένα", "Παράρτημα"])
+        sub_tab_main, sub_tab_apozimiosi, sub_tab_annex = st.tabs(["Κύρια Δεδομένα", "Αποζημίωση", "Παράρτημα"])
         with sub_tab_main:
             # Κύρια δεδομένα (χωρίς τις στήλες από τελευταίες σελίδες)
             main_columns = [col for col in df.columns if col not in ['Φορέας', 'Κωδικός Κλάδων / Πακέτων Κάλυψης', 'Περιγραφή', 'Κωδικός Τύπου Αποδοχών']]
@@ -6411,7 +6425,8 @@ def show_results_page(df, filename):
                     "print_gaps",
                     "Κενά Διαστήματα",
                     gaps_df,
-                    description="Χρονικές περίοδοι όπου δεν βρέθηκε ασφαλιστική κάλυψη μεταξύ των δηλωμένων εγγραφών."
+                    description="Χρονικές περίοδοι όπου δεν βρέθηκε ασφαλιστική κάλυψη μεταξύ των δηλωμένων εγγραφών.",
+                    footer_note=GAPS_NOTE,
                 )
             else:
                 st.success("Καμία κενή περίοδος δεν εντοπίστηκε. Όλα τα διαστήματα είναι συνεχή.")
@@ -6437,8 +6452,15 @@ def show_results_page(df, filename):
                     "print_zero_duration",
                     "Διαστήματα χωρίς ημέρες ασφάλισης",
                     zero_display_df,
-                    description="Εγγραφές που εμφανίζονται στον ΑΤΛΑΣ αλλά χωρίς να συνδέονται με ημέρες ασφάλισης."
+                    description="Εγγραφές που εμφανίζονται στον ΑΤΛΑΣ αλλά χωρίς να συνδέονται με ημέρες ασφάλισης.",
+                    footer_note=GAPS_NOTE,
                 )
+            st.markdown("---")
+            st.markdown(
+                "**Σημείωση:** Τα διαστήματα χωρίς ημέρες ασφάλισης αναφέρονται αυτούσια στο αρχείο ΑΤΛΑΣ χωρίς ημέρες ασφάλισης. "
+                "Ωστόσο, δεν αποτελούν εξ ορισμού κενό διάστημα καθώς μπορεί να επικαλύπτονται μερικώς από άλλες εγγραφές που να έχουν ημέρες ασφάλισης. "
+                "Απαιτείται λεπτομερής έλεγχος."
+            )
         else:
             st.warning("Οι στήλες 'Από' και 'Έως' δεν βρέθηκαν στα δεδομένα.")
     
@@ -7978,6 +8000,390 @@ def show_results_page(df, filename):
                 st.warning("Δεν βρέθηκαν δεδομένα για καταμέτρηση.")
         else:
             st.warning("Λείπουν οι απαραίτητες στήλες (Από, Έως, Ημέρες) για την καταμέτρηση.")
+    
+    with sub_tab_apozimiosi:
+        st.markdown("### Αποζημίωση (μισθωτή ασφάλιση)")
+        st.caption(f"Εξαιρούνται: {excluded_packages_label}")
+
+        apoz_df = df.copy()
+        apoz_df = exclude_unused_packages(apoz_df)
+        required_cols_apoz = ['Από', 'Έως', 'Ημέρες']
+        if 'Τύπος Ασφάλισης' not in apoz_df.columns:
+            apoz_df = apoz_df.assign(**{'Τύπος Ασφάλισης': ''})
+
+        # Φίλτρο μόνο μισθωτή ασφάλιση (όχι μη μισθωτή) — ίδιο κριτήριο με Παράλληλη/ΑΠΔ
+        def is_misthoti(typos):
+            s = str(typos).strip().upper()
+            return 'ΜΙΣΘΩΤΗ' in s and 'ΜΗ ΜΙΣΘΩΤΗ' not in s and not s.startswith('ΜΗ ')
+        apoz_df = apoz_df[apoz_df['Τύπος Ασφάλισης'].apply(is_misthoti)]
+
+        if not apoz_df.empty and all(col in apoz_df.columns for col in required_cols_apoz):
+            # Φίλτρα όπως στην Καταμέτρηση (χωρίς Τύπο Ασφάλισης)
+            with st.container():
+                col1, col2, col3, col4, col5, col6, col7 = st.columns([1.1, 1.0, 1.2, 1.3, 1.1, 0.9, 0.9])
+                with col1:
+                    if 'Ταμείο' in apoz_df.columns:
+                        tameia_opts = sorted(apoz_df['Ταμείο'].dropna().unique().tolist())
+                        sel_apoz_tameia = st.multiselect("Ταμείο:", options=tameia_opts, default=[], key="apoz_filter_tameio", placeholder="")
+                        if sel_apoz_tameia:
+                            apoz_df = apoz_df[apoz_df['Ταμείο'].isin(sel_apoz_tameia)]
+                with col2:
+                    if 'Α-Μ εργοδότη' in apoz_df.columns:
+                        emp_opts = sorted(apoz_df['Α-Μ εργοδότη'].dropna().astype(str).unique().tolist())
+                        sel_apoz_emp = st.multiselect("Α-Μ Εργοδότη:", options=emp_opts, default=[], key="apoz_filter_employer", placeholder="")
+                        if sel_apoz_emp:
+                            apoz_df = apoz_df[apoz_df['Α-Μ εργοδότη'].astype(str).isin(sel_apoz_emp)]
+                with col3:
+                    if 'Κλάδος/Πακέτο Κάλυψης' in apoz_df.columns:
+                        klados_codes = sorted(apoz_df['Κλάδος/Πακέτο Κάλυψης'].dropna().unique().tolist())
+                        klados_opts_apoz = []
+                        klados_map_apoz = {}
+                        for code in klados_codes:
+                            try:
+                                dmap = description_map
+                            except NameError:
+                                dmap = {}
+                            if code in dmap:
+                                lbl = f"{code} - {dmap[code]}"
+                                klados_opts_apoz.append(lbl)
+                                klados_map_apoz[lbl] = code
+                            else:
+                                klados_opts_apoz.append(code)
+                                klados_map_apoz[code] = code
+                        sel_apoz_klados = st.multiselect("Κλάδος/Πακέτο:", options=klados_opts_apoz, default=[], key="apoz_filter_klados", placeholder="")
+                        if sel_apoz_klados:
+                            sel_codes_apoz = [klados_map_apoz.get(o, o) for o in sel_apoz_klados]
+                            apoz_df = apoz_df[apoz_df['Κλάδος/Πακέτο Κάλυψης'].isin(sel_codes_apoz)]
+                with col4:
+                    e_col_apoz = next((c for c in apoz_df.columns if 'Τύπος Αποδοχών' in c), None)
+                    if e_col_apoz:
+                        earn_opts_apoz = sorted(apoz_df[e_col_apoz].dropna().astype(str).unique().tolist())
+                        sel_apoz_earn = st.multiselect("Τύπος Αποδοχών:", options=earn_opts_apoz, default=[], key="apoz_filter_earnings", placeholder="")
+                        if sel_apoz_earn:
+                            apoz_df = apoz_df[apoz_df[e_col_apoz].astype(str).isin(sel_apoz_earn)]
+                with col5:
+                    from_date_apoz = st.text_input("Από (dd/mm/yyyy):", value="", placeholder="01/01/2000", key="apoz_filter_from")
+                with col6:
+                    to_date_apoz = st.text_input("Έως (dd/mm/yyyy):", value="", placeholder="31/12/2020", key="apoz_filter_to")
+                if from_date_apoz or to_date_apoz:
+                    apoz_df = apoz_df.copy()
+                    apoz_df['_dt'] = pd.to_datetime(apoz_df['Από'], format='%d/%m/%Y', errors='coerce')
+                    if from_date_apoz:
+                        try:
+                            fd = pd.to_datetime(from_date_apoz, format='%d/%m/%Y')
+                            apoz_df = apoz_df[apoz_df['_dt'] >= fd]
+                        except Exception:
+                            st.error("Λάθος μορφή ημερομηνίας 'Από'")
+                    if to_date_apoz:
+                        try:
+                            td = pd.to_datetime(to_date_apoz, format='%d/%m/%Y')
+                            apoz_df = apoz_df[apoz_df['_dt'] <= td]
+                        except Exception:
+                            st.error("Λάθος μορφή ημερομηνίας 'Έως'")
+                    if '_dt' in apoz_df.columns:
+                        apoz_df = apoz_df.drop(columns=['_dt'])
+
+            # === Υπολογισμένα αποτελέσματα (τελευταίος εργοδότης, ημέρες, μισθός) ===
+            _has_klados_filter = bool(sel_apoz_klados) if 'sel_apoz_klados' in dir() else False
+            st.markdown("Επιλέξτε πακέτα κάλυψης για να εμφανιστούν τα αθροίσματα")
+            try:
+                if _has_klados_filter:
+                    _apoz_calc = apoz_df.copy()
+                    _apoz_calc['_Έως_dt'] = pd.to_datetime(_apoz_calc['Έως'], format='%d/%m/%Y', errors='coerce')
+                    _apoz_calc['_Από_dt'] = pd.to_datetime(_apoz_calc['Από'], format='%d/%m/%Y', errors='coerce')
+                    _apoz_calc = _apoz_calc.dropna(subset=['_Έως_dt', '_Από_dt'])
+                else:
+                    _apoz_calc = pd.DataFrame()
+
+                if not _apoz_calc.empty and 'Α-Μ εργοδότη' in _apoz_calc.columns:
+                    last_row = _apoz_calc.loc[_apoz_calc['_Έως_dt'].idxmax()]
+                    last_employer_code = str(last_row.get('Α-Μ εργοδότη', '')).strip()
+
+                    emp_df = _apoz_calc[_apoz_calc['Α-Μ εργοδότη'].astype(str).str.strip() == last_employer_code]
+                    total_days_last = 0.0
+                    total_days_last_pre = 0.0
+                    cutoff = pd.Timestamp('2012-11-12')
+                    for _, er in emp_df.iterrows():
+                        d_val = 0.0
+                        if 'Ημέρες' in er and pd.notna(er['Ημέρες']) and str(er['Ημέρες']).strip() != '':
+                            dv = clean_numeric_value(er['Ημέρες'])
+                            if dv is not None:
+                                d_val += dv
+                        if 'Έτη' in er and pd.notna(er['Έτη']):
+                            yv = clean_numeric_value(er['Έτη'])
+                            if yv is not None:
+                                d_val += yv * 300
+                        if 'Μήνες' in er and pd.notna(er['Μήνες']):
+                            mv = clean_numeric_value(er['Μήνες'])
+                            if mv is not None:
+                                d_val += mv * 25
+                        raw_g = str(er.get('Μικτές αποδοχές', ''))
+                        raw_c = str(er.get('Συνολικές εισφορές', ''))
+                        gv = clean_numeric_value(raw_g, exclude_drx=True) or 0.0
+                        cv = clean_numeric_value(raw_c, exclude_drx=True) or 0.0
+                        sgn = get_negative_amount_sign(gv, cv)
+                        if sgn == -1:
+                            d_val = -abs(d_val)
+                        total_days_last += d_val
+                        if er['_Έως_dt'] <= cutoff:
+                            total_days_last_pre += d_val
+                        elif er['_Από_dt'] < cutoff:
+                            span_days = (er['_Έως_dt'] - er['_Από_dt']).days + 1
+                            pre_days = (cutoff - er['_Από_dt']).days + 1
+                            if span_days > 0:
+                                total_days_last_pre += d_val * (pre_days / span_days)
+
+                    years_last = total_days_last / 300.0
+                    years_last_pre = total_days_last_pre / 300.0
+
+                    # Τελευταίος μισθός: πιο πρόσφατη μικτή αποδοχή κωδ. 01 από df
+                    last_salary = None
+                    try:
+                        apd_source = df.copy()
+                        e_type_col = next((c for c in apd_source.columns if 'Τύπος Αποδοχών' in c), None)
+                        if e_type_col:
+                            apd_01 = apd_source[apd_source[e_type_col].astype(str).str.strip().isin(['01', '1'])]
+                            if 'Τύπος Ασφάλισης' in apd_01.columns:
+                                apd_01 = apd_01[apd_01['Τύπος Ασφάλισης'].apply(is_misthoti)]
+                            apd_01 = apd_01.copy()
+                            apd_01['_Έως_dt2'] = pd.to_datetime(apd_01['Έως'], format='%d/%m/%Y', errors='coerce')
+                            apd_01 = apd_01.dropna(subset=['_Έως_dt2'])
+                            if not apd_01.empty:
+                                latest = apd_01.loc[apd_01['_Έως_dt2'].idxmax()]
+                                raw_sal = str(latest.get('Μικτές αποδοχές', ''))
+                                last_salary = clean_numeric_value(raw_sal, exclude_drx=True)
+                    except Exception:
+                        pass
+
+                    st.markdown("---")
+                    m1, m2, m3, m4, m5, m6 = st.columns(6)
+                    with m1:
+                        st.metric("Τελευταίος εργοδότης", last_employer_code)
+                    with m2:
+                        st.metric("Ημέρες τελ. εργοδότη", format_number_greek(total_days_last, decimals=0))
+                    with m3:
+                        st.metric("Έτη τελ. εργοδότη", format_number_greek(years_last, decimals=2))
+                    with m4:
+                        st.metric("Ημέρες έως 12/11/2012", format_number_greek(total_days_last_pre, decimals=0))
+                    with m5:
+                        st.metric("Έτη έως 12/11/2012", format_number_greek(years_last_pre, decimals=2))
+                    with m6:
+                        if last_salary is not None and last_salary > 0:
+                            st.metric("Τελευταίος μισθός", format_currency(last_salary))
+                        else:
+                            st.metric("Τελευταίος μισθός", "–")
+                    st.markdown("---")
+                else:
+                    st.markdown("---")
+                    m1, m2, m3, m4, m5, m6 = st.columns(6)
+                    with m1:
+                        st.metric("Τελευταίος εργοδότης", "–")
+                    with m2:
+                        st.metric("Ημέρες τελ. εργοδότη", "–")
+                    with m3:
+                        st.metric("Έτη τελ. εργοδότη", "–")
+                    with m4:
+                        st.metric("Ημέρες έως 12/11/2012", "–")
+                    with m5:
+                        st.metric("Έτη έως 12/11/2012", "–")
+                    with m6:
+                        st.metric("Τελευταίος μισθός", "–")
+                    pass
+                    st.markdown("---")
+            except Exception:
+                pass
+
+            apoz_rows = []
+            with st.spinner("Υπολογισμός ημερών αποζημίωσης..."):
+                for idx, row in apoz_df.iterrows():
+                    try:
+                        if pd.isna(row['Από']) or pd.isna(row['Έως']):
+                            continue
+                        start_dt = pd.to_datetime(row['Από'], format='%d/%m/%Y', errors='coerce')
+                        end_dt = pd.to_datetime(row['Έως'], format='%d/%m/%Y', errors='coerce')
+                        if pd.isna(start_dt) or pd.isna(end_dt):
+                            continue
+                        days_val = 0
+                        if 'Ημέρες' in row and pd.notna(row['Ημέρες']) and str(row['Ημέρες']).strip() != '':
+                            d = clean_numeric_value(row['Ημέρες'])
+                            if d is not None and d != 0:
+                                days_val += d
+                        if 'Έτη' in row and pd.notna(row['Έτη']):
+                            y = clean_numeric_value(row['Έτη'])
+                            if y is not None and y != 0:
+                                days_val += y * 300
+                        if 'Μήνες' in row and pd.notna(row['Μήνες']):
+                            m = clean_numeric_value(row['Μήνες'])
+                            if m is not None and m != 0:
+                                days_val += m * 25
+                        raw_gross = str(row.get('Μικτές αποδοχές', ''))
+                        if 'ΔΡΧ' in raw_gross.upper() or 'DRX' in raw_gross.upper():
+                            gross_val = 0.0
+                        else:
+                            gross_val = clean_numeric_value(raw_gross, exclude_drx=True)
+                        if gross_val is None:
+                            gross_val = 0.0
+                        raw_contrib = str(row.get('Συνολικές εισφορές', ''))
+                        if 'ΔΡΧ' in raw_contrib.upper() or 'DRX' in raw_contrib.upper():
+                            contrib_val = 0.0
+                        else:
+                            contrib_val = clean_numeric_value(raw_contrib, exclude_drx=True)
+                        if contrib_val is None:
+                            contrib_val = 0.0
+                        sign = get_negative_amount_sign(gross_val, contrib_val)
+                        if sign == -1:
+                            days_val = -abs(days_val)
+                        tameio = str(row.get('Ταμείο', '')).strip()
+                        employer = str(row.get('Α-Μ εργοδότη', '')).strip()
+                        klados = str(row.get('Κλάδος/Πακέτο Κάλυψης', row.get('Κλάδος/Πακέτο', ''))).strip()
+                        klados_desc = (description_map or {}).get(klados, '')
+                        earnings_type = str(row.get('Τύπος Αποδοχών', '')).strip()
+                        apoz_rows.append({
+                            'ΕΤΟΣ': start_dt.year,
+                            'ΤΑΜΕΙΟ': tameio,
+                            'ΕΡΓΟΔΟΤΗΣ': employer,
+                            'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ': klados,
+                            'ΠΕΡΙΓΡΑΦΗ': klados_desc,
+                            'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': earnings_type,
+                            'ΣΥΝΟΛΟ': days_val,
+                            'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ': gross_val,
+                            'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ': contrib_val,
+                        })
+                    except Exception:
+                        continue
+
+            if apoz_rows:
+                apoz_c_df = pd.DataFrame(apoz_rows)
+                group_cols = ['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ']
+                apoz_agg = apoz_c_df.groupby(group_cols, dropna=False)[['ΣΥΝΟΛΟ', 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ']].sum().reset_index()
+                apoz_agg = apoz_agg.sort_values(['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ'], na_position='first')
+
+                # Ποσοστό εισφοράς όπως στην Καταμέτρηση
+                apoz_agg['ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ'] = pd.NA
+                gross_series = apoz_agg['ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ']
+                valid_mask = gross_series.notna() & (gross_series != 0)
+                apoz_agg.loc[valid_mask, 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ'] = (
+                    apoz_agg.loc[valid_mask, 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ'] / apoz_agg.loc[valid_mask, 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ']
+                ) * 100
+
+                base_cols_apoz = ['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ']
+                value_cols_apoz = ['ΣΥΝΟΛΟ', 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ']
+                all_cols_apoz = base_cols_apoz + value_cols_apoz
+
+                def _fmt_days(v):
+                    if v == 0 or v == '' or (isinstance(v, float) and pd.isna(v)):
+                        return ""
+                    try:
+                        x = float(v)
+                    except (TypeError, ValueError):
+                        return "" if v == '' or v is None else str(v)
+                    if abs(x - round(x)) < 0.01:
+                        return str(int(round(x)))
+                    return f"{x:.1f}".replace('.', ',')
+                def _fmt_eur(v):
+                    if v == 0 or v == '' or (isinstance(v, float) and pd.isna(v)):
+                        return ""
+                    try:
+                        return format_currency(float(v))
+                    except (TypeError, ValueError):
+                        return ""
+                def _fmt_pct(val):
+                    if val == '' or val is None or (isinstance(val, float) and pd.isna(val)):
+                        return ""
+                    try:
+                        x = float(val)
+                        if x == 0:
+                            return ""
+                        return f"{x:.1f}%".replace('.', ',')
+                    except (TypeError, ValueError):
+                        return ""
+
+                # Κρύψη επαναλαμβανόμενων τιμών + κενή γραμμή ανάμεσα σε έτη (χωρίς γραμμή συνόλων)
+                processed_apoz = []
+                prev_year = None
+                prev_tameio = None
+                prev_employer = None
+                for _, row in apoz_agg.iterrows():
+                    curr_year = row['ΕΤΟΣ']
+                    curr_tameio = row['ΤΑΜΕΙΟ']
+                    curr_employer = row['ΕΡΓΟΔΟΤΗΣ']
+                    if prev_year is not None and curr_year != prev_year:
+                        processed_apoz.append({c: '' for c in all_cols_apoz})
+                        prev_tameio = None
+                        prev_employer = None
+                    display_row = row.to_dict()
+                    if curr_year == prev_year:
+                        display_row['ΕΤΟΣ'] = ''
+                    if curr_year == prev_year and curr_tameio == prev_tameio:
+                        display_row['ΤΑΜΕΙΟ'] = ''
+                    if curr_year == prev_year and curr_tameio == prev_tameio and curr_employer == prev_employer:
+                        display_row['ΕΡΓΟΔΟΤΗΣ'] = ''
+                    # Μη εμφάνιση None/NaN σε έτος, ταμείο, εργοδότη κλπ
+                    for col in all_cols_apoz:
+                        v = display_row.get(col)
+                        if v is None or (isinstance(v, float) and pd.isna(v)):
+                            display_row[col] = ''
+                    processed_apoz.append(display_row)
+                    prev_year = curr_year
+                    prev_tameio = curr_tameio
+                    prev_employer = curr_employer
+                if prev_year is not None:
+                    processed_apoz.append({c: '' for c in all_cols_apoz})
+
+                apoz_display_df = pd.DataFrame(processed_apoz, columns=all_cols_apoz)
+                # Αντικατάσταση None/NaN/"None" με κενό σε όλες τις στήλες (ώστε να μην εμφανίζεται "None")
+                def _clean_cell(v):
+                    if v is None:
+                        return ''
+                    if isinstance(v, float) and pd.isna(v):
+                        return ''
+                    if isinstance(v, str) and v.strip().lower() in ('none', 'nan'):
+                        return ''
+                    return v
+                for c in apoz_display_df.columns:
+                    apoz_display_df[c] = apoz_display_df[c].apply(_clean_cell)
+                # Έτος ως κείμενο ώστε τα κενά να μην γίνονται "None" από NumberColumn
+                def _year_str(x):
+                    if x is None or x == '' or (isinstance(x, float) and pd.isna(x)) or str(x).strip().lower() in ('none', 'nan'):
+                        return ''
+                    try:
+                        return str(int(float(x)))
+                    except (TypeError, ValueError):
+                        return ''
+                apoz_display_df['ΕΤΟΣ'] = apoz_display_df['ΕΤΟΣ'].apply(_year_str)
+                apoz_display_df['ΣΥΝΟΛΟ'] = apoz_display_df['ΣΥΝΟΛΟ'].apply(_fmt_days)
+                apoz_display_df['ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ'] = apoz_display_df['ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ'].apply(_fmt_eur)
+                apoz_display_df['ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ'] = apoz_display_df['ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ'].apply(_fmt_eur)
+                apoz_display_df['ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ'] = apoz_display_df['ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ'].apply(_fmt_pct)
+
+                bold_cols_apoz = ['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΕΡΓΟΔΟΤΗΣ', 'ΣΥΝΟΛΟ', 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ']
+                def apoz_style_fn(row_series):
+                    return ['font-weight: 700' if col in bold_cols_apoz else '' for col in apoz_display_df.columns]
+                st.dataframe(
+                    apoz_display_df.style.apply(apoz_style_fn, axis=1),
+                    use_container_width=True,
+                    column_config={
+                        "ΕΤΟΣ": st.column_config.TextColumn("Έτος"),
+                        "ΕΡΓΟΔΟΤΗΣ": st.column_config.TextColumn("Εργοδότης"),
+                        "ΣΥΝΟΛΟ": st.column_config.TextColumn("Σύνολο ημερών"),
+                        "ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ": st.column_config.TextColumn("Ποσοστό εισφοράς"),
+                    },
+                    hide_index=True,
+                )
+                register_view("Αποζημίωση", apoz_display_df)
+                render_print_button(
+                    "print_apozimiosi",
+                    "Αποζημίωση (μισθωτή ασφάλιση)",
+                    apoz_display_df,
+                    description="Σύνολα ημερών ασφάλισης για εγγραφές μισθωτής ασφάλισης, χωρίς επιμερισμό ανά μήνα.",
+                    bold_columns=['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΕΡΓΟΔΟΤΗΣ'],
+                )
+            else:
+                st.warning("Δεν βρέθηκαν δεδομένα μισθωτής ασφάλισης με τα τρέχοντα φίλτρα.")
+        elif apoz_df.empty:
+            st.warning("Δεν υπάρχουν εγγραφές με τύπο ασφάλισης «μισθωτή ασφάλιση».")
+        else:
+            st.warning("Λείπουν οι απαραίτητες στήλες (Από, Έως, Ημέρες).")
     
     with tab_parallel:
         if st.session_state.get('show_complex_file_warning'):

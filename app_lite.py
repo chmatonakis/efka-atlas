@@ -433,13 +433,13 @@ with col_mid:
 
     st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
     b_col1, b_col2 = st.columns([1, 1], gap="small")
-
+    
     with b_col1:
         if st.button("Εκτύπωση", type="primary", use_container_width=True):
             st.session_state["lite_disclaimer_for"] = "print"
-            st.session_state["lite_show_disclaimer"] = True
+             st.session_state["lite_show_disclaimer"] = True
             st.rerun()
-
+    
     with b_col2:
         if st.button("Νέο αρχείο", type="secondary", use_container_width=True):
             for key in [
@@ -494,7 +494,10 @@ def _parse_greek_number(s):
 
 
 def _build_timeline_html(source_df):
-    """Χρονοδιάγραμμα ασφάλισης ανά Ταμείο - Τύπο Ασφάλισης με οπτικές μπάρες."""
+    """Χρονοδιάγραμμα ασφάλισης ανά Ταμείο - Τύπο Ασφάλισης με οπτικές μπάρες.
+    Στα ταμεία εμφανίζονται μόνο διαστήματα με ημέρες ασφάλισης· τα διαστήματα χωρίς ημέρες
+    εμφανίζονται σε ξεχωριστή γραμμή «Διαστήματα χωρίς ημέρες».
+    """
     if source_df.empty or 'Από' not in source_df.columns or 'Έως' not in source_df.columns:
         return ""
 
@@ -505,17 +508,34 @@ def _build_timeline_html(source_df):
     if t.empty:
         return ""
 
+    # Υπολογισμός ημερών ασφάλισης ανά γραμμή (ίδια λογική με find_zero_duration_intervals)
+    duration_columns = ['Έτη', 'Μήνες', 'Ημέρες']
+    for col in duration_columns:
+        if col not in t.columns:
+            t[col] = 0
+        t[f'__{col}_n'] = t[col].apply(clean_numeric_value)
+    t['__duration_sum'] = t['__Έτη_n'] + t['__Μήνες_n'] + t['__Ημέρες_n']
+    if not t.empty:
+        t['__duration_sum_group'] = t.groupby(['_from', '_to'])['__duration_sum'].transform('sum')
+    else:
+        t['__duration_sum_group'] = 0
+
+    # Διαστήματα με ημέρες ασφάλισης μόνο για τις μπάρες ταμείων
+    t_with_days = t[t['__duration_sum'] > 0].copy()
+    # Διαστήματα χωρίς ημέρες για ξεχωριστή γραμμή (μηδενικό άθροισμα και ανά γραμμή και ανά διάστημα)
+    zero_duration_t = t[(t['__duration_sum'] == 0) & (t['__duration_sum_group'] == 0)].copy()
+
     tameio_col = 'Ταμείο' if 'Ταμείο' in t.columns else None
     ins_col = 'Τύπος Ασφάλισης' if 'Τύπος Ασφάλισης' in t.columns else None
 
     if tameio_col:
-        t['_label'] = t[tameio_col].astype(str).str.strip()
+        t_with_days['_label'] = t_with_days[tameio_col].astype(str).str.strip()
         if ins_col:
-            ins_vals = t[ins_col].astype(str).str.strip()
+            ins_vals = t_with_days[ins_col].astype(str).str.strip()
             mask = (ins_vals != '') & (ins_vals != 'nan')
-            t.loc[mask, '_label'] = t.loc[mask, '_label'] + ' — ' + ins_vals[mask]
+            t_with_days.loc[mask, '_label'] = t_with_days.loc[mask, '_label'] + ' — ' + ins_vals[mask]
     else:
-        t['_label'] = 'Ασφάλιση'
+        t_with_days['_label'] = 'Ασφάλιση'
 
     global_min = t['_from'].min()
     global_max = t['_to'].max()
@@ -530,7 +550,7 @@ def _build_timeline_html(source_df):
         '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1',
     ]
 
-    groups = t.groupby('_label', sort=False)
+    groups = t_with_days.groupby('_label', sort=False)
     label_order = list(groups.groups.keys())
 
     color_map = {}
@@ -561,6 +581,25 @@ def _build_timeline_html(source_df):
             f'<div class="tl-track">{"".join(bars)}</div>'
             f'</div>'
         )
+
+    # Γραμμή «Διαστήματα χωρίς ημέρες ασφάλισης»
+    if not zero_duration_t.empty:
+        zero_items = []
+        for _, z in zero_duration_t.iterrows():
+            left_pct = max(0, (z['_from'] - global_min).days / total_days * 100)
+            width_pct = max(0.3, (z['_to'] - z['_from']).days / total_days * 100)
+            tooltip = f"Χωρίς ημέρες: {z['Από']} — {z['Έως']}"
+            zero_items.append(
+                f'<div class="tl-bar tl-zero" style="left:{left_pct:.2f}%;width:{width_pct:.2f}%;" title="{html_mod.escape(tooltip)}"></div>'
+            )
+        if zero_items:
+            rows_html.append(
+                f'<div class="tl-row">'
+                f'<div class="tl-label tl-label-zero">Διαστήματα χωρίς ημέρες</div>'
+                f'<div class="tl-track">{"".join(zero_items)}</div>'
+                f'</div>'
+            )
+            legend_items += '<span class="tl-legend-item"><span class="tl-legend-dot tl-legend-zero"></span>Διαστήματα χωρίς ημέρες</span>'
 
     gap_bars = ""
     if gaps_df is not None and not gaps_df.empty:
@@ -596,17 +635,59 @@ def _build_timeline_html(source_df):
         pos = max(0, min(100, (yr_date - global_min).days / total_days * 100))
         ticks_html += f'<div class="tl-tick" style="left:{pos:.2f}%;"><span>{yr}</span></div>'
 
+    # Κάθετες γραμμές αναφοράς σε συγκεκριμένες ημερομηνίες
+    ref_dates = [
+        (1993, 1, 1),
+        (2002, 1, 1),
+        (2017, 1, 1),
+        (2020, 1, 1),
+    ]
+    ref_lines_html = ""
+    for y, m, d in ref_dates:
+        ref_dt = pd.Timestamp(year=y, month=m, day=d)
+        if global_min <= ref_dt <= global_max:
+            pos_pct = max(0, min(100, (ref_dt - global_min).days / total_days * 100))
+            label = ref_dt.strftime("%d/%m/%Y")
+            ref_lines_html += f'<div class="tl-ref-line" style="left:{pos_pct:.2f}%;"><span class="tl-ref-label">{html_mod.escape(label)}</span><div class="tl-ref-vline"></div></div>'
+
     period_str = f"{global_min.strftime('%d/%m/%Y')} — {global_max.strftime('%d/%m/%Y')}"
 
     return f"""
     <section class="print-section">
       <h2>Χρονοδιάγραμμα Ασφάλισης</h2>
       <p class="print-description">Οπτική απεικόνιση χρονικών περιόδων ασφάλισης ανά Ταμείο. Περίοδος: {html_mod.escape(period_str)}</p>
-      <div class="tl-legend">{legend_items}</div>
-      <div class="tl-container">
-        {"".join(rows_html)}
-        <div class="tl-axis">{ticks_html}</div>
+      <div class="tl-zoom-wrapper">
+        <div class="tl-zoom-controls">
+          <span class="tl-zoom-label">Εστίαση:</span>
+          <button type="button" class="tl-zoom-btn active" data-zoom="1" title="100%">100%</button>
+          <button type="button" class="tl-zoom-btn" data-zoom="1.25" title="125%">125%</button>
+          <button type="button" class="tl-zoom-btn" data-zoom="1.5" title="150%">150%</button>
+          <button type="button" class="tl-zoom-btn" data-zoom="2" title="200%">200%</button>
+          <button type="button" class="tl-zoom-btn" data-zoom="2.5" title="250%">250%</button>
+        </div>
+        <div class="tl-zoom-inner" id="tl-zoom-inner">
+          <div class="tl-legend">{legend_items}</div>
+          <div class="tl-container">
+            <div class="tl-ref-lines" aria-hidden="true">{ref_lines_html}</div>
+            {"".join(rows_html)}
+            <div class="tl-axis">{ticks_html}</div>
+          </div>
+        </div>
       </div>
+      <script>
+      (function() {{
+        var inner = document.getElementById('tl-zoom-inner');
+        var btns = inner && inner.closest('.tl-zoom-wrapper').querySelectorAll('.tl-zoom-btn');
+        if (!inner || !btns.length) return;
+        function setZoom(level) {{
+          inner.style.transform = 'scale(' + level + ')';
+          btns.forEach(function(b) {{ b.classList.toggle('active', parseFloat(b.getAttribute('data-zoom')) === level); }});
+        }}
+        btns.forEach(function(btn) {{
+          btn.addEventListener('click', function() {{ setZoom(parseFloat(btn.getAttribute('data-zoom'))); }});
+        }});
+      }})();
+      </script>
     </section>
     """
 
@@ -1082,13 +1163,13 @@ if section == "all":
     do_open = st.session_state.get("lite_do_open")
 
     def _build_report_block():
-        audit_df = generate_audit_report(df)
-        display_summary = build_summary_grouped_display(df, df) if 'Κλάδος/Πακέτο Κάλυψης' in df.columns else pd.DataFrame()
-        final_display_df, _, _, _, print_style_rows = build_count_report(
-            count_df,
-            description_map=description_map,
-            show_count_totals_only=False
-        )
+    audit_df = generate_audit_report(df)
+    display_summary = build_summary_grouped_display(df, df) if 'Κλάδος/Πακέτο Κάλυψης' in df.columns else pd.DataFrame()
+    final_display_df, _, _, _, print_style_rows = build_count_report(
+        count_df,
+        description_map=description_map,
+        show_count_totals_only=False
+    )
         show_complex_warning = False
         try:
             n_agg, n_limits_25, n_unpaid = compute_complex_file_metrics(df)
@@ -1120,22 +1201,22 @@ if section == "all":
         except Exception:
             pass
 
-        if not display_summary.empty:
+    if not display_summary.empty:
             totals_html = _build_totals_with_filters(display_summary, raw_df=df, desc_map=description_map, warning_types=warning_types)
             tab_entries.append(("totals", "Σύνολα", totals_html))
 
-        if not final_display_df.empty:
+    if not final_display_df.empty:
             count_table_html = build_yearly_print_html(final_display_df, year_column='ΕΤΟΣ', style_rows=print_style_rows)
             tab_entries.append(("count", "Καταμέτρηση",
                 f"<section class='print-section'><h2>Πίνακας Καταμέτρησης</h2>"
                 f"<p class='print-description'>Αναλυτική καταμέτρηση ημερών ασφάλισης ανά μήνα.</p>{count_table_html}</section>"
             ))
 
-        try:
-            gaps_df = find_gaps_in_insurance_data(df)
+    try:
+        gaps_df = find_gaps_in_insurance_data(df)
             zero_duration_df = find_zero_duration_intervals(df)
             gaps_content_parts = []
-            if gaps_df is not None and not gaps_df.empty:
+        if gaps_df is not None and not gaps_df.empty:
                 gaps_content_parts.append(build_print_section_html(
                     "Κενά Διαστήματα", gaps_df,
                     description="Χρονικές περίοδοι χωρίς ασφαλιστική κάλυψη.", heading_tag="h2"
@@ -1147,13 +1228,20 @@ if section == "all":
                     heading_tag="h2"
                 ))
             if gaps_content_parts:
+                note_html = (
+                    "<p class='print-description' style='margin-top:1.25em; padding:0.5em 0; border-top:1px solid #e2e8f0; font-size:0.95em;'>"
+                    "Τα διαστήματα χωρίς ημέρες ασφάλισης αναφέρονται αυτούσια στο αρχείο ΑΤΛΑΣ χωρίς ημέρες ασφάλισης. "
+                    "Ωστόσο, δεν αποτελούν εξ ορισμού κενό διάστημα καθώς μπορεί να επικαλύπτονται μερικώς από άλλες εγγραφές που να έχουν ημέρες ασφάλισης. "
+                    "Απαιτείται λεπτομερής έλεγχος.</p>"
+                )
+                gaps_content_parts.append(note_html)
                 tab_entries.append(("gaps", "Κενά", "".join(gaps_content_parts)))
-        except Exception:
+    except Exception:
             pass
 
-        try:
-            parallel_df = build_parallel_print_df(df, description_map)
-            if parallel_df is not None and not parallel_df.empty:
+    try:
+        parallel_df = build_parallel_print_df(df, description_map)
+        if parallel_df is not None and not parallel_df.empty:
                 par_html = build_yearly_print_html(
                     parallel_df, year_column='Έτος',
                     collapse_cols=['Ταμείο', 'Τύπος Ασφάλισης', 'Εργοδότης']
@@ -1162,12 +1250,12 @@ if section == "all":
                     f"<section class='print-section'><h2>Παράλληλη Ασφάλιση</h2>"
                     f"<p class='print-description'>ΙΚΑ & ΟΑΕΕ / ΟΑΕΕ & ΤΣΜΕΔΕ / ΟΓΑ & ΙΚΑ/ΟΑΕΕ (έως 31/12/2016).</p>{par_html}</section>"
                 ))
-        except Exception:
+    except Exception:
             pass
 
-        try:
-            parallel_2017_df = build_parallel_2017_print_df(df, description_map)
-            if parallel_2017_df is not None and not parallel_2017_df.empty:
+    try:
+        parallel_2017_df = build_parallel_2017_print_df(df, description_map)
+        if parallel_2017_df is not None and not parallel_2017_df.empty:
                 par2017_html = build_yearly_print_html(
                     parallel_2017_df, year_column='Έτος',
                     collapse_cols=['Ταμείο', 'Τύπος Ασφάλισης', 'Εργοδότης']
@@ -1176,18 +1264,18 @@ if section == "all":
                     f"<section class='print-section'><h2>Παράλληλη Απασχόληση 2017+</h2>"
                     f"<p class='print-description'>Από 01/2017 (ΙΚΑ & ΕΦΚΑ μη μισθωτή / ΕΦΚΑ μισθωτή & ΕΦΚΑ μη μισθωτή).</p>{par2017_html}</section>"
                 ))
-        except Exception:
+    except Exception:
             pass
 
-        try:
-            multi_df = build_multi_employment_print_df(df, description_map)
-            if multi_df is not None and not multi_df.empty:
-                multi_html = build_yearly_print_html(
-                    multi_df, year_column='Έτος',
+    try:
+        multi_df = build_multi_employment_print_df(df, description_map)
+        if multi_df is not None and not multi_df.empty:
+            multi_html = build_yearly_print_html(
+                multi_df, year_column='Έτος',
                     collapse_cols=['Ταμείο', 'Τύπος Ασφάλισης', 'Εργοδότης'],
-                    bold_columns=['Εργοδότης'],
-                    col_width_overrides={'Εργοδότης': '90px'},
-                )
+                bold_columns=['Εργοδότης'],
+                col_width_overrides={'Εργοδότης': '90px'},
+            )
                 tab_entries.append(("multi", "Πολλαπλή",
                     f"<section class='print-section'><h2>Πολλαπλή Απασχόληση</h2>"
                     f"<p class='print-description'>Μήνες με πολλαπλούς εργοδότες ΙΚΑ (αποδοχές 01, 16, ή 99).</p>{multi_html}</section>"
@@ -1220,7 +1308,7 @@ if section == "all":
                 if is_clickable:
                     safe_tab = html_mod.escape(target_tab)
                     card_attrs = f' class="audit-card audit-card-clickable" data-tab="{safe_tab}" onclick="showTab(\'{safe_tab}\');return false;" onkeydown="if(event.key===\'Enter\'){{showTab(\'{safe_tab}\');return false;}}" role="button" tabindex="0"'
-                else:
+        else:
                     card_attrs = ' class="audit-card"'
                 action_html = ""
                 if actions and actions != '-':
@@ -1246,7 +1334,7 @@ if section == "all":
             timeline_html = _build_timeline_html(df)
             if timeline_html:
                 tab_entries.insert(1, ("timeline", "Χρονοδιάγραμμα", timeline_html))
-        except Exception:
+    except Exception:
             pass
 
         if show_complex_warning:
@@ -1325,17 +1413,27 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .print-disclaimer { font-size: 9px; color: #888; margin-top: 16px; padding-top: 8px; border-top: 1px solid #ddd; line-height: 1.4; }
 .print-disclaimer strong { color: #444; }
 .lite-exclusion-note { text-align: right; font-size: 9px; color: #64748b; font-style: italic; margin-bottom: 4px; }
-.tl-container { position: relative; padding-bottom: 28px; }
+.tl-container { position: relative; padding-bottom: 28px; padding-top: 20px; }
 .tl-row { display: flex; align-items: center; margin-bottom: 4px; min-height: 16px; }
 .tl-label { width: 140px; min-width: 140px; font-size: 8px; font-weight: 600; color: #334155; text-align: right; padding-right: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-label-gap { color: #dc2626; }
+.tl-label-zero { color: #78716c; }
 .tl-track { position: relative; flex: 1; height: 14px; background: #f1f5f9; border-radius: 3px; }
 .tl-bar { position: absolute; top: 1px; height: 12px; border-radius: 2px; opacity: 0.85; }
 .tl-bar:hover { opacity: 1; box-shadow: 0 0 4px rgba(0,0,0,0.3); z-index: 2; }
 .tl-gap { background: repeating-linear-gradient(45deg, #fca5a5, #fca5a5 2px, #fecaca 2px, #fecaca 4px) !important; border: 1px solid #ef4444; opacity: 0.7; }
+.tl-zero { background: repeating-linear-gradient(-45deg, #a8a29e, #a8a29e 2px, #d6d3d1 2px, #d6d3d1 4px) !important; border: 1px solid #78716c; opacity: 0.85; }
+.tl-legend-zero { background: repeating-linear-gradient(-45deg, #a8a29e, #a8a29e 2px, #d6d3d1 2px, #d6d3d1 4px) !important; border: 1px solid #78716c; }
 .tl-axis { position: relative; height: 20px; margin-left: 148px; margin-top: 2px; border-top: 1px solid #cbd5e1; }
 .tl-tick { position: absolute; top: 2px; font-size: 7px; color: #64748b; transform: translateX(-50%); }
 .tl-tick::before { content: ''; position: absolute; top: -4px; left: 50%; width: 1px; height: 4px; background: #cbd5e1; }
+.tl-ref-lines { position: absolute; left: 140px; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 0; }
+.tl-ref-line { position: absolute; top: 0; bottom: 0; left: 0; display: flex; flex-direction: column; align-items: center; transform: translateX(-50%); }
+.tl-ref-label { font-size: 8px; color: #64748b; white-space: nowrap; margin-bottom: 2px; font-weight: 600; }
+.tl-ref-vline { flex: 1; width: 1px; min-height: 0; background: #64748b; opacity: 0.6; }
+.tl-zoom-wrapper { margin-top: 8px; overflow: visible; max-height: none; border: none; background: transparent; }
+.tl-zoom-controls { display: none; }
+.tl-zoom-inner { transform: none !important; padding: 0; }
 .tl-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; font-size: 8px; }
 .tl-legend-item { display: inline-flex; align-items: center; gap: 3px; color: #334155; }
 .tl-legend-dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
@@ -1531,17 +1629,31 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td {{ 
 .print-disclaimer strong {{ color: #374151; }}
 
 /* Timeline */
-.tl-container {{ position: relative; padding-bottom: 36px; }}
+.tl-container {{ position: relative; padding-bottom: 36px; padding-top: 26px; }}
 .tl-row {{ display: flex; align-items: center; margin-bottom: 8px; min-height: 28px; }}
 .tl-label {{ width: 200px; min-width: 200px; font-size: 13px; font-weight: 600; color: #334155; text-align: right; padding-right: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
 .tl-label-gap {{ color: #dc2626; }}
+.tl-label-zero {{ color: #78716c; }}
 .tl-track {{ position: relative; flex: 1; height: 24px; background: #f1f5f9; border-radius: 6px; }}
 .tl-bar {{ position: absolute; top: 2px; height: 20px; border-radius: 4px; opacity: 0.85; cursor: default; transition: opacity 0.15s; }}
 .tl-bar:hover {{ opacity: 1; box-shadow: 0 0 6px rgba(0,0,0,0.25); z-index: 2; }}
 .tl-gap {{ background: repeating-linear-gradient(45deg, #fca5a5, #fca5a5 3px, #fecaca 3px, #fecaca 6px) !important; border: 1px solid #ef4444; opacity: 0.7; }}
+.tl-zero {{ background: repeating-linear-gradient(-45deg, #a8a29e, #a8a29e 3px, #d6d3d1 3px, #d6d3d1 6px) !important; border: 1px solid #78716c; opacity: 0.85; }}
+.tl-legend-zero {{ background: repeating-linear-gradient(-45deg, #a8a29e, #a8a29e 3px, #d6d3d1 3px, #d6d3d1 6px) !important; border: 1px solid #78716c; }}
+.tl-zoom-wrapper {{ margin-top: 8px; border: 1px solid #e2e8f0; border-radius: 10px; overflow: auto; max-height: 75vh; min-height: 420px; background: #fafafa; }}
+.tl-zoom-controls {{ display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #f1f5f9; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }}
+.tl-zoom-label {{ font-size: 13px; font-weight: 600; color: #475569; }}
+.tl-zoom-btn {{ padding: 6px 12px; font-size: 12px; font-weight: 600; color: #64748b; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; cursor: pointer; transition: all 0.15s; }}
+.tl-zoom-btn:hover {{ background: #e2e8f0; color: #334155; border-color: #94a3b8; }}
+.tl-zoom-btn.active {{ background: #6366f1; color: #fff; border-color: #4f46e5; }}
+.tl-zoom-inner {{ display: inline-block; min-width: 100%; transform-origin: top left; transition: transform 0.2s ease; padding: 12px 16px; }}
 .tl-axis {{ position: relative; height: 28px; margin-left: 214px; margin-top: 4px; border-top: 1px solid #cbd5e1; }}
 .tl-tick {{ position: absolute; top: 4px; font-size: 11px; color: #64748b; transform: translateX(-50%); }}
 .tl-tick::before {{ content: ''; position: absolute; top: -6px; left: 50%; width: 1px; height: 6px; background: #cbd5e1; }}
+.tl-ref-lines {{ position: absolute; left: 200px; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 0; }}
+.tl-ref-line {{ position: absolute; top: 0; bottom: 0; left: 0; display: flex; flex-direction: column; align-items: center; transform: translateX(-50%); }}
+.tl-ref-label {{ font-size: 10px; color: #64748b; white-space: nowrap; margin-bottom: 4px; font-weight: 600; }}
+.tl-ref-vline {{ flex: 1; width: 1px; min-height: 0; background: #64748b; opacity: 0.7; }}
 .tl-legend {{ display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; font-size: 13px; }}
 .tl-legend-item {{ display: inline-flex; align-items: center; gap: 6px; color: #334155; }}
 .tl-legend-dot {{ width: 14px; height: 14px; border-radius: 3px; display: inline-block; }}
