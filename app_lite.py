@@ -1201,22 +1201,22 @@ if section == "all":
         except Exception:
             pass
 
-    if not display_summary.empty:
+        if not display_summary.empty:
             totals_html = _build_totals_with_filters(display_summary, raw_df=df, desc_map=description_map, warning_types=warning_types)
             tab_entries.append(("totals", "Σύνολα", totals_html))
 
-    if not final_display_df.empty:
+        if not final_display_df.empty:
             count_table_html = build_yearly_print_html(final_display_df, year_column='ΕΤΟΣ', style_rows=print_style_rows)
             tab_entries.append(("count", "Καταμέτρηση",
                 f"<section class='print-section'><h2>Πίνακας Καταμέτρησης</h2>"
                 f"<p class='print-description'>Αναλυτική καταμέτρηση ημερών ασφάλισης ανά μήνα.</p>{count_table_html}</section>"
             ))
 
-    try:
-        gaps_df = find_gaps_in_insurance_data(df)
+        try:
+            gaps_df = find_gaps_in_insurance_data(df)
             zero_duration_df = find_zero_duration_intervals(df)
             gaps_content_parts = []
-        if gaps_df is not None and not gaps_df.empty:
+            if gaps_df is not None and not gaps_df.empty:
                 gaps_content_parts.append(build_print_section_html(
                     "Κενά Διαστήματα", gaps_df,
                     description="Χρονικές περίοδοι χωρίς ασφαλιστική κάλυψη.", heading_tag="h2"
@@ -1236,12 +1236,12 @@ if section == "all":
                 )
                 gaps_content_parts.append(note_html)
                 tab_entries.append(("gaps", "Κενά", "".join(gaps_content_parts)))
-    except Exception:
+        except Exception:
             pass
 
-    try:
-        parallel_df = build_parallel_print_df(df, description_map)
-        if parallel_df is not None and not parallel_df.empty:
+        try:
+            parallel_df = build_parallel_print_df(df, description_map)
+            if parallel_df is not None and not parallel_df.empty:
                 par_html = build_yearly_print_html(
                     parallel_df, year_column='Έτος',
                     collapse_cols=['Ταμείο', 'Τύπος Ασφάλισης', 'Εργοδότης']
@@ -1250,12 +1250,12 @@ if section == "all":
                     f"<section class='print-section'><h2>Παράλληλη Ασφάλιση</h2>"
                     f"<p class='print-description'>ΙΚΑ & ΟΑΕΕ / ΟΑΕΕ & ΤΣΜΕΔΕ / ΟΓΑ & ΙΚΑ/ΟΑΕΕ (έως 31/12/2016).</p>{par_html}</section>"
                 ))
-    except Exception:
+        except Exception:
             pass
 
-    try:
-        parallel_2017_df = build_parallel_2017_print_df(df, description_map)
-        if parallel_2017_df is not None and not parallel_2017_df.empty:
+        try:
+            parallel_2017_df = build_parallel_2017_print_df(df, description_map)
+            if parallel_2017_df is not None and not parallel_2017_df.empty:
                 par2017_html = build_yearly_print_html(
                     parallel_2017_df, year_column='Έτος',
                     collapse_cols=['Ταμείο', 'Τύπος Ασφάλισης', 'Εργοδότης']
@@ -1264,18 +1264,18 @@ if section == "all":
                     f"<section class='print-section'><h2>Παράλληλη Απασχόληση 2017+</h2>"
                     f"<p class='print-description'>Από 01/2017 (ΙΚΑ & ΕΦΚΑ μη μισθωτή / ΕΦΚΑ μισθωτή & ΕΦΚΑ μη μισθωτή).</p>{par2017_html}</section>"
                 ))
-    except Exception:
+        except Exception:
             pass
 
-    try:
-        multi_df = build_multi_employment_print_df(df, description_map)
-        if multi_df is not None and not multi_df.empty:
-            multi_html = build_yearly_print_html(
-                multi_df, year_column='Έτος',
+        try:
+            multi_df = build_multi_employment_print_df(df, description_map)
+            if multi_df is not None and not multi_df.empty:
+                multi_html = build_yearly_print_html(
+                    multi_df, year_column='Έτος',
                     collapse_cols=['Ταμείο', 'Τύπος Ασφάλισης', 'Εργοδότης'],
-                bold_columns=['Εργοδότης'],
-                col_width_overrides={'Εργοδότης': '90px'},
-            )
+                    bold_columns=['Εργοδότης'],
+                    col_width_overrides={'Εργοδότης': '90px'},
+                )
                 tab_entries.append(("multi", "Πολλαπλή",
                     f"<section class='print-section'><h2>Πολλαπλή Απασχόληση</h2>"
                     f"<p class='print-description'>Μήνες με πολλαπλούς εργοδότες ΙΚΑ (αποδοχές 01, 16, ή 99).</p>{multi_html}</section>"
@@ -1308,7 +1308,7 @@ if section == "all":
                 if is_clickable:
                     safe_tab = html_mod.escape(target_tab)
                     card_attrs = f' class="audit-card audit-card-clickable" data-tab="{safe_tab}" onclick="showTab(\'{safe_tab}\');return false;" onkeydown="if(event.key===\'Enter\'){{showTab(\'{safe_tab}\');return false;}}" role="button" tabindex="0"'
-        else:
+                else:
                     card_attrs = ' class="audit-card"'
                 action_html = ""
                 if actions and actions != '-':
@@ -1334,7 +1334,7 @@ if section == "all":
             timeline_html = _build_timeline_html(df)
             if timeline_html:
                 tab_entries.insert(1, ("timeline", "Χρονοδιάγραμμα", timeline_html))
-    except Exception:
+        except Exception:
             pass
 
         if show_complex_warning:
