@@ -437,7 +437,7 @@ with col_mid:
     with b_col1:
         if st.button("Εκτύπωση", type="primary", use_container_width=True):
             st.session_state["lite_disclaimer_for"] = "print"
-             st.session_state["lite_show_disclaimer"] = True
+            st.session_state["lite_show_disclaimer"] = True
             st.rerun()
     
     with b_col2:
