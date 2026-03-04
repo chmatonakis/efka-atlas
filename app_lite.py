@@ -1163,13 +1163,13 @@ if section == "all":
     do_open = st.session_state.get("lite_do_open")
 
     def _build_report_block():
-    audit_df = generate_audit_report(df)
-    display_summary = build_summary_grouped_display(df, df) if 'Κλάδος/Πακέτο Κάλυψης' in df.columns else pd.DataFrame()
-    final_display_df, _, _, _, print_style_rows = build_count_report(
-        count_df,
-        description_map=description_map,
-        show_count_totals_only=False
-    )
+        audit_df = generate_audit_report(df)
+        display_summary = build_summary_grouped_display(df, df) if 'Κλάδος/Πακέτο Κάλυψης' in df.columns else pd.DataFrame()
+        final_display_df, _, _, _, print_style_rows = build_count_report(
+            count_df,
+            description_map=description_map,
+            show_count_totals_only=False
+        )
         show_complex_warning = False
         try:
             n_agg, n_limits_25, n_unpaid = compute_complex_file_metrics(df)
