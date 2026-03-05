@@ -9863,10 +9863,32 @@ def main():
             st.markdown("### Επεξεργασία Ολοκληρώθηκε")
             
             col1, col2, col3 = st.columns([1, 1, 1])
-            with col2:
+            with col1:
                 if st.button("Προβολή Αποτελεσμάτων", type="primary", use_container_width=True, key="show_results_btn"):
                     st.session_state['show_results'] = True
                     st.rerun()
+            with col2:
+                if st.button("Άνοιγμα HTML Αναφοράς", type="secondary", use_container_width=True, key="open_html_btn"):
+                    st.session_state['open_html_report'] = True
+                    st.rerun()
+            
+            if st.session_state.get('open_html_report'):
+                from html_viewer_builder import generate_full_html_report
+                client_name = st.session_state.get('client_name', '')
+                with st.spinner("Δημιουργία αναφοράς HTML..."):
+                    viewer_html, _ = generate_full_html_report(
+                        df, client_name=client_name,
+                        app_title="ATLAS", app_subtitle="Ασφαλιστικό Βιογραφικό",
+                    )
+                js_content = json.dumps(viewer_html).replace("</script>", "<\\/script>")
+                components.html(
+                    f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+<script>(function(){{var h={js_content};var b=new Blob([h],{{type:'text/html;charset=utf-8'}});
+var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
+<p style="margin:0;font-size:14px;color:#666;">Άνοιγμα HTML αναφοράς...</p></body></html>""",
+                    height=40,
+                )
+                st.session_state['open_html_report'] = False
             
             st.success(f"Εξήχθησαν {len(df)} γραμμές δεδομένων από {df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες")
         else:
@@ -9892,12 +9914,16 @@ def main():
                 with header_placeholder.container():
                     st.markdown("### Επεξεργασία Ολοκληρώθηκε")
                 
-                # Εμφάνιση κουμπιού
+                # Εμφάνιση κουμπιών
                 with button_placeholder.container():
                     col1, col2, col3 = st.columns([1, 1, 1])
-                    with col2:
+                    with col1:
                         if st.button("Προβολή Αποτελεσμάτων", type="primary", use_container_width=True, key="show_results_btn"):
                             st.session_state['show_results'] = True
+                            st.rerun()
+                    with col2:
+                        if st.button("Άνοιγμα HTML Αναφοράς", type="secondary", use_container_width=True, key="open_html_btn"):
+                            st.session_state['open_html_report'] = True
                             st.rerun()
                 
                 # Εμφάνιση summary

@@ -36,6 +36,24 @@ from app_final import (
     apply_negative_time_sign,
     APODOXES_DESCRIPTIONS,
 )
+from html_viewer_builder import (
+    build_timeline_html as _build_timeline_html,
+    build_totals_with_filters as _build_totals_with_filters,
+    parse_greek_number as _parse_greek_number,
+    filter_count_df,
+    build_report_tab_entries,
+    build_print_html_document,
+    build_viewer_html_document,
+    generate_full_html_report,
+    EXCLUDED_PACKAGES,
+    EXCLUDED_PACKAGES_LABEL,
+    EXCLUSION_NOTE_HTML,
+    COMPLEX_FILE_WARNING_HTML,
+    PRINT_STYLES,
+    VIEWER_STYLES,
+    VIEWER_JS,
+    APODOXES_DESCRIPTIONS as _APODOXES_DESCRIPTIONS_HVB,
+)
 
 st.set_page_config(
     page_title="ATLAS Lite",
@@ -281,7 +299,7 @@ if not st.session_state["lite_file_uploaded"]:
                 4. Κατεβάστε το αρχείο σε μορφή PDF στον υπολογιστή σας.<br>
                 5. Ανεβάστε το αρχείο που κατεβάσατε στην παραπάνω φόρμα.<br>
                 <br>
-                <strong>Σημείωση:</strong> Τα δεδομένα επεξεργάζονται αποκλειστικά στον browser σας (client-side) και δεν αποθηκεύονται σε κανέναν server.
+                <strong>Σημείωση:</strong> Το αρχείο στέλνεται στον server για επεξεργασία και δεν αποθηκεύεται μόνιμα· διαγράφεται από τη μνήμη όταν κλείσετε τη σελίδα ή αφαιρέσετε/αντικαταστήσετε το αρχείο.
             </div>
         </div>
     ''', unsafe_allow_html=True)
@@ -322,7 +340,7 @@ if not st.session_state["lite_processing_done"]:
                 • Ανεβάστε το αρχείο από τη φόρμα παραπάνω<br>
                 • Πατήστε "Επεξεργασία" για ανάλυση<br>
                 • Μετά την επεξεργασία θα εμφανιστούν οι σύνδεσμοι εκτύπωσης<br>
-                • Τα δεδομένα επεξεργάζονται τοπικά και δεν αποθηκεύονται
+                • Τα δεδομένα επεξεργάζονται στον server και δεν αποθηκεύονται μόνιμα
             </div>
         </div>
     ''', unsafe_allow_html=True)
