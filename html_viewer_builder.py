@@ -830,27 +830,7 @@ def build_report_tab_entries(df, description_map=None):
     except Exception:
         pass
 
-    # -- Extra tabs (ΑΠΔ, Κύρια Δεδομένα, Αποζημίωση, Παράρτημα) --
-    try:
-        from html_extra_tabs import build_apd_tab, build_main_data_tab, build_apozimiosi_tab, build_annex_tab
-
-        apd_html = _safe_call(build_apd_tab, df, description_map)
-        if apd_html:
-            tab_entries.append(("apd", "Ανάλυση ΑΠΔ", apd_html))
-
-        main_data_html = _safe_call(build_main_data_tab, df, description_map)
-        if main_data_html:
-            tab_entries.append(("main_data", "Κύρια Δεδομένα", main_data_html))
-
-        apoz_html = _safe_call(build_apozimiosi_tab, df, description_map)
-        if apoz_html:
-            tab_entries.append(("apozimiosi", "Αποζημίωση", apoz_html))
-
-        annex_html = _safe_call(build_annex_tab, df)
-        if annex_html:
-            tab_entries.append(("annex", "Παράρτημα", annex_html))
-    except Exception:
-        pass
+    # Στην προβολή HTML εμφανίζονται μόνο οι ίδιες καρτέλες με τη Lite (όχι ΑΠΔ, Κύρια Δεδομένα, Αποζημίωση, Παράρτημα)
 
     # -- Complex file warning --
     if show_complex_warning:

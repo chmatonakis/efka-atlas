@@ -1761,6 +1761,13 @@ def compute_parallel_months(base_df: pd.DataFrame) -> list[tuple[int, int]]:
     if base_df.empty or not all(col in base_df.columns for col in ['Από', 'Έως']):
         return []
 
+    # Έως 2016: μην μετράνε πακέτα 127, 131, 132, 133, 026
+    if 'Κλάδος/Πακέτο Κάλυψης' in base_df.columns:
+        pkg = base_df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
+        base_df = base_df[~pkg.isin(EXCLUDED_PACKAGES_PARALLEL_UNTIL_2016)].copy()
+    if base_df.empty:
+        return []
+
     parallel_rows = []
     for _, row in base_df.iterrows():
         try:
@@ -1989,6 +1996,9 @@ def compute_parallel_months_2017(base_df: pd.DataFrame) -> list[tuple[int, int]]
 
 EXCLUDED_PACKAGES_PARALLEL = {'Α', 'Λ', 'Υ', 'Ο', 'Χ', '026', '899'}
 
+# Για παράλληλη έως 2016: εξαιρούνται και 127, 131, 132, 133 (και 026) ακόμα κι αν έχουν τύπο αποδοχών 01 κτλ με ημέρες
+EXCLUDED_PACKAGES_PARALLEL_UNTIL_2016 = {'127', '131', '132', '133', '026'}
+
 
 def _build_monthly_rows_for_parallel(df: pd.DataFrame, description_map: dict | None = None) -> list[dict]:
     """Κοινή λογική ανάλυσης ανά μήνα για Παράλληλη Ασφάλιση / Απασχόληση.
@@ -2122,6 +2132,13 @@ def build_parallel_print_df(df: pd.DataFrame, description_map: dict | None = Non
         return None
 
     p_df = pd.DataFrame(monthly_rows)
+    # Έως 2016: μην υπολογίζονται πακέτα 127, 131, 132, 133, 026 ακόμα και με τύπο αποδοχών 01 κτλ με ημέρες
+    if 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ' in p_df.columns:
+        pkg = p_df['ΚΛΑΔΟΣ/ΠΑΚΕΤΟ'].astype(str).str.strip()
+        p_df = p_df[~pkg.isin(EXCLUDED_PACKAGES_PARALLEL_UNTIL_2016)].copy()
+    if p_df.empty:
+        return None
+
     p_df['ΕΤΟΣ'] = p_df['ΕΤΟΣ'].astype(int)
     p_df['Μήνας_Num'] = p_df['Μήνας_Num'].astype(int)
 
@@ -8498,7 +8515,7 @@ def show_results_page(df, filename):
                         insurance_type = str(row.get('Τύπος Ασφάλισης', '')).strip()
                         employer = str(row.get('Α-Μ εργοδότη', '')).strip()
                         klados = str(row.get('Κλάδος/Πακέτο Κάλυψης', row.get('Κλάδος/Πακέτο', ''))).strip()
-                        if klados in excluded_packages:
+                        if klados in excluded_packages or klados in EXCLUDED_PACKAGES_PARALLEL_UNTIL_2016:
                             continue
                         klados_desc = description_map.get(klados, '') if 'description_map' in locals() else ''
                         earnings_type = str(row.get('Τύπος Αποδοχών', '')).strip()
@@ -9933,13 +9950,18 @@ def main():
             
             st.markdown("### Επεξεργασία Ολοκληρώθηκε")
             
+            st.info(
+                "**Πριν την προβολή:** Αν δεν εμφανίζεται η ανάλυση ή η HTML αναφορά, ελέγξτε αν ο browser αποκλείει **αναδυόμενα παράθυρα** (pop-ups). "
+                "Δείτε το σχετικό [βίντεο οδηγίες](https://www.loom.com/share/9b9fe5f9300f42a7a1cfd1315f629145)."
+            )
+            
             col1, col2, col3 = st.columns([1, 1, 1])
             with col1:
                 if st.button("Προβολή Αποτελεσμάτων", type="primary", use_container_width=True, key="show_results_btn"):
                     st.session_state['show_results'] = True
                     st.rerun()
             with col2:
-                if st.button("Άνοιγμα HTML Αναφοράς", type="secondary", use_container_width=True, key="open_html_btn"):
+                if st.button("Γρήγορη Προβολή - Lite", type="secondary", use_container_width=True, key="open_html_btn"):
                     st.session_state['open_html_report'] = True
                     st.rerun()
             
@@ -9985,15 +10007,19 @@ var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
                 with header_placeholder.container():
                     st.markdown("### Επεξεργασία Ολοκληρώθηκε")
                 
-                # Εμφάνιση κουμπιών
+                # Εμφάνιση μηνύματος + κουμπιών μαζί
                 with button_placeholder.container():
+                    st.info(
+                        "**Πριν την προβολή:** Αν δεν εμφανίζεται η ανάλυση ή η HTML αναφορά, ελέγξτε αν ο browser αποκλείει **αναδυόμενα παράθυρα** (pop-ups). "
+                        "Δείτε το σχετικό [βίντεο οδηγίες](https://www.loom.com/share/9b9fe5f9300f42a7a1cfd1315f629145)."
+                    )
                     col1, col2, col3 = st.columns([1, 1, 1])
                     with col1:
                         if st.button("Προβολή Αποτελεσμάτων", type="primary", use_container_width=True, key="show_results_btn"):
                             st.session_state['show_results'] = True
                             st.rerun()
                     with col2:
-                        if st.button("Άνοιγμα HTML Αναφοράς", type="secondary", use_container_width=True, key="open_html_btn"):
+                        if st.button("Γρήγορη Προβολή - Lite", type="secondary", use_container_width=True, key="open_html_btn"):
                             st.session_state['open_html_report'] = True
                             st.rerun()
                 

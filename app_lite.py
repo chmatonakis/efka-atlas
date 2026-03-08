@@ -98,6 +98,12 @@ div[data-testid="stDecoration"] {visibility: hidden;}
 div[data-testid="stStatusWidget"] {visibility: hidden;}
 
 .stApp { background-color: var(--color-bg); }
+/* Στενότερο εύρος περιεχομένου ώστε να μην απλώνονται τα πάντα */
+[data-testid="stAppViewContainer"] .block-container {
+    max-width: 1000px;
+    padding-left: 1rem;
+    padding-right: 1rem;
+}
 html, body, [data-testid="stAppViewContainer"], .block-container {
     font-family: var(--font-main) !important;
     font-size: 17px;
@@ -128,9 +134,9 @@ div.stButton > button[kind="secondary"]:hover {
     color: #000 !important; transform: translateY(-1px);
 }
 
-/* Κουμπί Προβολή Ανάλυσης: μπλε (η κλάση προστίθεται με JS) */
-button.btn-view-analysis,
-button.btn-view-analysis:hover {
+/* Κουμπί Αποδοχή και Προβολή μόνο: μπλε (μόνο μέσω κλάσης που βάζει το script) */
+div.stButton > button.btn-view-analysis,
+div.stButton > button.btn-view-analysis:hover {
     background-color: #2563eb !important; border-color: #2563eb !important;
     color: white !important;
 }
@@ -150,6 +156,9 @@ button.btn-view-analysis:hover {
 [data-testid="stCaptionContainer"],
 label {
     font-family: var(--font-main) !important;
+}
+.stTextInput label p {
+    font-weight: 700 !important;
 }
 [data-testid="stMarkdownContainer"] h3 {
     font-weight: 700 !important;
@@ -313,7 +322,7 @@ if not st.session_state["lite_file_uploaded"]:
                 Για επίσημη πληροφόρηση και θέματα συνταξιοδότησης, απευθυνθείτε αποκλειστικά στον e-ΕΦΚΑ.
             </div>
             <div class="footer-copyright">
-                © Syntaksi Pro - my advisor
+                © 2026 Χαράλαμπος Ματωνάκης - myadvisor
             </div>
         </div>
     ''', unsafe_allow_html=True)
@@ -366,38 +375,46 @@ if section != "all":
         st.experimental_set_query_params(section="all", client=st.session_state.get("lite_client_name", ""))
     st.rerun()
 
-if "lite_show_disclaimer" not in st.session_state:
-    st.session_state["lite_show_disclaimer"] = False
-if "lite_disclaimer_for" not in st.session_state:
-    st.session_state["lite_disclaimer_for"] = "viewer"  # "viewer" | "print"
 if "lite_do_open" not in st.session_state:
     st.session_state["lite_do_open"] = None  # None | "viewer" | "print"
 
-def show_disclaimer_dialog():
-    disclaimer_text = (
-        "Η αναφορά βασίζεται αποκλειστικά στα δεδομένα του αρχείου ΑΤΛΑΣ/e‑ΕΦΚΑ. "
-        "Ενδέχεται να υπάρχουν κενά ή σφάλματα και απαιτείται έλεγχος από τον χρήστη."
-    )
-    try:
-        @st.dialog("Πριν την προβολή")
-        def _dlg():
-            st.warning(disclaimer_text)
-            if st.button("Αποδοχή-Προβολή", type="primary"):
-                st.session_state["lite_do_open"] = st.session_state.get("lite_disclaimer_for", "viewer")
-                st.session_state["lite_show_disclaimer"] = False
-                try:
-                    st.query_params["section"] = "all"
-                    if client_value:
-                        st.query_params["client"] = client_value
-                except Exception:
-                    st.experimental_set_query_params(section="all", client=client_value)
-                st.rerun()
-        _dlg()
-    except Exception:
-        st.warning(disclaimer_text)
-        if st.button("Αποδοχή-Προβολή", type="primary"):
-            st.session_state["lite_do_open"] = st.session_state.get("lite_disclaimer_for", "viewer")
-            st.session_state["lite_show_disclaimer"] = False
+# Ονοματεπώνυμο από session (χρειάζεται και όταν section == "all" για την αναφορά)
+_client_name_from_session = st.session_state.get("lite_client_name", "")
+_client_value_from_session = _client_name_from_session.strip()
+
+# --- CENTERED INPUTS LAYOUT (μόνο όταν δεν είμαστε σε προβολή αναφοράς) ---
+if st.session_state.get("lite_do_open") is None:
+    # Δύο στήλες: αριστερά μηνύματα + κουμπιά, δεξιά πλαίσιο βίντεο οδηγίες
+    col_form, col_videos = st.columns([1.2, 1], gap="large")
+    with col_form:
+        # 1. Full Name Input
+        client_name = st.text_input("Ονοματεπώνυμο:", value=st.session_state.get("lite_client_name", ""), key="client_input")
+        st.session_state["lite_client_name"] = client_name
+
+        client_value = client_name.strip()
+
+        # Μόνιμο μήνυμα αποποίησης (κίτρινο πλαίσιο) κάτω από Ονοματεπώνυμο, πάνω από τα κουμπιά
+        st.markdown(
+            '<div style="background:#fef9c3;border:2px solid #eab308;border-radius:8px;padding:12px 16px;margin:12px 0 16px 0;font-size:0.95rem;line-height:1.5;color:#713f12;">'
+            '<strong>Πολύ σημαντικό:</strong> Η αναφορά βασίζεται αποκλειστικά στα δεδομένα του αρχείου ΑΤΛΑΣ/e‑ΕΦΚΑ. '
+            'Ενδέχεται να υπάρχουν κενά ή σφάλματα και απαιτείται έλεγχος από τον χρήστη.'
+            '</div>',
+            unsafe_allow_html=True
+        )
+
+        st.markdown(
+            '<div style="background:#dbeafe;border:2px solid #60a5fa;border-radius:8px;padding:12px 16px;margin:0 0 16px 0;font-size:0.95rem;line-height:1.5;color:#1e3a8a;">'
+            '<strong>Οδηγία για αναδυόμενα:</strong> Αν δεν εμφανίζεται η ανάλυση, ελέγξτε αν ο browser αποκλείει '
+            '<strong>αναδυόμενα παράθυρα</strong>. '
+            '<a href="https://www.loom.com/share/9b9fe5f9300f42a7a1cfd1315f629145" target="_blank" rel="noopener">Βίντεο οδηγίες</a>.'
+            '</div>',
+            unsafe_allow_html=True
+        )
+
+        # 2. Κουμπιά: Αποδοχή και Προβολή (μπλε μέσω CSS), Εκτύπωση & Νέο αρχείο
+        # Χρησιμοποιούμε type="secondary" ώστε να μην εφαρμόζεται το κόκκινο primary· το μπλε το βάζει το CSS στο πρώτο κουμπί
+        if st.button("Αποδοχή και Προβολή", type="secondary", use_container_width=True, key="view_analysis_btn"):
+            st.session_state["lite_do_open"] = "viewer"
             try:
                 st.query_params["section"] = "all"
                 if client_value:
@@ -406,83 +423,95 @@ def show_disclaimer_dialog():
                 st.experimental_set_query_params(section="all", client=client_value)
             st.rerun()
 
-# --- CENTERED INPUTS LAYOUT ---
-# We use empty columns to center the content in the middle ~40-50%
-col_left, col_mid, col_right = st.columns([1, 1.5, 1], gap="medium")
-
-with col_mid:
-    # 1. Full Name Input
-    client_name = st.text_input("Ονοματεπώνυμο:", value=st.session_state.get("lite_client_name", ""), key="client_input")
-    st.session_state["lite_client_name"] = client_name
-
-    client_value = client_name.strip()
-
-    st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
-
-    # 2. Τρία κουμπιά: Προβολή Ανάλυσης (κέντρο πάνω, μπλε), Εκτύπωση & Νέο αρχείο (κάτω)
-    if st.button("Προβολή Ανάλυσης", type="primary", use_container_width=True, key="view_analysis_btn"):
-        st.session_state["lite_disclaimer_for"] = "viewer"
-        st.session_state["lite_show_disclaimer"] = True
-        st.rerun()
-
-    st.markdown("""
-    <script>
-    (function() {
-      function styleViewButton() {
-        var btns = document.querySelectorAll('div[data-testid="stButton"] button');
-        for (var i = 0; i < btns.length; i++) {
-          if (btns[i].textContent.trim() === 'Προβολή Ανάλυσης') {
-            btns[i].classList.add('btn-view-analysis');
-            return true;
+        st.markdown("""
+        <script>
+        (function() {
+          function styleViewButton() {
+            var btns = document.querySelectorAll('div[data-testid="stButton"] button, div.stButton button');
+            for (var i = 0; i < btns.length; i++) {
+              var t = (btns[i].textContent || '').trim();
+              if (t.indexOf('Αποδοχή και Προβολή') !== -1) {
+                btns[i].classList.add('btn-view-analysis');
+                btns[i].style.setProperty('background-color', '#2563eb', 'important');
+                btns[i].style.setProperty('border-color', '#2563eb', 'important');
+                btns[i].style.setProperty('color', 'white', 'important');
+                return true;
+              }
+            }
+            return false;
           }
-        }
-        return false;
-      }
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', styleViewButton);
-      } else {
-        styleViewButton();
-      }
-      setTimeout(styleViewButton, 500);
-      setTimeout(styleViewButton, 1500);
-    })();
-    </script>
-    """, unsafe_allow_html=True)
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', styleViewButton);
+          } else {
+            styleViewButton();
+          }
+          setTimeout(styleViewButton, 100);
+          setTimeout(styleViewButton, 500);
+          setTimeout(styleViewButton, 1500);
+        })();
+        </script>
+        """, unsafe_allow_html=True)
 
-    st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
-    b_col1, b_col2 = st.columns([1, 1], gap="small")
-    
-    with b_col1:
-        if st.button("Εκτύπωση", type="primary", use_container_width=True):
-            st.session_state["lite_disclaimer_for"] = "print"
-            st.session_state["lite_show_disclaimer"] = True
-            st.rerun()
-    
-    with b_col2:
-        if st.button("Νέο αρχείο", type="secondary", use_container_width=True):
-            for key in [
-                "lite_file_uploaded",
-                "lite_processing_done",
-                "lite_uploaded_file",
-                "lite_filename",
-                "lite_df",
-                "lite_client_name",
-                "lite_show_disclaimer",
-                "lite_disclaimer_for",
-                "lite_do_open",
-            ]:
-                if key in st.session_state:
-                    del st.session_state[key]
-            try:
-                st.query_params.clear()
-            except Exception:
-                st.experimental_set_query_params()
-            st.rerun()
+        st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+        b_col1, b_col2 = st.columns([1, 1], gap="small")
 
-if st.session_state.get("lite_show_disclaimer"):
-    show_disclaimer_dialog()
+        with b_col1:
+            if st.button("Εκτύπωση", type="primary", use_container_width=True):
+                st.session_state["lite_do_open"] = "print"
+                try:
+                    st.query_params["section"] = "all"
+                    if client_value:
+                        st.query_params["client"] = client_value
+                except Exception:
+                    st.experimental_set_query_params(section="all", client=client_value)
+                st.rerun()
 
-description_map = build_description_map(df)
+        with b_col2:
+            if st.button("Νέο αρχείο", type="secondary", use_container_width=True):
+                for key in [
+                    "lite_file_uploaded",
+                    "lite_processing_done",
+                    "lite_uploaded_file",
+                    "lite_filename",
+                    "lite_df",
+                    "lite_client_name",
+                    "lite_do_open",
+                ]:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                try:
+                    st.query_params.clear()
+                except Exception:
+                    st.experimental_set_query_params()
+                st.rerun()
+
+    with col_videos:
+        st.markdown(
+            '<div style="background:#f8fafc;border:2px solid #e2e8f0;border-radius:10px;padding:20px;margin-top:0;">'
+            '<div style="font-size:1rem;font-weight:700;color:#1e293b;margin-bottom:14px;">Βίντεο οδηγίες</div>'
+            '<ul style="margin:0;padding-left:20px;line-height:1.8;color:#475569;font-size:0.95rem;">'
+            '<li style="margin-bottom:10px;"><a href="https://youtu.be/3EEn0s9izRU?si=GtkPlb4ZY170MEvf" target="_blank" rel="noopener" style="color:#2563eb;font-weight:600;">ΟΑΕΕ: Ανάλυση βιογραφικού ΑΤΛΑΣ με το ATLAS Lite</a></li>'
+            '<li><a href="https://youtu.be/B7JOOCFK5AU?si=J7hSSYyLYK_eOn2g" target="_blank" rel="noopener" style="color:#2563eb;font-weight:600;">ΙΚΑ &amp; ΟΑΕΕ Παράλληλη: Ανάλυση βιογραφικού ΑΤΛΑΣ με το ATLAS Lite</a></li>'
+            '</ul></div>',
+            unsafe_allow_html=True
+        )
+
+    # Footer/disclaimer όπως στην κύρια εφαρμογή
+    st.markdown('''
+        <div class="main-footer">
+            <div class="footer-disclaimer">
+                <strong>ΑΠΟΠΟΙΗΣΗ ΕΥΘΥΝΗΣ:</strong> Η παρούσα εφαρμογή αποτελεί εργαλείο ιδιωτικής πρωτοβουλίας για την διευκόλυνση ανάγνωσης του ασφαλιστικού βιογραφικού.
+                Δεν συνδέεται με τον e-ΕΦΚΑ ή άλλο δημόσιο φορέα.
+                Τα αποτελέσματα παράγονται βάσει των δεδομένων του αρχείου PDF που εισάγετε και ενδέχεται να περιέχουν ανακρίβειες.
+                Για επίσημη πληροφόρηση και θέματα συνταξιοδότησης, απευθυνθείτε αποκλειστικά στον e-ΕΦΚΑ.
+            </div>
+            <div class="footer-copyright">
+                © 2026 Χαράλαμπος Ματωνάκης - myadvisor
+            </div>
+        </div>
+    ''', unsafe_allow_html=True)
+
+# Όταν section != "all" χρησιμοποιούμε ελαφρά defaults (χωρίς build_description_map).
 excluded_packages = {"Α", "Λ", "Υ", "Ο", "Χ", "026", "899"}
 excluded_packages_label = ", ".join(sorted(excluded_packages))
 LITE_EXCLUSION_NOTE = f'<div class="lite-exclusion-note">Εξαιρούνται από την καταμέτρηση: {excluded_packages_label}</div>'
@@ -493,10 +522,15 @@ COMPLEX_FILE_WARNING_HTML = (
     '⚠️ Προσοχή: Περίπλοκο αρχείο — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.'
     '</div>'
 )
-if 'Κλάδος/Πακέτο Κάλυψης' in df.columns:
-    pkg_series = df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
-    count_df = df[~pkg_series.isin(excluded_packages)].copy()
+if section != "all":
+    description_map = {}
+    if 'Κλάδος/Πακέτο Κάλυψης' in df.columns:
+        pkg_series = df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
+        count_df = df[~pkg_series.isin(excluded_packages)].copy()
+    else:
+        count_df = df.copy()
 else:
+    description_map = {}
     count_df = df.copy()
 
 def _parse_greek_number(s):
@@ -1158,8 +1192,29 @@ def _build_totals_with_filters(display_summary, raw_df=None, desc_map=None, warn
     return section_html
 
 # --- FULL WIDTH REPORT OUTPUT ---
-if section == "all":
-    # Μπλε κουμπί "Προβολή Ανάλυσης" (script τρέχει στο parent document)
+if section == "all" and st.session_state.get("lite_do_open") in {"viewer", "print"}:
+    client_name = _client_name_from_session
+    client_value = _client_value_from_session
+
+    # Μεγάλο κεντραρισμένο spinner αμέσως (πρώτο πράγμα που εμφανίζεται)
+    _loading_placeholder = st.empty()
+    _spinner_html = """
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:280px;gap:20px;padding:40px;">
+      <div style="width:64px;height:64px;border:6px solid #e2e8f0;border-top-color:#2563eb;border-radius:50%;animation:lite-spin 0.9s linear infinite;"></div>
+      <p style="margin:0;font-size:1.35rem;font-weight:700;color:#1e293b;">Φόρτωση αναφοράς...</p>
+    </div>
+    <style>@keyframes lite-spin { to { transform: rotate(360deg); } }</style>
+    """
+    _loading_placeholder.markdown(_spinner_html, unsafe_allow_html=True)
+
+    description_map = build_description_map(df)
+    if 'Κλάδος/Πακέτο Κάλυψης' in df.columns:
+        pkg_series = df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
+        count_df = df[~pkg_series.isin(excluded_packages)].copy()
+    else:
+        count_df = df.copy()
+
+    # Μπλε κουμπί "Αποδοχή και Προβολή" (script τρέχει στο parent document)
     components.html("""
     <script>
     (function() {
@@ -1167,7 +1222,7 @@ if section == "all":
         var doc = window.parent.document;
         var btns = doc.querySelectorAll('button');
         for (var i = 0; i < btns.length; i++) {
-          if (btns[i].textContent.trim().indexOf('Προβολή Ανάλυσης') !== -1) {
+          if (btns[i].textContent.trim().indexOf('Αποδοχή και Προβολή') !== -1) {
             btns[i].classList.add('btn-view-analysis');
             btns[i].style.setProperty('background-color', '#2563eb', 'important');
             btns[i].style.setProperty('border-color', '#2563eb', 'important');
@@ -1362,10 +1417,11 @@ if section == "all":
         return audit_df, display_summary, final_display_df, print_style_rows, tab_entries
 
     if do_open:
-        with st.spinner("Φόρτωση αναφοράς..."):
-            audit_df, display_summary, final_display_df, print_style_rows, tab_entries = _build_report_block()
+        audit_df, display_summary, final_display_df, print_style_rows, tab_entries = _build_report_block()
     else:
         audit_df, display_summary, final_display_df, print_style_rows, tab_entries = _build_report_block()
+
+    _loading_placeholder.empty()
 
     # --- Sidebar nav items ---
     nav_items = "\n".join(
@@ -2105,6 +2161,7 @@ document.addEventListener('DOMContentLoaded', function() {{
 </script><p style="margin:0;font-size:14px;color:#666;">Άνοιγμα Προβολής Ανάλυσης...</p></body></html>"""
         components.html(open_viewer_snippet, height=40)
         st.session_state["lite_do_open"] = None
+        st.rerun()
     elif do_open == "print":
         open_print_snippet = f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
 <script>
@@ -2117,3 +2174,4 @@ document.addEventListener('DOMContentLoaded', function() {{
 </script><p style="margin:0;font-size:14px;color:#666;">Άνοιγμα εκτυπώσιμης μορφής...</p></body></html>"""
         components.html(open_print_snippet, height=40)
         st.session_state["lite_do_open"] = None
+        st.rerun()
