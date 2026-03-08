@@ -1624,15 +1624,17 @@ def find_column_by_pattern(df, patterns):
 
 def normalize_column_names(df):
     """
-    Κανονικοποίηση ονομάτων στηλών με mapping σε standard names
+    Κανονικοποίηση ονομάτων στηλών με mapping σε standard names.
+    Υποστηρίζει κεφαλές που εμφανίζονται «σε μια λέξη» (π.χ. PDF από Firefox: ΣυνολικέςΕισφορές, Κλάδος/ΠακέτοΚάλυψης).
     """
     # Mapping από patterns -> standard name (με προτεραιότητα - πιο συγκεκριμένα πρώτα)
     column_mapping = {
-        'Συνολικές εισφορές': ['συνολικές εισφορές', 'συνολικες εισφορες', 'συνολικ εισφορ'],
-        'Μικτές αποδοχές': ['μικτές αποδοχές', 'μικτες αποδοχες', 'μικτ αποδοχ'],
-        'Τύπος Αποδοχών': ['τύπος αποδοχών', 'τυπος αποδοχων', 'τυπος απο'],
-        'Κλάδος/Πακέτο Κάλυψης': ['κλάδος πακέτο κάλυψης', 'κλαδος πακετο καλυψης', 'κλάδος', 'πακέτο κάλυψης'],
-        'Α-Μ εργοδότη': ['α μ εργοδότη', 'α/μ εργοδ', 'εργοδότη', 'α-μ εργοδότη'],
+        'Συνολικές εισφορές': ['συνολικές εισφορές', 'συνολικες εισφορες', 'συνολικ εισφορ', 'συνολικέςεισφορές', 'συνολικεςεισφορες'],
+        'Μικτές αποδοχές': ['μικτές αποδοχές', 'μικτες αποδοχες', 'μικτ αποδοχ', 'μικτέςαποδοχές', 'μικτεςαποδοχες'],
+        'Τύπος Αποδοχών': ['τύπος αποδοχών', 'τυπος αποδοχων', 'τυπος απο', 'τύποςαποδοχών', 'τυποςαποδοχων'],
+        'Τύπος Ασφάλισης': ['τύπος ασφάλισης', 'τυπος ασφαλισης', 'μημισθωτηασφαλιση', 'μισθωτήασφάλιση', 'μισθωτη ασφαλιση'],
+        'Κλάδος/Πακέτο Κάλυψης': ['κλάδος πακέτο κάλυψης', 'κλαδος πακετο καλυψης', 'κλάδος', 'πακέτο κάλυψης', 'κλάδος/πακέτοκάλυψης', 'κλαδοςπακετοκαλυψης'],
+        'Α-Μ εργοδότη': ['α μ εργοδότη', 'α/μ εργοδ', 'εργοδότη', 'α-μ εργοδότη', 'αμεργοδότη', 'α-μεργοδότη'],
         'Ημέρες': ['ημέρες', 'ημερες', 'ημερ'],
         'Έτη': ['έτη', 'ετη'],
         'Μήνες': ['μήνες', 'μηνες'],
@@ -1647,36 +1649,53 @@ def normalize_column_names(df):
     # Πρώτα ψάχνουμε για exact matches ή πολύ κοντινά matches
     for col in df.columns:
         col_normalized = normalize_column_name(col).lower()
+        col_no_space = col_normalized.replace(' ', '').replace('/', '').replace('-', '').replace('_', '')
         
         # Ελέγχουμε για κάθε standard name (με τη σειρά προτεραιότητας)
+        matched = False
         for standard_name, patterns in column_mapping.items():
             if standard_name in used_standards:
                 continue
                 
             # Έλεγχος για match
-            matched = False
             for pattern in patterns:
                 # Ελέγχουμε αν το pattern ταιριάζει
                 if pattern == col_normalized:
-                    # Exact match
                     rename_dict[col] = standard_name
                     used_standards.add(standard_name)
                     matched = True
                     break
                 elif len(pattern) > 5 and pattern in col_normalized:
-                    # Substring match (αλλά μόνο για μακρά patterns)
                     rename_dict[col] = standard_name
                     used_standards.add(standard_name)
                     matched = True
                     break
                 elif len(col_normalized) > 5 and col_normalized in pattern:
-                    # Reverse substring match
+                    rename_dict[col] = standard_name
+                    used_standards.add(standard_name)
+                    matched = True
+                    break
+                # Παραλλαγή «μία λέξη» (π.χ. από Firefox): στήλη χωρίς κενά/παύλες = standard χωρίς κενά/παύλες
+                pattern_no_space = pattern.replace(' ', '').replace('/', '').replace('-', '').replace('_', '')
+                if len(pattern_no_space) >= 3 and (col_no_space == pattern_no_space or pattern_no_space in col_no_space or col_no_space in pattern_no_space):
                     rename_dict[col] = standard_name
                     used_standards.add(standard_name)
                     matched = True
                     break
             
             if matched:
+                break
+        
+        if matched:
+            continue
+        # Fallback: standard name χωρίς κενά/σύμβολα = στήλη χωρίς κενά/σύμβολα
+        for standard_name in column_mapping:
+            if standard_name in used_standards:
+                continue
+            standard_no_space = standard_name.lower().replace(' ', '').replace('/', '').replace('-', '').replace('_', '')
+            if len(standard_no_space) >= 3 and (col_no_space == standard_no_space or standard_no_space in col_no_space):
+                rename_dict[col] = standard_name
+                used_standards.add(standard_name)
                 break
     
     # Εφαρμογή mapping
@@ -1852,7 +1871,7 @@ def compute_parallel_months(base_df: pd.DataFrame) -> list[tuple[int, int]]:
         has_tsm = tsm_days > 0
         has_oga = oga_days > 0
 
-        if (has_ika and has_oaee) or (has_oaee and has_tsm) or (has_oga and (has_ika or has_oaee)):
+        if (has_ika and has_oaee) or (has_ika and has_tsm) or (has_oaee and has_tsm) or (has_oga and (has_ika or has_oaee)):
             if year <= 2016:
                 valid_months.append((year, month))
 
@@ -2147,7 +2166,7 @@ def build_parallel_print_df(df: pd.DataFrame, description_map: dict | None = Non
         oaee_d = min(group.loc[group['is_oaee'], 'Ημέρες'].sum(), 25)
         tsm_d = min(group.loc[group['is_tsm'], 'Ημέρες'].sum(), 25)
         oga_d = min(group.loc[group['is_oga'], 'Ημέρες'].sum(), 25)
-        if (ika_d > 0 and oaee_d > 0) or (oaee_d > 0 and tsm_d > 0) or (oga_d > 0 and (ika_d > 0 or oaee_d > 0)):
+        if (ika_d > 0 and oaee_d > 0) or (ika_d > 0 and tsm_d > 0) or (oaee_d > 0 and tsm_d > 0) or (oga_d > 0 and (ika_d > 0 or oaee_d > 0)):
             valid_months.append((year, month))
 
     if not valid_months:
@@ -2155,7 +2174,7 @@ def build_parallel_print_df(df: pd.DataFrame, description_map: dict | None = Non
 
     valid_df = pd.DataFrame(valid_months, columns=['ΕΤΟΣ', 'Μήνας_Num'])
     filtered = p_df.merge(valid_df, on=['ΕΤΟΣ', 'Μήνας_Num'], how='inner')
-    filtered = filtered[filtered['is_ika_general'] | filtered['is_oaee'] | filtered['is_tsm'] | filtered['is_oga']]
+    filtered = filtered[filtered['is_ika'] | filtered['is_oaee'] | filtered['is_tsm'] | filtered['is_oga']]
     filtered = filtered.drop(columns=['is_ika', 'is_oaee', 'is_tsm', 'is_oga', 'is_ika_general'])
 
     if filtered.empty:
@@ -3191,7 +3210,7 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
             audit_rows.append({
                 'A/A': 5, 'Έλεγχος': 'Παράλληλη ασφάλιση',
                 'Εύρημα': 'Πιθανή',
-                'Λεπτομέρειες': 'Βρέθηκαν χρονικά επικαλυπτόμενα διαστήματα ΙΚΑ (αποδοχές 01, 16, ή 99) & ΟΑΕΕ (Κ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ) ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.',
+                'Λεπτομέρειες': 'Βρέθηκαν χρονικά επικαλυπτόμενα διαστήματα ΙΚΑ (αποδοχές 01, 16, ή 99) & ΟΑΕΕ (Κ), ΙΚΑ & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ) ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.',
                 'Ενέργειες': 'Ελέγξτε την καρτέλα "Παράλληλη Ασφάλιση"'
             })
         else:
@@ -3529,7 +3548,7 @@ def build_summary_grouped_display(summary_df: pd.DataFrame, source_df: pd.DataFr
     else:
         month_days, year_days = 25, 300
 
-    grouped = summary_df.groupby(group_keys).agg({
+    agg_spec = {
         'Από_dt': 'min',
         'Έως_dt': 'max',
         'Έτη': 'sum',
@@ -3537,7 +3556,16 @@ def build_summary_grouped_display(summary_df: pd.DataFrame, source_df: pd.DataFr
         'Ημέρες': 'sum',
         'Μικτές αποδοχές': 'sum',
         'Συνολικές εισφορές': 'sum'
-    }).reset_index()
+    }
+    agg_dict = {col: agg_spec[col] for col in agg_spec if col in summary_df.columns}
+    if not agg_dict:
+        return pd.DataFrame()
+    grouped = summary_df.groupby(group_keys).agg(agg_dict).reset_index()
+
+    # Βεβαιωθείτε ότι υπάρχουν οι στήλες που χρησιμοποιεί το υπόλοιπο κώδικα
+    for col in ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές']:
+        if col not in grouped.columns:
+            grouped[col] = 0
 
     # Cap μήνα-μήνα πάνω στο ισοδύναμο ημερών (Έτη/Μήνες/Ημέρες), χωρίς διάκριση Τύπου Αποδοχών.
     raw_total_days = (
@@ -3562,9 +3590,13 @@ def build_summary_grouped_display(summary_df: pd.DataFrame, source_df: pd.DataFr
     grouped['Μήνες'] = months_series
     grouped['Ημέρες'] = days_series
 
-    grouped['Από'] = grouped['Από_dt'].dt.strftime('%d/%m/%Y')
-    grouped['Έως'] = grouped['Έως_dt'].dt.strftime('%d/%m/%Y')
-    grouped = grouped.drop(columns=['Από_dt', 'Έως_dt'])
+    if 'Από_dt' in grouped.columns:
+        grouped['Από'] = grouped['Από_dt'].dt.strftime('%d/%m/%Y')
+    if 'Έως_dt' in grouped.columns:
+        grouped['Έως'] = grouped['Έως_dt'].dt.strftime('%d/%m/%Y')
+    for dt_col in ['Από_dt', 'Έως_dt']:
+        if dt_col in grouped.columns:
+            grouped = grouped.drop(columns=[dt_col])
 
     record_counts = summary_df.groupby(group_keys).size().reset_index(name='Αριθμός Εγγραφών')
     summary_final = grouped.merge(record_counts, on=group_keys, how='left')
@@ -3579,18 +3611,20 @@ def build_summary_grouped_display(summary_df: pd.DataFrame, source_df: pd.DataFr
         desc_df_merge['Κλάδος/Πακέτο Κάλυψης'] = desc_df_merge['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
         summary_final = summary_final.merge(desc_df_merge, on='Κλάδος/Πακέτο Κάλυψης', how='left')
 
-    columns_order = ['Κλάδος/Πακέτο Κάλυψης']
-    if 'Ταμείο' in summary_final.columns:
-        columns_order.append('Ταμείο')
-    if 'Περιγραφή' in summary_final.columns:
-        columns_order.append('Περιγραφή')
-    columns_order += ['Από', 'Έως', 'Συνολικές ημέρες', 'Έτη', 'Μήνες', 'Ημέρες',
+    desired_order = ['Κλάδος/Πακέτο Κάλυψης', 'Ταμείο', 'Περιγραφή',
+                      'Από', 'Έως', 'Συνολικές ημέρες', 'Έτη', 'Μήνες', 'Ημέρες',
                       'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
+    columns_order = [c for c in desired_order if c in summary_final.columns]
+    extra_cols = [c for c in summary_final.columns if c not in desired_order]
+    if extra_cols:
+        import logging
+        logging.warning(f"[build_summary_grouped_display] Unexpected columns found (dropped): {extra_cols}")
     summary_final = summary_final[columns_order]
 
     display_summary = summary_final.copy()
-    display_summary['Μικτές αποδοχές'] = display_summary['Μικτές αποδοχές'].apply(format_currency)
-    display_summary['Συνολικές εισφορές'] = display_summary['Συνολικές εισφορές'].apply(format_currency)
+    for curr_col in ['Μικτές αποδοχές', 'Συνολικές εισφορές']:
+        if curr_col in display_summary.columns:
+            display_summary[curr_col] = display_summary[curr_col].apply(format_currency)
 
     numeric_columns_summary = ['Συνολικές ημέρες', 'Έτη', 'Μήνες', 'Ημέρες', 'Αριθμός Εγγραφών']
     for col in numeric_columns_summary:
@@ -4306,7 +4340,7 @@ def render_totals_tab(
     group_keys = ['Κλάδος/Πακέτο Κάλυψης']
     if 'Ταμείο' in summary_df.columns:
         group_keys.append('Ταμείο')
-    grouped = summary_df.groupby(group_keys).agg({
+    agg_spec = {
         'Από_dt': 'min',
         'Έως_dt': 'max',
         'Έτη': 'sum',
@@ -4314,7 +4348,15 @@ def render_totals_tab(
         'Ημέρες': 'sum',
         'Μικτές αποδοχές': 'sum',
         'Συνολικές εισφορές': 'sum'
-    }).reset_index()
+    }
+    agg_dict = {col: agg_spec[col] for col in agg_spec if col in summary_df.columns}
+    if not agg_dict:
+        st.warning("Δεν βρέθηκαν στήλες για ομαδοποίηση στη Συνοπτική Αναφορά.")
+        return
+    grouped = summary_df.groupby(group_keys).agg(agg_dict).reset_index()
+    for col in ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές']:
+        if col not in grouped.columns:
+            grouped[col] = 0
 
     basis_label = st.session_state.get('ins_days_basis', 'Μήνας = 25, Έτος = 300')
     if str(basis_label).startswith('Μήνας = 30'):
@@ -4361,18 +4403,16 @@ def render_totals_tab(
         desc_df_merge['Κλάδος/Πακέτο Κάλυψης'] = desc_df_merge['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
         summary_final = summary_final.merge(desc_df_merge, on='Κλάδος/Πακέτο Κάλυψης', how='left')
 
-    columns_order = ['Κλάδος/Πακέτο Κάλυψης']
-    if 'Ταμείο' in summary_final.columns:
-        columns_order.append('Ταμείο')
-    if 'Περιγραφή' in summary_final.columns:
-        columns_order.append('Περιγραφή')
-    columns_order += ['Από', 'Έως', 'Συνολικές ημέρες', 'Έτη', 'Μήνες', 'Ημέρες',
+    desired_order = ['Κλάδος/Πακέτο Κάλυψης', 'Ταμείο', 'Περιγραφή',
+                     'Από', 'Έως', 'Συνολικές ημέρες', 'Έτη', 'Μήνες', 'Ημέρες',
                      'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
+    columns_order = [c for c in desired_order if c in summary_final.columns]
     summary_final = summary_final[columns_order]
 
     display_summary = summary_final.copy()
-    display_summary['Μικτές αποδοχές'] = display_summary['Μικτές αποδοχές'].apply(format_currency)
-    display_summary['Συνολικές εισφορές'] = display_summary['Συνολικές εισφορές'].apply(format_currency)
+    for curr_col in ['Μικτές αποδοχές', 'Συνολικές εισφορές']:
+        if curr_col in display_summary.columns:
+            display_summary[curr_col] = display_summary[curr_col].apply(format_currency)
     for col in ['Συνολικές ημέρες', 'Έτη', 'Μήνες', 'Ημέρες', 'Αριθμός Εγγραφών']:
         if col in display_summary.columns:
             decimals = 1 if col in ['Έτη', 'Μήνες'] else 0
@@ -5393,7 +5433,7 @@ def show_results_page(df, filename):
                          audit_rows.append({
                             'A/A': 5, 'Έλεγχος': 'Παράλληλη ασφάλιση', 
                             'Εύρημα': 'Πιθανή', 
-                            'Λεπτομέρειες': 'Βρέθηκαν χρονικά επικαλυπτόμενα διαστήματα ΙΚΑ (αποδοχές 01, 16, ή 99) & ΟΑΕΕ (Κ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ) ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.',
+                            'Λεπτομέρειες': 'Βρέθηκαν χρονικά επικαλυπτόμενα διαστήματα ΙΚΑ (αποδοχές 01, 16, ή 99) & ΟΑΕΕ (Κ), ΙΚΑ & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ) ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.',
                             'Ενέργειες': 'Ελέγξτε την καρτέλα "Παράλληλη Ασφάλιση"'
                         })
                     else:
@@ -5900,7 +5940,7 @@ def show_results_page(df, filename):
             group_keys.append('Κλάδος/Πακέτο Κάλυψης')
             if earnings_col:
                 group_keys.append(earnings_col)
-            yearly_grouped = yearly_df.groupby(group_keys).agg({
+            agg_spec = {
                 'Από': 'min',
                 'Έως': 'max',
                 'Έτη': 'sum',
@@ -5908,216 +5948,230 @@ def show_results_page(df, filename):
                 'Ημέρες': 'sum',
                 'Μικτές αποδοχές': 'sum',
                 'Συνολικές εισφορές': 'sum'
-            }).reset_index()
-            
-            # Μετράμε τις εγγραφές για κάθε συνδυασμό
-            count_keys = ['Έτος', 'Ταμείο']
-            if 'Τύπος Ασφάλισης' in yearly_df.columns:
-                count_keys.append('Τύπος Ασφάλισης')
-            count_keys.append('Κλάδος/Πακέτο Κάλυψης')
-            if earnings_col:
-                count_keys.append(earnings_col)
-            yearly_counts = yearly_df.groupby(count_keys).size().reset_index()
-            yearly_counts.columns = count_keys + ['Αριθμός Εγγραφών']
-            
-            # Συνδυάζουμε τα δεδομένα
-            yearly_final = yearly_grouped.merge(yearly_counts, on=count_keys, how='left')
-
-            # Μετατρέπουμε σε ακέραιους όπου απαιτείται για καθαρή εμφάνιση
-            for int_col in ['Έτη', 'Μήνες', 'Ημέρες', 'Αριθμός Εγγραφών']:
-                if int_col in yearly_final.columns:
-                    yearly_final[int_col] = yearly_final[int_col].fillna(0).astype(int)
-
-            # Κανονικοποίηση ονόματος στήλης τύπου αποδοχών για εμφάνιση
-            if earnings_col and earnings_col != 'Τύπος Αποδοχών' and earnings_col in yearly_final.columns:
-                yearly_final = yearly_final.rename(columns={earnings_col: 'Τύπος Αποδοχών'})
-            
-            # Αναδιατάσσουμε τις στήλες: Έτος, Ταμείο, Τύπος Ασφάλισης, Κλάδος/Πακέτο, Από, Έως, Τύπος Αποδοχών, συνολικά
-            display_order = ['Έτος', 'Ταμείο']
-            if 'Τύπος Ασφάλισης' in yearly_final.columns:
-                display_order.append('Τύπος Ασφάλισης')
-            display_order += ['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως']
-            if 'Τύπος Αποδοχών' in yearly_final.columns:
-                display_order.append('Τύπος Αποδοχών')
-            display_order += ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
-            yearly_final = yearly_final[display_order]
-            
-            # Ταξινομούμε πρώτα ανά έτος, μετά ανά ταμείο, μετά ανά κλάδο
-            sort_keys = ['Έτος', 'Ταμείο']
-            if 'Τύπος Ασφάλισης' in yearly_final.columns:
-                sort_keys.append('Τύπος Ασφάλισης')
-            sort_keys.append('Κλάδος/Πακέτο Κάλυψης')
-            if 'Τύπος Αποδοχών' in yearly_final.columns:
-                sort_keys.append('Τύπος Αποδοχών')
-            yearly_final = yearly_final.sort_values(sort_keys)
-            
-            # Δημιουργούμε αντίγραφο για εμφάνιση με μορφοποίηση και βελτιωμένη εμφάνιση
-            display_yearly = yearly_final.copy()
-            
-            # Εφαρμόζουμε μορφοποίηση νομισμάτων μόνο για εμφάνιση
-            display_yearly['Μικτές αποδοχές'] = display_yearly['Μικτές αποδοχές'].apply(format_currency)
-            display_yearly['Συνολικές εισφορές'] = display_yearly['Συνολικές εισφορές'].apply(format_currency)
-            
-            # Βελτιώνουμε την εμφάνιση για καλύτερη αναγνωσιμότητα
-            # Δημιουργούμε μια νέα στήλη για εμφάνιση με κενά όπου επαναλαμβάνονται τα έτη/ταμεία
-            display_yearly_detailed = display_yearly.copy()
-            
-            # Αφαιρούμε επαναλαμβανόμενα έτη (με σωστό data type)
-            display_yearly_detailed['Έτος_Display'] = display_yearly_detailed['Έτος'].astype(str)
-            for i in range(1, len(display_yearly_detailed)):
-                if display_yearly_detailed.iloc[i]['Έτος'] == display_yearly_detailed.iloc[i-1]['Έτος']:
-                    display_yearly_detailed.iloc[i, display_yearly_detailed.columns.get_loc('Έτος_Display')] = ''
-            
-            # Αφαιρούμε επαναλαμβανόμενα ταμεία
-            display_yearly_detailed['Ταμείο_Display'] = display_yearly_detailed['Ταμείο'].astype(str)
-            for i in range(1, len(display_yearly_detailed)):
-                if (display_yearly_detailed.iloc[i]['Έτος'] == display_yearly_detailed.iloc[i-1]['Έτος'] and 
-                    display_yearly_detailed.iloc[i]['Ταμείο'] == display_yearly_detailed.iloc[i-1]['Ταμείο']):
-                    display_yearly_detailed.iloc[i, display_yearly_detailed.columns.get_loc('Ταμείο_Display')] = ''
-
-            # Αφαιρούμε επαναλαμβανόμενο «Τύπος Ασφάλισης» ανά (Έτος, Ταμείο, Τύπος)
-            if 'Τύπος Ασφάλισης' in display_yearly_detailed.columns:
-                type_series = display_yearly_detailed['Τύπος Ασφάλισης'].fillna('').astype(str)
-                display_yearly_detailed['Τύπος_Ασφάλισης_Display'] = type_series
-                for i in range(1, len(display_yearly_detailed)):
-                    same_group = (
-                        display_yearly_detailed.iloc[i]['Έτος'] == display_yearly_detailed.iloc[i-1]['Έτος'] and
-                        display_yearly_detailed.iloc[i]['Ταμείο'] == display_yearly_detailed.iloc[i-1]['Ταμείο'] and
-                        type_series.iloc[i] == type_series.iloc[i-1]
-                    )
-                    if same_group:
-                        display_yearly_detailed.iloc[i, display_yearly_detailed.columns.get_loc('Τύπος_Ασφάλισης_Display')] = ''
-            
-            # Προσθήκη γραμμών "Σύνολο <Έτος>" με αθροίσματα ανά έτος (δυναμικά με βάση τα φίλτρα)
-            totals_rows = []
-            for year_value in sorted(yearly_final['Έτος'].unique()):
-                # Επιλεγμένες γραμμές του συγκεκριμένου έτους από τον πίνακα εμφάνισης
-                year_rows_disp = display_yearly_detailed[display_yearly_detailed['Έτος'] == year_value]
-                # Προσθήκη των κανονικών γραμμών για το έτος
-                totals_rows.append(year_rows_disp)
-                # Υπολογισμός αθροισμάτων από τον μη-μορφοποιημένο πίνακα
-                yr_mask = yearly_final['Έτος'] == year_value
-                sum_years = yearly_final.loc[yr_mask, 'Έτη'].sum() if 'Έτη' in yearly_final.columns else 0
-                sum_months = yearly_final.loc[yr_mask, 'Μήνες'].sum() if 'Μήνες' in yearly_final.columns else 0
-                sum_days = yearly_final.loc[yr_mask, 'Ημέρες'].sum() if 'Ημέρες' in yearly_final.columns else 0
-                sum_gross = yearly_final.loc[yr_mask, 'Μικτές αποδοχές'].sum() if 'Μικτές αποδοχές' in yearly_final.columns else 0
-                sum_contrib = yearly_final.loc[yr_mask, 'Συνολικές εισφορές'].sum() if 'Συνολικές εισφορές' in yearly_final.columns else 0
-                sum_count = yearly_final.loc[yr_mask, 'Αριθμός Εγγραφών'].sum() if 'Αριθμός Εγγραφών' in yearly_final.columns else 0
-
-                # Δημιουργία γραμμής συνόλου σε επίπεδο εμφάνισης
-                total_row = {col: '' for col in display_yearly_detailed.columns}
-                # Στήλες εμφάνισης για έτος/ταμείο/τύπος ασφάλισης
-                if 'Έτος_Display' in total_row:
-                    total_row['Έτος_Display'] = ''
-                if 'Ταμείο_Display' in total_row:
-                    total_row['Ταμείο_Display'] = ''
-                if 'Τύπος_Ασφάλισης_Display' in total_row:
-                    total_row['Τύπος_Ασφάλισης_Display'] = ''
-                # Το "Σύνολο ΧΧΧΧ" πηγαίνει στη στήλη Έως
-                if 'Έως' in total_row:
-                    total_row['Έως'] = f"Σύνολο {int(year_value)}"
-                # Αθροιστικές στήλες
-                if 'Έτη' in total_row:
-                    total_row['Έτη'] = int(sum_years)
-                if 'Μήνες' in total_row:
-                    total_row['Μήνες'] = int(sum_months)
-                if 'Ημέρες' in total_row:
-                    total_row['Ημέρες'] = int(sum_days)
-                if 'Μικτές αποδοχές' in total_row:
-                    total_row['Μικτές αποδοχές'] = format_currency(sum_gross)
-                if 'Συνολικές εισφορές' in total_row:
-                    total_row['Συνολικές εισφορές'] = format_currency(sum_contrib)
-                if 'Αριθμός Εγγραφών' in total_row:
-                    total_row['Αριθμός Εγγραφών'] = int(sum_count)
-
-                totals_rows.append(pd.DataFrame([total_row], columns=display_yearly_detailed.columns))
-
-            # Ενοποίηση με τις γραμμές συνόλων ανά έτος
-            if totals_rows:
-                display_yearly_detailed = pd.concat(totals_rows, ignore_index=True)
-
-            # Αναδιατάσσουμε τις στήλες για εμφάνιση
-            display_columns = ['Έτος_Display', 'Ταμείο_Display']
-            if 'Τύπος_Ασφάλισης_Display' in display_yearly_detailed.columns:
-                display_columns.append('Τύπος_Ασφάλισης_Display')
-            display_columns += ['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως', 'Τύπος Αποδοχών']
-            display_columns += ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
-            
-            # Δημιουργούμε τον τελικό πίνακα για εμφάνιση
-            display_final = display_yearly_detailed[display_columns].copy()
-            
-            # Μετονομάζουμε τις στήλες για εμφάνιση
-            final_headers = ['Έτος', 'Ταμείο']
-            if 'Τύπος_Ασφάλισης_Display' in display_yearly_detailed.columns:
-                final_headers.append('Τύπος Ασφάλισης')
-            final_headers += ['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως', 'Τύπος Αποδοχών']
-            final_headers += ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές Αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
-            display_final.columns = final_headers
-            period_column_name = 'Έως'
-            
-            # Εφαρμόζουμε ελληνική μορφοποίηση για αριθμητικές στήλες
-            numeric_cols_yearly = ['Έτη', 'Μήνες', 'Ημέρες', 'Αριθμός Εγγραφών']
-            for col in numeric_cols_yearly:
-                if col in display_final.columns:
-                    # Έτη και Μήνες με 1 δεκαδικό, οι υπόλοιπες χωρίς δεκαδικά
-                    decimals = 1 if col in ['Έτη', 'Μήνες'] else 0
-                    display_final[col] = display_final[col].apply(lambda x: format_number_greek(x, decimals=decimals) if pd.notna(x) and x != '' and str(x).strip() != '' else x)
-            
-            # Στυλ για γραμμές "Σύνολο <Έτος>" και σκούρα γραμματοσειρά στη στήλη Έτος
-            def _highlight_totals(row):
-                value = str(row.get(period_column_name, ''))
-                styles = []
+            }
+            agg_dict = {col: agg_spec[col] for col in agg_spec if col in yearly_df.columns}
+            if not agg_dict:
+                st.warning("Δεν βρέθηκαν στήλες για ετήσια ομαδοποίηση.")
+                yearly_grouped = pd.DataFrame()
+                yearly_counts = pd.DataFrame()
+                yearly_final = pd.DataFrame()
+            else:
+                yearly_grouped = yearly_df.groupby(group_keys).agg(agg_dict).reset_index()
+                for col in ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές']:
+                    if col not in yearly_grouped.columns:
+                        yearly_grouped[col] = 0
                 
-                # Βρίσκουμε τη θέση της στήλης "Έως"
-                eos_index = list(row.index).index(period_column_name) if period_column_name in row.index else -1
+                # Μετράμε τις εγγραφές για κάθε συνδυασμό
+                    count_keys = ['Έτος', 'Ταμείο']
+                if 'Τύπος Ασφάλισης' in yearly_df.columns:
+                    count_keys.append('Τύπος Ασφάλισης')
+                count_keys.append('Κλάδος/Πακέτο Κάλυψης')
+                if earnings_col:
+                    count_keys.append(earnings_col)
+                yearly_counts = yearly_df.groupby(count_keys).size().reset_index()
+                yearly_counts.columns = count_keys + ['Αριθμός Εγγραφών']
                 
-                if value.startswith('Σύνολο'):
-                    # Για κάθε στήλη
-                    for i, col_name in enumerate(row.index):
-                        if i >= eos_index and eos_index != -1:
-                            # Από "Έως" και δεξιότερα: μπλε background
-                            styles.append('background-color: #e6f2ff; color: #000000; font-weight: 700;')
-                        else:
-                            # Αριστερά από "Έως": χωρίς background
-                            styles.append('font-weight: 700;')
+                # Συνδυάζουμε τα δεδομένα
+                yearly_final = yearly_grouped.merge(yearly_counts, on=count_keys, how='left')
+
+                if yearly_final.empty:
+                    pass
                 else:
-                    styles = [''] * len(row)
+                    # Μετατρέπουμε σε ακέραιους όπου απαιτείται για καθαρή εμφάνιση
+                    for int_col in ['Έτη', 'Μήνες', 'Ημέρες', 'Αριθμός Εγγραφών']:
+                        if int_col in yearly_final.columns:
+                            yearly_final[int_col] = yearly_final[int_col].fillna(0).astype(int)
+
+                    # Κανονικοποίηση ονόματος στήλης τύπου αποδοχών για εμφάνιση
+                    if earnings_col and earnings_col != 'Τύπος Αποδοχών' and earnings_col in yearly_final.columns:
+                        yearly_final = yearly_final.rename(columns={earnings_col: 'Τύπος Αποδοχών'})
+                    
+                    # Αναδιατάσσουμε τις στήλες
+                    display_order = ['Έτος', 'Ταμείο']
+                    if 'Τύπος Ασφάλισης' in yearly_final.columns:
+                        display_order.append('Τύπος Ασφάλισης')
+                    display_order += ['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως']
+                    if 'Τύπος Αποδοχών' in yearly_final.columns:
+                        display_order.append('Τύπος Αποδοχών')
+                    display_order += ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
+                    yearly_final = yearly_final[display_order]
+                    
+                    # Ταξινομούμε πρώτα ανά έτος, μετά ανά ταμείο, μετά ανά κλάδο
+                    sort_keys = ['Έτος', 'Ταμείο']
+                    if 'Τύπος Ασφάλισης' in yearly_final.columns:
+                        sort_keys.append('Τύπος Ασφάλισης')
+                    sort_keys.append('Κλάδος/Πακέτο Κάλυψης')
+                    if 'Τύπος Αποδοχών' in yearly_final.columns:
+                        sort_keys.append('Τύπος Αποδοχών')
+                    yearly_final = yearly_final.sort_values(sort_keys)
+                    
+                    # Δημιουργούμε αντίγραφο για εμφάνιση με μορφοποίηση και βελτιωμένη εμφάνιση
+                    display_yearly = yearly_final.copy()
+                    
+                    # Εφαρμόζουμε μορφοποίηση νομισμάτων μόνο για εμφάνιση
+                    display_yearly['Μικτές αποδοχές'] = display_yearly['Μικτές αποδοχές'].apply(format_currency)
+                    display_yearly['Συνολικές εισφορές'] = display_yearly['Συνολικές εισφορές'].apply(format_currency)
+                    
+                    # Βελτιώνουμε την εμφάνιση για καλύτερη αναγνωσιμότητα
+                    # Δημιουργούμε μια νέα στήλη για εμφάνιση με κενά όπου επαναλαμβάνονται τα έτη/ταμεία
+                    display_yearly_detailed = display_yearly.copy()
+                    
+                    # Αφαιρούμε επαναλαμβανόμενα έτη (με σωστό data type)
+                    display_yearly_detailed['Έτος_Display'] = display_yearly_detailed['Έτος'].astype(str)
+                    for i in range(1, len(display_yearly_detailed)):
+                        if display_yearly_detailed.iloc[i]['Έτος'] == display_yearly_detailed.iloc[i-1]['Έτος']:
+                            display_yearly_detailed.iloc[i, display_yearly_detailed.columns.get_loc('Έτος_Display')] = ''
+                    
+                    # Αφαιρούμε επαναλαμβανόμενα ταμεία
+                    display_yearly_detailed['Ταμείο_Display'] = display_yearly_detailed['Ταμείο'].astype(str)
+                    for i in range(1, len(display_yearly_detailed)):
+                        if (display_yearly_detailed.iloc[i]['Έτος'] == display_yearly_detailed.iloc[i-1]['Έτος'] and 
+                            display_yearly_detailed.iloc[i]['Ταμείο'] == display_yearly_detailed.iloc[i-1]['Ταμείο']):
+                            display_yearly_detailed.iloc[i, display_yearly_detailed.columns.get_loc('Ταμείο_Display')] = ''
+
+                    # Αφαιρούμε επαναλαμβανόμενο «Τύπος Ασφάλισης» ανά (Έτος, Ταμείο, Τύπος)
+                    if 'Τύπος Ασφάλισης' in display_yearly_detailed.columns:
+                        type_series = display_yearly_detailed['Τύπος Ασφάλισης'].fillna('').astype(str)
+                        display_yearly_detailed['Τύπος_Ασφάλισης_Display'] = type_series
+                        for i in range(1, len(display_yearly_detailed)):
+                            same_group = (
+                                display_yearly_detailed.iloc[i]['Έτος'] == display_yearly_detailed.iloc[i-1]['Έτος'] and
+                                display_yearly_detailed.iloc[i]['Ταμείο'] == display_yearly_detailed.iloc[i-1]['Ταμείο'] and
+                                type_series.iloc[i] == type_series.iloc[i-1]
+                            )
+                            if same_group:
+                                display_yearly_detailed.iloc[i, display_yearly_detailed.columns.get_loc('Τύπος_Ασφάλισης_Display')] = ''
+                    
+                    # Προσθήκη γραμμών "Σύνολο <Έτος>" με αθροίσματα ανά έτος (δυναμικά με βάση τα φίλτρα)
+                    totals_rows = []
+                    for year_value in sorted(yearly_final['Έτος'].unique()):
+                        # Επιλεγμένες γραμμές του συγκεκριμένου έτους από τον πίνακα εμφάνισης
+                        year_rows_disp = display_yearly_detailed[display_yearly_detailed['Έτος'] == year_value]
+                        # Προσθήκη των κανονικών γραμμών για το έτος
+                        totals_rows.append(year_rows_disp)
+                        # Υπολογισμός αθροισμάτων από τον μη-μορφοποιημένο πίνακα
+                        yr_mask = yearly_final['Έτος'] == year_value
+                        sum_years = yearly_final.loc[yr_mask, 'Έτη'].sum() if 'Έτη' in yearly_final.columns else 0
+                        sum_months = yearly_final.loc[yr_mask, 'Μήνες'].sum() if 'Μήνες' in yearly_final.columns else 0
+                        sum_days = yearly_final.loc[yr_mask, 'Ημέρες'].sum() if 'Ημέρες' in yearly_final.columns else 0
+                        sum_gross = yearly_final.loc[yr_mask, 'Μικτές αποδοχές'].sum() if 'Μικτές αποδοχές' in yearly_final.columns else 0
+                        sum_contrib = yearly_final.loc[yr_mask, 'Συνολικές εισφορές'].sum() if 'Συνολικές εισφορές' in yearly_final.columns else 0
+                        sum_count = yearly_final.loc[yr_mask, 'Αριθμός Εγγραφών'].sum() if 'Αριθμός Εγγραφών' in yearly_final.columns else 0
+    
+                        # Δημιουργία γραμμής συνόλου σε επίπεδο εμφάνισης
+                        total_row = {col: '' for col in display_yearly_detailed.columns}
+                        # Στήλες εμφάνισης για έτος/ταμείο/τύπος ασφάλισης
+                        if 'Έτος_Display' in total_row:
+                            total_row['Έτος_Display'] = ''
+                        if 'Ταμείο_Display' in total_row:
+                            total_row['Ταμείο_Display'] = ''
+                        if 'Τύπος_Ασφάλισης_Display' in total_row:
+                            total_row['Τύπος_Ασφάλισης_Display'] = ''
+                        # Το "Σύνολο ΧΧΧΧ" πηγαίνει στη στήλη Έως
+                        if 'Έως' in total_row:
+                            total_row['Έως'] = f"Σύνολο {int(year_value)}"
+                        # Αθροιστικές στήλες
+                        if 'Έτη' in total_row:
+                            total_row['Έτη'] = int(sum_years)
+                        if 'Μήνες' in total_row:
+                            total_row['Μήνες'] = int(sum_months)
+                        if 'Ημέρες' in total_row:
+                            total_row['Ημέρες'] = int(sum_days)
+                        if 'Μικτές αποδοχές' in total_row:
+                            total_row['Μικτές αποδοχές'] = format_currency(sum_gross)
+                        if 'Συνολικές εισφορές' in total_row:
+                            total_row['Συνολικές εισφορές'] = format_currency(sum_contrib)
+                        if 'Αριθμός Εγγραφών' in total_row:
+                            total_row['Αριθμός Εγγραφών'] = int(sum_count)
+    
+                        totals_rows.append(pd.DataFrame([total_row], columns=display_yearly_detailed.columns))
+    
+                    # Ενοποίηση με τις γραμμές συνόλων ανά έτος
+                    if totals_rows:
+                        display_yearly_detailed = pd.concat(totals_rows, ignore_index=True)
+    
+                    # Αναδιατάσσουμε τις στήλες για εμφάνιση
+                    display_columns = ['Έτος_Display', 'Ταμείο_Display']
+                    if 'Τύπος_Ασφάλισης_Display' in display_yearly_detailed.columns:
+                        display_columns.append('Τύπος_Ασφάλισης_Display')
+                    display_columns += ['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως', 'Τύπος Αποδοχών']
+                    display_columns += ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
                 
-                return styles
-            
-            def _bold_year_column(row):
-                styles = [''] * len(row)
-                # Η στήλη Έτος είναι η πρώτη (index 0)
-                styles[0] = 'font-weight: bold; color: #000000;'
-                return styles
-
-            try:
-                # Φίλτρο εμφάνισης μόνο γραμμών «Σύνολο <Έτος>» αν είναι ενεργός ο διακόπτης
-                if st.session_state.get('yearly_totals_only', False):
+                    # Δημιουργούμε τον τελικό πίνακα για εμφάνιση
+                    display_final = display_yearly_detailed[display_columns].copy()
+                
+                    # Μετονομάζουμε τις στήλες για εμφάνιση
+                    final_headers = ['Έτος', 'Ταμείο']
+                    if 'Τύπος_Ασφάλισης_Display' in display_yearly_detailed.columns:
+                        final_headers.append('Τύπος Ασφάλισης')
+                    final_headers += ['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως', 'Τύπος Αποδοχών']
+                    final_headers += ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές Αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']
+                    display_final.columns = final_headers
+                    period_column_name = 'Έως'
+                
+                    # Εφαρμόζουμε ελληνική μορφοποίηση για αριθμητικές στήλες
+                    numeric_cols_yearly = ['Έτη', 'Μήνες', 'Ημέρες', 'Αριθμός Εγγραφών']
+                    for col in numeric_cols_yearly:
+                        if col in display_final.columns:
+                            # Έτη και Μήνες με 1 δεκαδικό, οι υπόλοιπες χωρίς δεκαδικά
+                            decimals = 1 if col in ['Έτη', 'Μήνες'] else 0
+                            display_final[col] = display_final[col].apply(lambda x: format_number_greek(x, decimals=decimals) if pd.notna(x) and x != '' and str(x).strip() != '' else x)
+                
+                    # Στυλ για γραμμές "Σύνολο <Έτος>" και σκούρα γραμματοσειρά στη στήλη Έτος
+                    def _highlight_totals(row):
+                        value = str(row.get(period_column_name, ''))
+                        styles = []
+                    
+                        # Βρίσκουμε τη θέση της στήλης "Έως"
+                        eos_index = list(row.index).index(period_column_name) if period_column_name in row.index else -1
+                    
+                        if value.startswith('Σύνολο'):
+                            # Για κάθε στήλη
+                            for i, col_name in enumerate(row.index):
+                                if i >= eos_index and eos_index != -1:
+                                    # Από "Έως" και δεξιότερα: μπλε background
+                                    styles.append('background-color: #e6f2ff; color: #000000; font-weight: 700;')
+                                else:
+                                    # Αριστερά από "Έως": χωρίς background
+                                    styles.append('font-weight: 700;')
+                        else:
+                            styles = [''] * len(row)
+                    
+                        return styles
+                
+                    def _bold_year_column(row):
+                        styles = [''] * len(row)
+                        # Η στήλη Έτος είναι η πρώτη (index 0)
+                        styles[0] = 'font-weight: bold; color: #000000;'
+                        return styles
+    
                     try:
-                        display_final = display_final[display_final[period_column_name].astype(str).str.startswith('Σύνολο')]
-                    except Exception:
-                        pass
+                        # Φίλτρο εμφάνισης μόνο γραμμών «Σύνολο <Έτος>» αν είναι ενεργός ο διακόπτης
+                        if st.session_state.get('yearly_totals_only', False):
+                            try:
+                                display_final = display_final[display_final[period_column_name].astype(str).str.startswith('Σύνολο')]
+                            except Exception:
+                                pass
 
-                register_view("Ετήσια Αναφορά", display_final)
-                styled = display_final.style.apply(_highlight_totals, axis=1).apply(_bold_year_column, axis=1)
-                st.dataframe(
-                    styled,
-                    use_container_width=True,
-                    key="yearly_table"
-                )
-            except Exception:
-                # Fallback χωρίς χρωματισμό για να διατηρηθούν search/download/expand & scroll
-                st.dataframe(
-                    display_final,
-                    use_container_width=True
-                )
-            render_print_button(
-                "print_yearly",
-                "Ετήσια Αναφορά",
-                display_final,
-                description="Ετήσια αναφορά ανά Ταμείο, Κλάδο/Πακέτο Κάλυψης και τύπο αποδοχών με συγκεντρωτικά στοιχεία."
-            )
+                        register_view("Ετήσια Αναφορά", display_final)
+                        styled = display_final.style.apply(_highlight_totals, axis=1).apply(_bold_year_column, axis=1)
+                        st.dataframe(
+                            styled,
+                            use_container_width=True,
+                            key="yearly_table"
+                        )
+                    except Exception:
+                        # Fallback χωρίς χρωματισμό για να διατηρηθούν search/download/expand & scroll
+                        st.dataframe(
+                            display_final,
+                            use_container_width=True
+                        )
+                    render_print_button(
+                        "print_yearly",
+                        "Ετήσια Αναφορά",
+                        display_final,
+                        description="Ετήσια αναφορά ανά Ταμείο, Κλάδο/Πακέτο Κάλυψης και τύπο αποδοχών με συγκεντρωτικά στοιχεία."
+                    )
                 
         else:
             st.warning("Οι στήλες 'Από' ή 'Ταμείο' δεν βρέθηκαν στα δεδομένα.")
@@ -8388,7 +8442,7 @@ def show_results_page(df, filename):
     with tab_parallel:
         if st.session_state.get('show_complex_file_warning'):
             st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
-        st.markdown("### Παράλληλη Ασφάλιση (ΙΚΑ & ΟΑΕΕ / ΟΑΕΕ & ΤΣΜΕΔΕ / ΟΓΑ & ΙΚΑ/ΟΑΕΕ)")
+        st.markdown("### Παράλληλη Ασφάλιση (ΙΚΑ & ΟΑΕΕ / ΙΚΑ & ΤΣΜΕΔΕ / ΟΑΕΕ & ΤΣΜΕΔΕ / ΟΓΑ & ΙΚΑ/ΟΑΕΕ)")
         parallel_df = exclude_unused_packages(df.copy())
         required_cols = ['Από', 'Έως', 'Ημέρες']
         
@@ -8569,7 +8623,7 @@ def show_results_page(df, filename):
                     has_tsm = tsm_days > 0
                     has_oga = oga_days > 0
 
-                    if (has_ika and has_oaee) or (has_oaee and has_tsm) or (has_oga and (has_ika or has_oaee)):
+                    if (has_ika and has_oaee) or (has_ika and has_tsm) or (has_oaee and has_tsm) or (has_oga and (has_ika or has_oaee)):
                         # Περιορισμός έως 31/12/2016
                         if year <= 2016:
                             valid_months.append((year, month))
@@ -8605,14 +8659,14 @@ def show_results_page(df, filename):
                 # Μηνύματα ενημέρωσης σε μία γραμμή (όπως στην Καταμέτρηση)
                 info_col1, info_col2, info_col3 = st.columns([3, 3, 2])
                 with info_col1:
-                    st.info("Εμφάνιση διαστημάτων όπου συνυπάρχουν στον ίδιο μήνα: ΙΚΑ (Τύπος Αποδοχών 01, 16 ή 99) & ΟΑΕΕ (Κλάδος/Πακέτο Κ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.")
+                    st.info("Εμφάνιση διαστημάτων όπου συνυπάρχουν στον ίδιο μήνα: ΙΚΑ (Τύπος Αποδοχών 01, 16 ή 99) & ΟΑΕΕ (Κλάδος/Πακέτο Κ), ΙΚΑ & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.")
                 with info_col2:
                     met_col1, met_col2 = st.columns(2)
                     with met_col1:
                         st.metric("Μήνες Παράλληλης", format_number_greek(len(valid_months), decimals=0))
                     with met_col2:
                         st.metric("Ημέρες Παράλληλης", format_number_greek(parallel_days_total, decimals=0))
-                    st.caption("Κριτήρια: ΙΚΑ (αποδοχές 01, 16, ή 99) & ΟΑΕΕ Κ, ΟΑΕΕ Κ & ΤΣΜΕΔΕ ΚΣ/ΠΚΣ, ή ΟΓΑ Κ & ΙΚΑ/ΟΑΕΕ (έως 31/12/2016).")
+                    st.caption("Κριτήρια: ΙΚΑ (αποδοχές 01, 16, ή 99) & ΟΑΕΕ Κ, ΙΚΑ & ΤΣΜΕΔΕ ΚΣ/ΠΚΣ, ΟΑΕΕ Κ & ΤΣΜΕΔΕ ΚΣ/ΠΚΣ, ή ΟΓΑ Κ & ΙΚΑ/ΟΑΕΕ (έως 31/12/2016).")
                 with info_col3:
                     st.warning("Διαστήματα που καλύπτουν πολλαπλούς μήνες επιμερίζονται και επισημαίνονται με κίτρινο χρώμα.")
 
@@ -8621,8 +8675,8 @@ def show_results_page(df, filename):
                     p_c_df_filtered = p_c_df.merge(valid_months_df, on=['ΕΤΟΣ', 'Μήνας_Num'], how='inner')
                     
                     # Strict Filtering: Κρατάμε IKA ή OAEE K ή TSMEDE KS/PKS ή OGA K
-                    p_c_df_filtered = p_c_df_filtered[p_c_df_filtered['is_ika_general'] | p_c_df_filtered['is_oaee'] | p_c_df_filtered['is_tsm'] | p_c_df_filtered['is_oga']]
-                    
+                    p_c_df_filtered = p_c_df_filtered[p_c_df_filtered['is_ika'] | p_c_df_filtered['is_oaee'] | p_c_df_filtered['is_tsm'] | p_c_df_filtered['is_oga']]
+
                     # Καθαρισμός helper columns
                     p_c_df_filtered = p_c_df_filtered.drop(columns=['is_ika', 'is_oaee', 'is_tsm', 'is_oga', 'is_ika_general', 'ΦΟΡΕΑΣ'])
                     
@@ -8855,7 +8909,7 @@ def show_results_page(df, filename):
                         "print_parallel",
                         "Παράλληλη Ασφάλιση",
                         display_final_df,
-                        description="Πίνακας Παράλληλης Ασφάλισης (ΙΚΑ & ΟΑΕΕ)",
+                        description="Πίνακας Παράλληλης Ασφάλισης (ΙΚΑ & ΟΑΕΕ / ΙΚΑ & ΤΣΜΕΔΕ / ΟΑΕΕ & ΤΣΜΕΔΕ / ΟΓΑ & ΙΚΑ/ΟΑΕΕ)",
                         yearly=True,
                         year_column='Έτος'
                     )
@@ -9594,7 +9648,7 @@ def show_results_page(df, filename):
                             summary_df[col] = summary_df[col].apply(lambda x: clean_numeric_value(x, exclude_drx=True))
                     summary_df = apply_negative_time_sign(summary_df)
                     
-                    grouped = summary_df.groupby('Κλάδος/Πακέτο Κάλυψης').agg({
+                    agg_spec = {
                         'Από': 'min',
                         'Έως': 'max',
                         'Έτη': 'sum',
@@ -9602,16 +9656,24 @@ def show_results_page(df, filename):
                         'Ημέρες': 'sum',
                         'Μικτές αποδοχές': 'sum',
                         'Συνολικές εισφορές': 'sum'
-                    }).reset_index()
+                    }
+                    agg_dict = {col: agg_spec[col] for col in agg_spec if col in summary_df.columns}
+                    if not agg_dict:
+                        pass  # Παράλειψη Συνοπτικής Αναφοράς αν λείπουν στήλες
+                    else:
+                        grouped = summary_df.groupby('Κλάδος/Πακέτο Κάλυψης').agg(agg_dict).reset_index()
+                        for col in ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές']:
+                            if col not in grouped.columns:
+                                grouped[col] = 0
                     
-                    record_counts = summary_df['Κλάδος/Πακέτο Κάλυψης'].value_counts().reset_index()
-                    record_counts.columns = ['Κλάδος/Πακέτο Κάλυψης', 'Αριθμός Εγγραφών']
+                        record_counts = summary_df['Κλάδος/Πακέτο Κάλυψης'].value_counts().reset_index()
+                        record_counts.columns = ['Κλάδος/Πακέτο Κάλυψης', 'Αριθμός Εγγραφών']
                     
-                    summary_final = grouped.merge(record_counts, on='Κλάδος/Πακέτο Κάλυψης', how='left')
-                    summary_final = summary_final[['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως', 'Έτη', 'Μήνες', 'Ημέρες', 
-                                                 'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']]
+                        summary_final = grouped.merge(record_counts, on='Κλάδος/Πακέτο Κάλυψης', how='left')
+                        summary_final = summary_final[['Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως', 'Έτη', 'Μήνες', 'Ημέρες', 
+                                                     'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']]
                     
-                    summary_final.to_excel(writer, sheet_name='Συνοπτική_Αναφορά', index=False)
+                        summary_final.to_excel(writer, sheet_name='Συνοπτική_Αναφορά', index=False)
                     
                     # Προσθήκη ετήσιας αναφοράς στο Excel (με νέα δομή: Έτος, Ταμείο, Κλάδος/Πακέτο)
                     if 'Από' in df.columns and 'Ταμείο' in df.columns:
@@ -9628,7 +9690,7 @@ def show_results_page(df, filename):
                         yearly_df = apply_negative_time_sign(yearly_df)
                         
                         # Ομαδοποίηση με βάση έτος, ταμείο και κλάδο/πακέτο κάλυψης
-                        yearly_grouped = yearly_df.groupby(['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης']).agg({
+                        agg_spec_y = {
                             'Από': 'min',
                             'Έως': 'max',
                             'Έτη': 'sum',
@@ -9636,23 +9698,32 @@ def show_results_page(df, filename):
                             'Ημέρες': 'sum',
                             'Μικτές αποδοχές': 'sum',
                             'Συνολικές εισφορές': 'sum'
-                        }).reset_index()
+                        }
+                        agg_dict_y = {c: agg_spec_y[c] for c in agg_spec_y if c in yearly_df.columns}
+                        if not agg_dict_y:
+                            yearly_grouped = pd.DataFrame()
+                        else:
+                            yearly_grouped = yearly_df.groupby(['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης']).agg(agg_dict_y).reset_index()
+                            for c in ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές']:
+                                if c not in yearly_grouped.columns:
+                                    yearly_grouped[c] = 0
                         
-                        # Μετράμε τις εγγραφές για κάθε έτος, ταμείο και κλάδο
-                        yearly_counts = yearly_df.groupby(['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης']).size().reset_index()
-                        yearly_counts.columns = ['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης', 'Αριθμός Εγγραφών']
-                        
-                        # Συνδυάζουμε τα δεδομένα
-                        yearly_final = yearly_grouped.merge(yearly_counts, on=['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης'], how='left')
-                        
-                        # Αναδιατάσσουμε τις στήλες (πρώτα Έτος, μετά Ταμείο, μετά Κλάδος/Πακέτο)
-                        yearly_final = yearly_final[['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως', 'Έτη', 'Μήνες', 'Ημέρες', 
-                                                   'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']]
-                        
-                        # Ταξινομούμε πρώτα ανά έτος, μετά ανά ταμείο, μετά ανά κλάδο
-                        yearly_final = yearly_final.sort_values(['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης'])
-                        
-                        yearly_final.to_excel(writer, sheet_name='Ετήσια_Αναφορά', index=False)
+                        if not yearly_grouped.empty:
+                            # Μετράμε τις εγγραφές για κάθε έτος, ταμείο και κλάδο
+                            yearly_counts = yearly_df.groupby(['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης']).size().reset_index()
+                            yearly_counts.columns = ['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης', 'Αριθμός Εγγραφών']
+                            
+                            # Συνδυάζουμε τα δεδομένα
+                            yearly_final = yearly_grouped.merge(yearly_counts, on=['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης'], how='left')
+                            
+                            # Αναδιατάσσουμε τις στήλες (πρώτα Έτος, μετά Ταμείο, μετά Κλάδος/Πακέτο)
+                            yearly_final = yearly_final[['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης', 'Από', 'Έως', 'Έτη', 'Μήνες', 'Ημέρες', 
+                                                       'Μικτές αποδοχές', 'Συνολικές εισφορές', 'Αριθμός Εγγραφών']]
+                            
+                            # Ταξινομούμε πρώτα ανά έτος, μετά ανά ταμείο, μετά ανά κλάδο
+                            yearly_final = yearly_final.sort_values(['Έτος', 'Ταμείο', 'Κλάδος/Πακέτο Κάλυψης'])
+                            
+                            yearly_final.to_excel(writer, sheet_name='Ετήσια_Αναφορά', index=False)
                     
                     # Προσθήκη αναφοράς κενών διαστημάτων στο Excel
                     gaps_df = find_gaps_in_insurance_data(df)

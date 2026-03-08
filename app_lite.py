@@ -965,6 +965,7 @@ def _build_totals_with_filters(display_summary, raw_df=None, desc_map=None, warn
       var _totalsRawRecords = """ + raw_records_js + """;
       var _totalsDkMap = """ + dk_map_js + """;
       var _totalsDescMap = """ + desc_map_js + """;
+      var _totalsHasDescCol = """ + ("true" if perigrafi_col in display_summary.columns else "false") + """;
 
       function parseDate(str) {
         if (!str || str === '') return null;
@@ -1034,7 +1035,7 @@ def _build_totals_with_filters(display_summary, raw_df=None, desc_map=None, warn
               desc = String(desc).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
               var dk = (typeof _totalsDkMap === 'object' && _totalsDkMap[g.p + '|' + g.t]) ? _totalsDkMap[g.p + '|' + g.t] : {};
               var dkAttrs = ['dk1','dk3','dk4','dk5','dk6','dk7a','dk7b','dk7c'].map(function(k) { return 'data-' + k + '=\"' + (dk[k] || 0) + '\"'; }).join(' ');
-              var cells = [g.p, g.t, desc, g.apo, g.eos, formatGreekInt(g.h), formatGreekDec(y), formatGreekDec(m), formatGreekDec(d), '—', '—', '—'];
+              var cells = [g.p, g.t]; if (_totalsHasDescCol) cells.push(desc); cells = cells.concat([g.apo, g.eos, formatGreekInt(g.h), formatGreekDec(y), formatGreekDec(m), formatGreekDec(d), '—', '—', '—']);
               var tdHtml = cells.slice(0, colCount).map(function(c) { return '<td>' + (c || '') + '</td>'; }).join('');
               newRows.push('<tr data-paketo=\"' + (g.p || '').replace(/"/g, '&quot;') + '\" data-tameio=\"' + (g.t || '').replace(/"/g, '&quot;') + '\" data-apo=\"' + (g.apo || '').replace(/"/g, '&quot;') + '\" data-eos=\"' + (g.eos || '').replace(/"/g, '&quot;') + '\" data-hmeres=\"' + g.h + '\" ' + dkAttrs + '>' + tdHtml + '</tr>');
             });

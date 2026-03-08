@@ -532,8 +532,10 @@ def build_totals_with_filters(display_summary, raw_df=None, desc_map=None,
     }).replace("</script>", "<\\/script>")
     desc_map_js = json.dumps(desc_map or {}).replace("</script>", "<\\/script>")
 
+    has_desc_col = perigrafi_col in display_summary.columns
     calcs_panel = _build_date_key_calcs_panel()
-    js = _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js)
+    js = _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
+                                  has_desc_col=has_desc_col)
 
     return (
         f'<section class="print-section">'
@@ -570,13 +572,16 @@ def _build_date_key_calcs_panel():
     )
 
 
-def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js):
+def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
+                            has_desc_col=True):
     """Επιστρέφει το JavaScript κομμάτι για client-side filtering Σύνολα."""
+    has_desc_js = "true" if has_desc_col else "false"
     return """
     (function(){
       var _totalsRawRecords = """ + raw_records_js + """;
       var _totalsDkMap = """ + dk_map_js + """;
       var _totalsDescMap = """ + desc_map_js + """;
+      var _totalsHasDescCol = """ + has_desc_js + """;
       function parseDate(str){if(!str||str==='')return null;var p=str.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})$/);if(!p)return null;return new Date(parseInt(p[3],10),parseInt(p[2],10)-1,parseInt(p[1],10));}
       function formatGreekInt(n){if(n===0)return'0';return n.toString().replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');}
       function formatGreekDec(n){var p=n.toFixed(1).split('.');return p[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.')+','+p[1];}
@@ -598,7 +603,7 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js):
               var desc=(_totalsDescMap&&_totalsDescMap[g.p])?String(_totalsDescMap[g.p]).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'):'';
               var dk=(_totalsDkMap&&_totalsDkMap[g.p+'|'+g.t])?_totalsDkMap[g.p+'|'+g.t]:{};
               var dkA=['dk1','dk3','dk4','dk5','dk6','dk7a','dk7b','dk7c'].map(function(k){return'data-'+k+'="'+(dk[k]||0)+'"';}).join(' ');
-              var cells=[g.p,g.t,desc,g.apo,g.eos,formatGreekInt(g.h),formatGreekDec(y),formatGreekDec(m),formatGreekDec(d),'—','—','—'];
+              var cells=[g.p,g.t];if(_totalsHasDescCol)cells.push(desc);cells=cells.concat([g.apo,g.eos,formatGreekInt(g.h),formatGreekDec(y),formatGreekDec(m),formatGreekDec(d),'—','—','—']);
               nR.push('<tr data-paketo="'+(g.p||'').replace(/"/g,'&quot;')+'" data-tameio="'+(g.t||'').replace(/"/g,'&quot;')+'" data-apo="'+(g.apo||'').replace(/"/g,'&quot;')+'" data-eos="'+(g.eos||'').replace(/"/g,'&quot;')+'" data-hmeres="'+g.h+'" '+dkA+'>'+cells.slice(0,colCount).map(function(c){return'<td>'+(c||'')+'</td>';}).join('')+'</tr>');
             });tbody.innerHTML=nR.join('');rows=tbody.querySelectorAll('tr');}
         }else{
