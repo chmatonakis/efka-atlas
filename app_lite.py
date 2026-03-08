@@ -2149,19 +2149,14 @@ document.addEventListener('DOMContentLoaded', function() {{
     # --- Ανοίγουμε viewer ή print μόνο μετά από disclaimer (lite_do_open) ---
     do_open = st.session_state.get("lite_do_open")
     if do_open == "viewer":
-        js_content = json.dumps(html_doc).replace("</script>", "<\\/script>")
-        open_viewer_snippet = f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
-<script>
-(function() {{
-  var htmlContent = {js_content};
-  var blob = new Blob([htmlContent], {{ type: 'text/html;charset=utf-8' }});
-  var url = URL.createObjectURL(blob);
-  window.open(url, '_blank');
-}})();
-</script><p style="margin:0;font-size:14px;color:#666;">Άνοιγμα Προβολής Ανάλυσης...</p></body></html>"""
-        components.html(open_viewer_snippet, height=40)
-        st.session_state["lite_do_open"] = None
-        st.rerun()
+        # Πρόβολη inline ώστε να δουλεύει και στο Streamlit Cloud (όπου συχνά μπλοκάρεται το window.open)
+        _loading_placeholder.empty()
+        st.markdown("---")
+        st.markdown("### Γρήγορη Προβολή - Lite")
+        components.html(html_doc, height=900, scrolling=True)
+        if st.button("Επιστροφή στη φόρμα", type="secondary"):
+            st.session_state["lite_do_open"] = None
+            st.rerun()
     elif do_open == "print":
         open_print_snippet = f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
 <script>
