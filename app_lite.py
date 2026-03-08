@@ -1214,25 +1214,8 @@ if section == "all" and st.session_state.get("lite_do_open") in {"viewer", "prin
     else:
         count_df = df.copy()
 
-    # Μπλε κουμπί "Αποδοχή και Προβολή" (script τρέχει στο parent document)
-    components.html("""
-    <script>
-    (function() {
-      try {
-        var doc = window.parent.document;
-        var btns = doc.querySelectorAll('button');
-        for (var i = 0; i < btns.length; i++) {
-          if (btns[i].textContent.trim().indexOf('Αποδοχή και Προβολή') !== -1) {
-            btns[i].classList.add('btn-view-analysis');
-            btns[i].style.setProperty('background-color', '#2563eb', 'important');
-            btns[i].style.setProperty('border-color', '#2563eb', 'important');
-            break;
-          }
-        }
-      } catch (e) {}
-    })();
-    </script>
-    """, height=0)
+    # Μπλε κουμπί — δεν βάζουμε components.html εδώ ώστε να μην δημιουργηθεί extra iframe
+    # που μπλοκάρει το window.open στο Cloud
 
     do_open = st.session_state.get("lite_do_open")
 
@@ -2146,27 +2129,22 @@ document.addEventListener('DOMContentLoaded', function() {{
 </body>
 </html>"""
 
-    # --- Ανοίγουμε viewer ή print μόνο μετά από disclaimer (lite_do_open) ---
+    # --- Ανοίγουμε viewer ή print σε νέο παράθυρο (ΧΩΡΙΣ rerun ώστε το JS να προλάβει) ---
     do_open = st.session_state.get("lite_do_open")
     if do_open == "viewer":
-        # Πρόβολη inline ώστε να δουλεύει και στο Streamlit Cloud (όπου συχνά μπλοκάρεται το window.open)
+        js_content = json.dumps(html_doc).replace("</script>", "<\\/script>")
+        open_viewer_snippet = f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+<script>(function(){{var h={js_content};var b=new Blob([h],{{type:'text/html;charset=utf-8'}});
+var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
+<p style="margin:0;font-size:14px;color:#666;">Άνοιγμα Προβολής Ανάλυσης...</p></body></html>"""
         _loading_placeholder.empty()
-        st.markdown("---")
-        st.markdown("### Γρήγορη Προβολή - Lite")
-        components.html(html_doc, height=900, scrolling=True)
-        if st.button("Επιστροφή στη φόρμα", type="secondary"):
-            st.session_state["lite_do_open"] = None
-            st.rerun()
+        components.html(open_viewer_snippet, height=40)
+        st.session_state["lite_do_open"] = None
     elif do_open == "print":
         open_print_snippet = f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
-<script>
-(function() {{
-  var htmlContent = {print_js};
-  var blob = new Blob([htmlContent], {{ type: 'text/html;charset=utf-8' }});
-  var url = URL.createObjectURL(blob);
-  window.open(url, '_blank');
-}})();
-</script><p style="margin:0;font-size:14px;color:#666;">Άνοιγμα εκτυπώσιμης μορφής...</p></body></html>"""
+<script>(function(){{var h={print_js};var b=new Blob([h],{{type:'text/html;charset=utf-8'}});
+var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
+<p style="margin:0;font-size:14px;color:#666;">Άνοιγμα εκτυπώσιμης μορφής...</p></body></html>"""
+        _loading_placeholder.empty()
         components.html(open_print_snippet, height=40)
         st.session_state["lite_do_open"] = None
-        st.rerun()
