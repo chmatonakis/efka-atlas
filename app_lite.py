@@ -243,22 +243,33 @@ components.html(
 )
 
 def get_section() -> str:
-    try:
-        section = st.query_params.get("section", "summary")
-    except Exception:
-        params = st.experimental_get_query_params()
-        section = params.get("section", ["summary"])[0]
-    section = (section or "summary").strip().lower()
+    section = st.query_params.get("section", "summary")
+    if isinstance(section, list):
+        section = section[0] if section else "summary"
+    section = (str(section or "summary").strip().lower())
     if section not in {"summary", "summary_grouped", "count", "all"}:
         section = "summary"
     return section
 
 def get_query_param(name: str) -> str:
+    val = st.query_params.get(name, "")
+    if isinstance(val, list):
+        val = val[0] if val else ""
+    return str(val or "").strip()
+
+def _clear_lite_and_go_initial():
+    """Καθαρισμός όλων των lite_* και query params, επιστροφή στην αρχική (μόνο upload, χωρίς κουμπιά/εκτύπωση)."""
+    for key in list(st.session_state.keys()):
+        if key.startswith("lite_"):
+            del st.session_state[key]
+    # Ρητά αρχική κατάσταση ώστε να μην εμφανιστεί η φόρμα με κουμπιά
+    st.session_state["lite_file_uploaded"] = False
+    st.session_state["lite_processing_done"] = False
     try:
-        return str(st.query_params.get(name, "") or "")
+        st.query_params.clear()
     except Exception:
-        params = st.experimental_get_query_params()
-        return str(params.get(name, [""])[0])
+        pass
+    st.rerun()
 
 section = get_section()
 client_name_param = get_query_param("client").strip()
@@ -367,12 +378,9 @@ if df is None or df.empty:
 
 # Μετά την επεξεργασία πηγαίνουμε πάντα στο section "all" για να εμφανίζονται τα 3 κουμπιά
 if section != "all":
-    try:
-        st.query_params["section"] = "all"
-        if st.session_state.get("lite_client_name"):
-            st.query_params["client"] = st.session_state["lite_client_name"]
-    except Exception:
-        st.experimental_set_query_params(section="all", client=st.session_state.get("lite_client_name", ""))
+    st.query_params["section"] = "all"
+    if st.session_state.get("lite_client_name"):
+        st.query_params["client"] = st.session_state["lite_client_name"]
     st.rerun()
 
 if "lite_do_open" not in st.session_state:
@@ -415,12 +423,9 @@ if st.session_state.get("lite_do_open") is None:
         # Χρησιμοποιούμε type="secondary" ώστε να μην εφαρμόζεται το κόκκινο primary· το μπλε το βάζει το CSS στο πρώτο κουμπί
         if st.button("Αποδοχή και Προβολή", type="secondary", use_container_width=True, key="view_analysis_btn"):
             st.session_state["lite_do_open"] = "viewer"
-            try:
-                st.query_params["section"] = "all"
-                if client_value:
-                    st.query_params["client"] = client_value
-            except Exception:
-                st.experimental_set_query_params(section="all", client=client_value)
+            st.query_params["section"] = "all"
+            if client_value:
+                st.query_params["client"] = client_value
             st.rerun()
 
         st.markdown("""
@@ -458,32 +463,14 @@ if st.session_state.get("lite_do_open") is None:
         with b_col1:
             if st.button("Εκτύπωση", type="primary", use_container_width=True):
                 st.session_state["lite_do_open"] = "print"
-                try:
-                    st.query_params["section"] = "all"
-                    if client_value:
-                        st.query_params["client"] = client_value
-                except Exception:
-                    st.experimental_set_query_params(section="all", client=client_value)
+                st.query_params["section"] = "all"
+                if client_value:
+                    st.query_params["client"] = client_value
                 st.rerun()
 
         with b_col2:
             if st.button("Νέο αρχείο", type="secondary", use_container_width=True):
-                for key in [
-                    "lite_file_uploaded",
-                    "lite_processing_done",
-                    "lite_uploaded_file",
-                    "lite_filename",
-                    "lite_df",
-                    "lite_client_name",
-                    "lite_do_open",
-                ]:
-                    if key in st.session_state:
-                        del st.session_state[key]
-                try:
-                    st.query_params.clear()
-                except Exception:
-                    st.experimental_set_query_params()
-                st.rerun()
+                _clear_lite_and_go_initial()
 
     with col_videos:
         st.markdown(
@@ -2129,22 +2116,38 @@ document.addEventListener('DOMContentLoaded', function() {{
 </body>
 </html>"""
 
-    # --- Ανοίγουμε viewer ή print σε νέο παράθυρο (ΧΩΡΙΣ rerun ώστε το JS να προλάβει) ---
+    # --- Ανοίγουμε viewer ή print σε νέο παράθυρο. ΔΕΝ μηδενίζουμε lite_do_open ώστε στο επόμενο rerun
+    # (από κλικ στο Νέο αρχείο) να μπαίνουμε ακόμα εδώ και να τρέχει το callback του κουμπιού.
     do_open = st.session_state.get("lite_do_open")
+    popup_already_shown = st.session_state.get("lite_popup_shown", False)
+
     if do_open == "viewer":
-        js_content = json.dumps(html_doc).replace("</script>", "<\\/script>")
-        open_viewer_snippet = f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+        _loading_placeholder.empty()
+        if not popup_already_shown:
+            js_content = json.dumps(html_doc).replace("</script>", "<\\/script>")
+            open_viewer_snippet = f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
 <script>(function(){{var h={js_content};var b=new Blob([h],{{type:'text/html;charset=utf-8'}});
 var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
 <p style="margin:0;font-size:14px;color:#666;">Άνοιγμα Προβολής Ανάλυσης...</p></body></html>"""
-        _loading_placeholder.empty()
-        components.html(open_viewer_snippet, height=40)
-        st.session_state["lite_do_open"] = None
+            components.html(open_viewer_snippet, height=40)
+            st.session_state["lite_popup_shown"] = True
+        else:
+            st.markdown("<p style='margin:0;font-size:14px;color:#666;'>Η προβολή άνοιξε σε νέο παράθυρο.</p>", unsafe_allow_html=True)
     elif do_open == "print":
-        open_print_snippet = f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+        _loading_placeholder.empty()
+        if not popup_already_shown:
+            open_print_snippet = f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
 <script>(function(){{var h={print_js};var b=new Blob([h],{{type:'text/html;charset=utf-8'}});
 var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
 <p style="margin:0;font-size:14px;color:#666;">Άνοιγμα εκτυπώσιμης μορφής...</p></body></html>"""
-        _loading_placeholder.empty()
-        components.html(open_print_snippet, height=40)
-        st.session_state["lite_do_open"] = None
+            components.html(open_print_snippet, height=40)
+            st.session_state["lite_popup_shown"] = True
+        else:
+            st.markdown("<p style='margin:0;font-size:14px;color:#666;'>Η εκτύπωση άνοιξε σε νέο παράθυρο.</p>", unsafe_allow_html=True)
+
+    # Κουμπί Νέο αρχείο: όταν πατηθεί, θα τρέξει στο επόμενο rerun (θα έχουμε ακόμα lite_do_open = viewer/print)
+    if do_open in ("viewer", "print"):
+        st.markdown("---")
+        st.markdown("Η αναφορά άνοιξε σε νέο παράθυρο.")
+        if st.button("Νέο αρχείο", type="secondary", key="new_file_after_open"):
+            _clear_lite_and_go_initial()
