@@ -80,81 +80,6 @@ def filter_count_df(df: pd.DataFrame) -> pd.DataFrame:
 # Timeline
 # ---------------------------------------------------------------------------
 
-def build_timeline_data(source_df):
-    """Επιστρέφει δομημένα δεδομένα για χρονοδιάγραμμα (JSON export / frontend).
-    Επιστρέφει dict: period, groups, zero_duration, gaps ή κενό dict αν δεν υπάρχουν δεδομένα.
-    """
-    if source_df.empty or 'Από' not in source_df.columns or 'Έως' not in source_df.columns:
-        return {}
-
-    t = source_df.copy()
-    t['_from'] = pd.to_datetime(t['Από'], format='%d/%m/%Y', errors='coerce')
-    t['_to'] = pd.to_datetime(t['Έως'], format='%d/%m/%Y', errors='coerce')
-    t = t.dropna(subset=['_from', '_to'])
-    if t.empty:
-        return {}
-
-    duration_columns = ['Έτη', 'Μήνες', 'Ημέρες']
-    for col in duration_columns:
-        if col not in t.columns:
-            t[col] = 0
-        t[f'__{col}_n'] = t[col].apply(clean_numeric_value)
-    t['__duration_sum'] = t['__Έτη_n'] + t['__Μήνες_n'] + t['__Ημέρες_n']
-    if not t.empty:
-        t['__duration_sum_group'] = t.groupby(['_from', '_to'])['__duration_sum'].transform('sum')
-    else:
-        t['__duration_sum_group'] = 0
-
-    t_with_days = t[t['__duration_sum'] > 0].copy()
-    zero_duration_t = t[(t['__duration_sum'] == 0) & (t['__duration_sum_group'] == 0)].copy()
-
-    tameio_col = 'Ταμείο' if 'Ταμείο' in t.columns else None
-    ins_col = 'Τύπος Ασφάλισης' if 'Τύπος Ασφάλισης' in t.columns else None
-
-    if tameio_col:
-        t_with_days['_label'] = t_with_days[tameio_col].astype(str).str.strip()
-        if ins_col:
-            ins_vals = t_with_days[ins_col].astype(str).str.strip()
-            mask = (ins_vals != '') & (ins_vals != 'nan')
-            t_with_days.loc[mask, '_label'] = (
-                t_with_days.loc[mask, '_label'] + ' — ' + ins_vals[mask]
-            )
-    else:
-        t_with_days['_label'] = 'Ασφάλιση'
-
-    global_min = t['_from'].min()
-    global_max = t['_to'].max()
-    total_days = (global_max - global_min).days
-    if total_days <= 0:
-        return {}
-
-    out = {
-        "period": {
-            "from": global_min.strftime('%d/%m/%Y'),
-            "to": global_max.strftime('%d/%m/%Y'),
-        },
-        "groups": [],
-        "zero_duration": [],
-        "gaps": [],
-    }
-
-    for lbl, grp in t_with_days.groupby('_label', sort=False):
-        bars = []
-        for _, r in grp.iterrows():
-            bars.append({"apo": r['Από'], "eos": r['Έως']})
-        out["groups"].append({"label": lbl, "bars": bars})
-
-    for _, z in zero_duration_t.iterrows():
-        out["zero_duration"].append({"apo": z['Από'], "eos": z['Έως']})
-
-    gaps_df = find_gaps_in_insurance_data(source_df)
-    if gaps_df is not None and not gaps_df.empty and 'Από' in gaps_df.columns and 'Έως' in gaps_df.columns:
-        for _, g in gaps_df.iterrows():
-            out["gaps"].append({"apo": str(g.get('Από', '')), "eos": str(g.get('Έως', ''))})
-
-    return out
-
-
 def build_timeline_html(source_df):
     """Χρονοδιάγραμμα ασφάλισης ανά Ταμείο – Τύπο Ασφάλισης (οπτικές μπάρες)."""
     if source_df.empty or 'Από' not in source_df.columns or 'Έως' not in source_df.columns:
@@ -711,242 +636,6 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
 
 
 # ---------------------------------------------------------------------------
-# Count tab with client-side filters
-# ---------------------------------------------------------------------------
-
-def build_count_with_filters(count_display_df, print_style_rows, count_df,
-                             description_map=None):
-    """Ενότητα Καταμέτρηση με client-side φίλτρα (Ταμείο, Τύπος, κ.λπ.)."""
-    _col_renames = {
-        'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ': 'ΑΠΟΔΟΧΕΣ',
-        'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ': 'ΕΙΣΦΟΡΕΣ',
-        'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ': '%',
-    }
-    renamed_df = count_display_df.rename(
-        columns={k: v for k, v in _col_renames.items() if k in count_display_df.columns}
-    )
-
-    count_table_html = build_yearly_print_html(
-        renamed_df, year_column='ΕΤΟΣ', style_rows=print_style_rows,
-        bold_columns=['ΑΠΟΔΟΧΕΣ', 'ΕΙΣΦΟΡΕΣ'],
-    )
-    count_table_html = re.sub(
-        r'>ΣΥΝΟΛΟ\s+(\d{4})<', r'>\1<', count_table_html
-    )
-    count_table_html = re.sub(
-        r'>Σύνολο\s+(\d{4})<', r'>\1<', count_table_html
-    )
-
-    desc_map = description_map or {}
-
-    def _vals(col):
-        if col in count_df.columns:
-            return sorted(count_df[col].dropna().astype(str).str.strip().unique().tolist())
-        return []
-
-    tameio_vals = _vals('Ταμείο')
-    typos_vals = _vals('Τύπος Ασφάλισης')
-    employer_vals = _vals('Α-Μ εργοδότη')
-    klados_vals = _vals('Κλάδος/Πακέτο Κάλυψης')
-    apodoxes_col = next((c for c in count_df.columns if 'Τύπος Αποδοχών' in c), None)
-    apodoxes_vals = _vals(apodoxes_col) if apodoxes_col else []
-
-    def _dropdown(name, options, data_attr, with_desc=False):
-        if not options:
-            return ""
-        items = []
-        for val in options:
-            if with_desc:
-                desc = (desc_map.get(val) or "").strip()
-                label = f"{val} – {desc}" if desc else val
-            else:
-                label = val
-            items.append(
-                f'<label class="filter-cb"><input type="checkbox" name="cnt-{html_mod.escape(data_attr)}" '
-                f'value="{html_mod.escape(str(val))}">'
-                f'{html_mod.escape(label)}</label>'
-            )
-        items_html = "".join(items)
-        return (
-            f'<div class="filter-group filter-dropdown" data-filter-name="{html_mod.escape(name)}">'
-            f'<span class="filter-label">{html_mod.escape(name)}:</span>'
-            f'<div class="filter-dropdown-trigger" tabindex="0">'
-            f'Επιλέξτε {html_mod.escape(name)}…</div>'
-            f'<div class="filter-dropdown-panel">'
-            f'<div class="filter-options">{items_html}</div></div></div>'
-        )
-
-    filter_parts = [
-        _dropdown("Ταμείο", tameio_vals, "tameio"),
-        _dropdown("Τύπος Ασφάλισης", typos_vals, "typos"),
-        _dropdown("Εργοδότης", employer_vals, "employer"),
-        _dropdown("Κλάδος/Πακέτο", klados_vals, "klados", with_desc=True),
-        _dropdown("Τύπος Αποδοχών", apodoxes_vals, "apodoxes"),
-        '<div class="filter-group">'
-        '<span class="filter-label">Από (έτος):</span>'
-        '<input type="text" id="cnt-filter-from" class="filter-date" placeholder="π.χ. 1993" maxlength="4">'
-        '</div>',
-        '<div class="filter-group">'
-        '<span class="filter-label">Έως (έτος):</span>'
-        '<input type="text" id="cnt-filter-to" class="filter-date" placeholder="π.χ. 2024" maxlength="4">'
-        '</div>',
-        '<div class="filter-group" style="align-self:center;">'
-        '<label class="filter-cb">'
-        '<input type="checkbox" id="cnt-totals-only">'
-        ' Μόνο σύνολα ανά έτος</label>'
-        '</div>',
-    ]
-
-    filter_bar = '<div class="count-filters">' + "".join(f for f in filter_parts if f) + '</div>'
-
-    js = _build_count_filter_js()
-
-    return (
-        f'<section class="print-section" id="count-section">'
-        f'<h2>Πίνακας Καταμέτρησης</h2>'
-        f'<p class="print-description">Αναλυτική καταμέτρηση ημερών ασφάλισης ανά μήνα.</p>'
-        f'{filter_bar}'
-        f'<div id="count-tables-wrapper">{count_table_html}</div>'
-        f'<script>{js}</script></section>'
-    )
-
-
-def _build_count_filter_js():
-    """Client-side JS για φιλτράρισμα πίνακα Καταμέτρησης."""
-    return r"""
-(function(){
-  var sec=document.getElementById('count-section');
-  if(!sec)return;
-  var yearSections=sec.querySelectorAll('.year-section');
-  if(!yearSections.length)return;
-
-  /* Εντοπισμός στηλών από headers */
-  var colMap={};
-  var ft=sec.querySelector('table.print-table');
-  if(ft){ft.querySelectorAll('thead th').forEach(function(th,i){
-    var t=th.textContent.trim().toUpperCase();
-    if(t==='ΤΑΜΕΙΟ')colMap.tameio=i;
-    else if(t==='ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ')colMap.typos=i;
-    else if(t==='ΕΡΓΟΔΟΤΗΣ')colMap.employer=i;
-    else if(t.indexOf('ΚΛΑΔΟΣ')!==-1||t.indexOf('ΠΑΚΕΤΟ')!==-1)colMap.klados=i;
-    else if(t.indexOf('ΑΠΟΔΟΧΩΝ')!==-1)colMap.apodoxes=i;
-  });}
-
-  /* Σημείωση κάθε γραμμής με data-* (propagation collapsed τιμών) */
-  yearSections.forEach(function(ys){
-    var tbl=ys.querySelector('table.print-table');
-    if(!tbl)return;
-    var rows=tbl.querySelectorAll('tbody tr');
-    var last={};
-  /* Εντοπισμός γραμμής συνόλου: class total-row, ή κελί με ΣΥΝΟΛΟ, ή 4ψηφιο έτος σε στήλη μήνα (όχι ΕΤΟΣ) */
-    rows.forEach(function(tr){
-      var tds=tr.querySelectorAll('td');
-      var isTotal=tr.classList.contains('total-row');
-      if(!isTotal){for(var j=0;j<tds.length;j++){var t=(tds[j].textContent||'').trim();if(t.indexOf('ΣΥΝΟΛΟ')!==-1){isTotal=true;break;}if(j>=8&&/^\d{4}$/.test(t)&&parseInt(t,10)>=1900&&parseInt(t,10)<=2100){isTotal=true;break;}}}
-      tr.setAttribute('data-is-total',isTotal?'1':'0');
-      /* Κενές γραμμές (separators) */
-      var allEmpty=true;
-      for(var k=0;k<tds.length;k++){if(tds[k].textContent.trim()){allEmpty=false;break;}}
-      if(allEmpty){tr.setAttribute('data-is-sep','1');return;}
-      if(isTotal)return;
-
-      function gv(key){
-        if(colMap[key]===undefined)return'';
-        var td=tds[colMap[key]];var v=td?td.textContent.trim():'';
-        if(v)last[key]=v;
-        return last[key]||'';
-      }
-      tr.setAttribute('data-c-tameio',gv('tameio'));
-      tr.setAttribute('data-c-typos',gv('typos'));
-      tr.setAttribute('data-c-employer',gv('employer'));
-      tr.setAttribute('data-c-klados',gv('klados'));
-      tr.setAttribute('data-c-apodoxes',gv('apodoxes'));
-    });
-  });
-
-  /* Εφαρμογή φίλτρων */
-  function apply(){
-    var f={tameio:[],typos:[],employer:[],klados:[],apodoxes:[]};
-    ['tameio','typos','employer','klados','apodoxes'].forEach(function(attr){
-      sec.querySelectorAll('input[name="cnt-'+attr+'"]:checked').forEach(function(cb){f[attr].push(cb.value);});
-    });
-    var fromY=parseInt((document.getElementById('cnt-filter-from')||{}).value,10)||0;
-    var toY=parseInt((document.getElementById('cnt-filter-to')||{}).value,10)||9999;
-    var totOnly=document.getElementById('cnt-totals-only')&&document.getElementById('cnt-totals-only').checked;
-
-    yearSections.forEach(function(ys){
-      var hd=ys.querySelector('.year-heading');
-      var yTxt=hd?hd.textContent.trim():'';
-      /* Πολλαπλό κλειδί μπορεί να περιέχει | */
-      var yNum=parseInt(yTxt,10)||0;
-      if(yNum&&(yNum<fromY||yNum>toY)){ys.style.display='none';return;}
-
-      var tbl=ys.querySelector('table.print-table');
-      if(!tbl){ys.style.display='';return;}
-      var rows=tbl.querySelectorAll('tbody tr');
-      var any=false;
-      rows.forEach(function(tr){
-        if(tr.getAttribute('data-is-sep')==='1'){tr.style.display='none';return;}
-        var isT=tr.getAttribute('data-is-total')==='1';
-        if(totOnly){tr.style.display=isT?'':'none';if(isT)any=true;return;}
-        if(isT){tr.style.display='';any=true;return;}
-        var ok=true;
-        if(f.tameio.length&&f.tameio.indexOf(tr.getAttribute('data-c-tameio'))===-1)ok=false;
-        if(f.typos.length&&f.typos.indexOf(tr.getAttribute('data-c-typos'))===-1)ok=false;
-        if(f.employer.length&&f.employer.indexOf(tr.getAttribute('data-c-employer'))===-1)ok=false;
-        if(f.klados.length&&f.klados.indexOf(tr.getAttribute('data-c-klados'))===-1)ok=false;
-        if(f.apodoxes.length&&f.apodoxes.indexOf(tr.getAttribute('data-c-apodoxes'))===-1)ok=false;
-        tr.style.display=ok?'':'none';
-        if(ok)any=true;
-      });
-      /* Εμφάνιση separators μόνο αν υπάρχουν ορατές γραμμές */
-      if(any&&!totOnly){rows.forEach(function(tr){if(tr.getAttribute('data-is-sep')==='1')tr.style.display='';});}
-      ys.style.display=any?'':'none';
-    });
-  }
-
-  /* Dropdown open/close */
-  sec.querySelectorAll('.count-filters .filter-dropdown-trigger').forEach(function(tg){
-    tg.addEventListener('click',function(e){
-      e.stopPropagation();
-      var dd=tg.closest('.filter-dropdown');
-      if(!dd)return;
-      /* Κλείσιμο άλλων ανοιχτών */
-      sec.querySelectorAll('.count-filters .filter-dropdown.open').forEach(function(o){if(o!==dd)o.classList.remove('open');});
-      dd.classList.toggle('open');
-    });
-  });
-  document.addEventListener('click',function(){
-    sec.querySelectorAll('.count-filters .filter-dropdown.open').forEach(function(dd){dd.classList.remove('open');});
-  });
-  sec.querySelectorAll('.count-filters .filter-dropdown-panel').forEach(function(p){
-    p.addEventListener('click',function(e){e.stopPropagation();});
-  });
-
-  /* Ενημέρωση labels */
-  function updLabels(){
-    sec.querySelectorAll('.count-filters .filter-dropdown').forEach(function(dd){
-      var name=dd.getAttribute('data-filter-name')||'';
-      var tg=dd.querySelector('.filter-dropdown-trigger');
-      if(!tg)return;
-      var n=dd.querySelectorAll('input[type="checkbox"]:checked').length;
-      tg.textContent=n===0?'Επιλέξτε '+name+'…':n===1?'1 επιλεγμένο':n+' επιλεγμένα';
-    });
-  }
-
-  /* Event listeners */
-  sec.querySelectorAll('.count-filters input[type="checkbox"]').forEach(function(cb){
-    cb.addEventListener('change',function(){apply();updLabels();});
-  });
-  sec.querySelectorAll('.count-filters .filter-date').forEach(function(inp){
-    inp.addEventListener('input',apply);
-  });
-  updLabels();
-})();
-"""
-
-
-# ---------------------------------------------------------------------------
 # Report data builder
 # ---------------------------------------------------------------------------
 
@@ -1000,10 +689,15 @@ def build_report_tab_entries(df, description_map=None):
 
     # -- Count --
     if not count_display_df.empty:
-        count_html = build_count_with_filters(
-            count_display_df, print_style_rows, count_df, description_map,
+        count_table_html = build_yearly_print_html(
+            count_display_df, year_column='ΕΤΟΣ', style_rows=print_style_rows,
         )
-        tab_entries.append(("count", "Καταμέτρηση", count_html))
+        tab_entries.append((
+            "count", "Καταμέτρηση",
+            f"<section class='print-section'><h2>Πίνακας Καταμέτρησης</h2>"
+            f"<p class='print-description'>Αναλυτική καταμέτρηση ημερών ασφάλισης ανά μήνα.</p>"
+            f"{count_table_html}</section>",
+        ))
 
     # -- Gaps --
     try:
@@ -1247,7 +941,7 @@ def build_viewer_html_document(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html_mod.escape(app_title)} - {html_mod.escape(app_subtitle)}</title>
-<link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>{VIEWER_STYLES}</style>
 </head>
 <body>
@@ -1318,9 +1012,6 @@ def generate_full_html_report(df, client_name="", app_title="ATLAS",
 
 PRINT_STYLES = """
 @media print { @page { size: A4 landscape; margin: 8mm; } }
-@media print {
-  .count-filters, .totals-filters, .totals-info-bar { display: none !important; visibility: hidden !important; }
-}
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: "Fira Sans", sans-serif; color: #222; margin: 0; padding: 12px 16px; font-size: 11px; line-height: 1.4; background: #fff; }
 .prt-name { text-align: center; font-size: 18px; font-weight: 800; margin-bottom: 2px; }
@@ -1371,180 +1062,59 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 """
 
 VIEWER_STYLES = """
-/* ===== Reset & Base (Lite style) ===== */
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; overflow: hidden; }
-body {
-  font-family: "Fira Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-  color: #1e293b; background: #f8fafc;
-  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
-}
-
-/* ===== App Layout ===== */
-.app-layout { display: flex; height: 100vh; overflow: hidden; }
-
-/* ===== Sidebar (Lite: 220px, solid #1e293b) ===== */
-.sidebar {
-  width: 220px; min-width: 220px;
-  background: #1e293b; color: #e2e8f0;
-  display: flex; flex-direction: column;
-  position: fixed; top: 0; left: 0; bottom: 0; z-index: 10;
-}
-.sidebar-header {
-  padding: 20px 16px 12px; border-bottom: 1px solid #334155;
-  font-size: 18px; font-weight: 800; color: #fff; text-align: center;
-}
+body { font-family: "Fira Sans", -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #1e293b; background: #fff; }
+.app-layout { display: flex; min-height: 100vh; }
+.sidebar { width: 220px; min-width: 220px; background: #1e293b; color: #e2e8f0; display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 10; }
+.sidebar-header { padding: 20px 16px 12px; border-bottom: 1px solid #334155; font-size: 18px; font-weight: 800; color: #fff; text-align: center; }
 .sidebar-header small { display: block; font-size: 11px; font-weight: 400; color: #94a3b8; margin-top: 2px; }
 .sidebar-nav { flex: 1; padding: 8px 0; overflow-y: auto; }
-.sidebar-nav::-webkit-scrollbar { width: 4px; }
-.sidebar-nav::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
-.nav-item {
-  display: block; padding: 10px 20px;
-  color: #cbd5e1; text-decoration: none;
-  font-size: 14px; font-weight: 600;
-  border-left: 3px solid transparent;
-  transition: all 0.15s;
-}
+.nav-item { display: block; padding: 10px 20px; color: #cbd5e1; text-decoration: none; font-size: 14px; font-weight: 600; border-left: 3px solid transparent; transition: all .15s; }
 .nav-item:hover { background: #334155; color: #fff; }
 .nav-item.active { background: #334155; color: #fff; border-left-color: #6366f1; }
-.sidebar-footer {
-  padding: 12px 16px; border-top: 1px solid #334155;
-  display: flex; flex-direction: column; gap: 8px;
-}
+.sidebar-footer { padding: 12px 16px; border-top: 1px solid #334155; display: flex; flex-direction: column; gap: 8px; }
 .sidebar-footer-copyright { margin-top: auto; padding-top: 12px; font-size: 11px; color: #94a3b8; text-align: left; }
-.btn-action {
-  width: 100%; border: none; padding: 10px 0; border-radius: 6px;
-  font-size: 14px; font-weight: 700; cursor: pointer; transition: background 0.15s;
-}
-.btn-save { background: #2563eb; color: white; }
-.btn-save:hover { background: #1d4ed8; }
-.btn-print { background: #dc3545; color: white; }
-.btn-print:hover { background: #b91c1c; }
-
-/* ===== Main Content (Lite: margin-left 220px) ===== */
-.main-content {
-  margin-left: 220px; flex: 1; min-width: 0;
-  height: 100vh; display: flex; flex-direction: column; overflow: hidden;
-  background: #f8fafc;
-}
-.header-name {
-  font-size: 22px; font-weight: 800; color: #111827;
-  padding: 20px 32px 4px; flex-shrink: 0;
-}
-.main-title {
-  font-size: 15px; color: #64748b; font-weight: 600;
-  padding: 0 32px 16px; flex-shrink: 0;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-/* ===== Tab Panes: only active visible, scrolls independently ===== */
-.tab-pane { display: none; }
-.tab-pane.active {
-  display: block; flex: 1; min-height: 0;
-  overflow-y: auto; overflow-x: hidden;
-  padding: 24px 32px 40px; position: relative;
-}
-.tab-pane.active::-webkit-scrollbar { width: 6px; }
-.tab-pane.active::-webkit-scrollbar-track { background: transparent; }
-.tab-pane.active::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 6px; }
-.tab-pane.active::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-
-/* ===== Exclusion Note ===== */
+.btn-action { width: 100%; border: none; padding: 10px 0; border-radius: 6px; font-size: 14px; font-weight: 700; cursor: pointer; transition: background .15s; }
+.btn-save { background: #2563eb; color: white; } .btn-save:hover { background: #1d4ed8; }
+.btn-print { background: #dc3545; color: white; } .btn-print:hover { background: #b91c1c; }
+.main-content { margin-left: 220px; flex: 1; padding: 24px 32px; min-width: 0; }
+.header-name { font-size: 22px; font-weight: 800; color: #111827; margin-bottom: 4px; }
+.main-title { font-size: 15px; color: #64748b; font-weight: 600; margin-bottom: 20px; }
+.tab-pane { display: none; } .tab-pane.active { display: block; position: relative; }
 .lite-exclusion-note { text-align: right; font-size: 11px; color: #64748b; font-style: italic; margin-bottom: 8px; }
-
-/* ===== Audit Cards (Lite style) ===== */
 .audit-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; margin-bottom: 24px; }
-.audit-card {
-  background: white; border: 1px solid #e2e8f0; border-radius: 12px;
-  padding: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.03);
-  display: flex; flex-direction: column;
-}
+.audit-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.03); display: flex; flex-direction: column; }
 .audit-card-clickable { cursor: pointer; transition: box-shadow 0.2s, border-color 0.2s; }
 .audit-card-clickable:hover { box-shadow: 0 4px 12px rgba(99,102,241,0.2); border-color: #6366f1; }
 .audit-card-clickable:focus { outline: 2px solid #6366f1; outline-offset: 2px; }
-.audit-card-header {
-  font-size: 14px; font-weight: 700; color: #334155; margin-bottom: 8px;
-  border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;
-  display: flex; justify-content: space-between; align-items: center;
-}
+.audit-card-header { font-size: 14px; font-weight: 700; color: #334155; margin-bottom: 8px; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
 .audit-card-result { font-size: 16px; font-weight: 600; color: #0f172a; margin-bottom: 8px; }
 .audit-card-details { font-size: 13px; color: #64748b; line-height: 1.5; flex: 1; }
 .audit-card-actions { margin-top: 12px; padding-top: 8px; border-top: 1px dashed #e2e8f0; font-size: 12px; color: #ef4444; font-weight: 600; }
-
-/* ===== Print Sections & Tables (Lite style) ===== */
-.print-section { margin-bottom: 24px; position: relative; }
-.print-section h2 {
-  font-size: 18px; font-weight: 700; color: #1e293b;
-  margin: 0 0 8px 0; padding-bottom: 6px;
-  border-bottom: 2px solid #6366f1;
-}
+.print-section { margin-bottom: 24px; }
+.print-section h2 { font-size: 18px; font-weight: 700; color: #1e293b; margin: 0 0 8px 0; padding-bottom: 6px; border-bottom: 2px solid #6366f1; }
 .print-description { font-size: 13px; color: #64748b; font-style: italic; margin: 0 0 12px 0; }
-
-table.print-table {
-  border-collapse: collapse; width: 100%; font-size: 13px; table-layout: auto;
-  background: #fff; border-radius: 8px; overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-}
-table.print-table thead th {
-  background: #f8fafc; border-bottom: 2px solid #e2e8f0;
-  padding: 10px 12px; text-align: left; font-weight: 700;
-  color: #334155; font-size: 12px; white-space: nowrap;
-}
+table.print-table { border-collapse: collapse; width: 100%; font-size: 13px; table-layout: auto; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+table.print-table thead th { background: #f8fafc; border-bottom: 2px solid #e2e8f0; padding: 10px 12px; text-align: left; font-weight: 700; color: #334155; font-size: 12px; white-space: nowrap; }
 table.print-table tbody td { border-bottom: 1px solid #f1f5f9; padding: 8px 12px; color: #475569; }
 table.print-table tbody tr:hover td { background: #f8fafc; }
 table.print-table tbody td:first-child { font-weight: 700; color: #1e293b; }
-table.print-table tbody tr.total-row td {
-  background: #dbeafe !important; color: #1e293b; font-weight: 700 !important;
-  border-top: 1px solid #93c5fd;
-}
+table.print-table tbody tr.total-row td { background: #dbeafe !important; color: #1e293b; font-weight: 700 !important; border-top: 1px solid #93c5fd; }
 table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { white-space: normal; word-break: break-word; }
-
-.table-container { position: relative; }
-.print-section { position: relative; overflow-x: auto; }
-
-/* ===== Section Action Buttons ===== */
-.section-actions {
-  position: absolute; top: 6px; right: 6px; z-index: 5;
-  display: flex; align-items: center; gap: 8px;
-  opacity: 0.85; transition: opacity 0.2s;
-}
+.table-container { position: relative; } .print-section { position: relative; }
+.section-actions { position: absolute; top: 6px; right: 6px; z-index: 5; display: flex; align-items: center; gap: 8px; opacity: 0.85; transition: opacity 0.2s; }
 .table-container:hover .section-actions, .print-section:hover > .section-actions { opacity: 1; }
-.btn-fs, .btn-print-tab {
-  width: 40px; height: 40px; border-radius: 8px; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  border: 1px solid transparent;
-  transition: opacity 0.2s, background 0.15s, transform 0.15s;
-  font-size: 18px; line-height: 1;
-}
-.btn-fs { background: #e0e7ff; border-color: #a5b4fc; color: #4338ca; }
-.btn-fs:hover { background: #6366f1; color: #fff; border-color: #4f46e5; transform: scale(1.1); }
-.btn-print-tab { background: #f0fdf4; border-color: #86efac; color: #15803d; }
-.btn-print-tab:hover { background: #22c55e; color: #fff; border-color: #16a34a; transform: scale(1.1); }
-
-/* ===== Fullscreen Overlay ===== */
+.btn-fs, .btn-print-tab { width: 40px; height: 40px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; border: 1px solid transparent; transition: opacity 0.2s, background 0.15s, transform 0.15s; font-size: 18px; line-height: 1; }
+.btn-fs { background: #e0e7ff; border-color: #a5b4fc; color: #4338ca; } .btn-fs:hover { background: #6366f1; color: #fff; border-color: #4f46e5; transform: scale(1.1); }
+.btn-print-tab { background: #f0fdf4; border-color: #86efac; color: #15803d; } .btn-print-tab:hover { background: #22c55e; color: #fff; border-color: #16a34a; transform: scale(1.1); }
 .table-fullscreen .section-actions { display: none; }
-.table-fullscreen {
-  position: fixed; inset: 0; z-index: 10000; background: #fff;
-  display: flex; flex-direction: column;
-}
-.table-fullscreen .fs-toolbar {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 24px; border-bottom: 2px solid #e2e8f0; background: #f8fafc; flex-shrink: 0;
-}
+.table-fullscreen { position: fixed; inset: 0; z-index: 10000; background: #fff; display: flex; flex-direction: column; }
+.table-fullscreen .fs-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; border-bottom: 2px solid #e2e8f0; background: #f8fafc; flex-shrink: 0; }
 .table-fullscreen .fs-title { font-size: 16px; font-weight: 700; color: #1e293b; }
 .table-fullscreen .fs-toolbar-actions { display: flex; align-items: center; gap: 10px; }
-.table-fullscreen .fs-print-btn {
-  background: #dcfce7; border: 1px solid #86efac; border-radius: 8px;
-  padding: 8px 16px; font-size: 14px; font-weight: 600; color: #15803d;
-  cursor: pointer; display: flex; align-items: center; gap: 6px;
-  transition: background 0.15s, color 0.15s;
-}
+.table-fullscreen .fs-print-btn { background: #dcfce7; border: 1px solid #86efac; border-radius: 8px; padding: 8px 16px; font-size: 14px; font-weight: 600; color: #15803d; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: background 0.15s, color 0.15s; }
 .table-fullscreen .fs-print-btn:hover { background: #22c55e; color: #fff; border-color: #16a34a; }
-.table-fullscreen .fs-close {
-  background: #fee2e2; border: 1px solid #fca5a5; border-radius: 8px;
-  width: 38px; height: 38px; cursor: pointer; display: flex; align-items: center; justify-content: center;
-  font-size: 20px; color: #dc2626; transition: all 0.15s;
-}
+.table-fullscreen .fs-close { background: #fee2e2; border: 1px solid #fca5a5; border-radius: 8px; width: 38px; height: 38px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #dc2626; transition: all 0.15s; }
 .table-fullscreen .fs-close:hover { background: #dc2626; color: #fff; }
 .table-fullscreen .fs-body { flex: 1; overflow: auto; padding: 16px 24px; }
 .table-fullscreen .fs-body table.print-table { table-layout: auto; font-size: 14px; }
@@ -1552,45 +1122,18 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .table-fullscreen .fs-body table.print-table colgroup col { width: auto !important; }
 .table-fullscreen .fs-body table.print-table thead th { padding: 12px 14px; font-size: 13px; position: sticky; top: 0; z-index: 2; background: #f8fafc; }
 .table-fullscreen .fs-body table.print-table tbody td { padding: 10px 14px; }
-
-/* ===== Tooltips ===== */
-.apodoxes-tooltip {
-  position: fixed; z-index: 100000; max-width: 340px; padding: 14px 18px;
-  font-size: 15px; line-height: 1.5; color: #1e293b; background: #ffffff;
-  border-radius: 12px;
-  box-shadow: 0 12px 48px rgba(0,0,0,0.14), 0 4px 16px rgba(99,102,241,0.08);
-  border: 1px solid #e2e8f0; pointer-events: none;
-  opacity: 0; visibility: hidden;
-  transition: opacity 0.2s ease, visibility 0.2s ease, transform 0.15s ease;
-  transform: translateY(4px);
-}
+.apodoxes-tooltip { position: fixed; z-index: 100000; max-width: 340px; padding: 14px 18px; font-size: 15px; line-height: 1.5; color: #1e293b; background: #fff; border-radius: 12px; box-shadow: 0 12px 48px rgba(0,0,0,0.14), 0 4px 16px rgba(99,102,241,0.08); border: 1px solid #e2e8f0; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity 0.2s, visibility 0.2s, transform 0.15s; transform: translateY(4px); }
 .apodoxes-tooltip.visible { opacity: 1; visibility: visible; transform: translateY(0); }
 .has-apodoxes-tooltip { cursor: help; }
-
-/* ===== Year Sections ===== */
+@media print { .section-actions { display: none !important; } .btn-fs { display: none !important; } .btn-print-tab { display: none !important; } .apodoxes-tooltip { display: none !important; } }
 .year-section { margin-bottom: 20px; }
-.year-heading {
-  font-size: 15px; font-weight: 800; color: #1e293b;
-  padding: 8px 0 4px 0; border-bottom: 2px solid #6366f1; margin-bottom: 6px;
-}
-
-/* ===== Disclaimer ===== */
-.print-disclaimer {
-  font-size: 12px; color: #64748b; margin-top: 32px; padding-top: 16px;
-  border-top: 1px solid #e2e8f0; line-height: 1.6; flex-shrink: 0;
-}
+.year-heading { font-size: 15px; font-weight: 800; color: #1e293b; padding: 8px 0 4px 0; border-bottom: 2px solid #6366f1; margin-bottom: 6px; }
+.print-disclaimer { font-size: 12px; color: #64748b; margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; line-height: 1.6; }
 .print-disclaimer strong { color: #374151; }
-
-/* ===== Timeline (Lite style) ===== */
 .tl-container { position: relative; padding-bottom: 36px; padding-top: 26px; }
 .tl-row { display: flex; align-items: center; margin-bottom: 8px; min-height: 28px; }
-.tl-label {
-  width: 200px; min-width: 200px; font-size: 13px; font-weight: 600;
-  color: #334155; text-align: right; padding-right: 14px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.tl-label-gap { color: #dc2626; }
-.tl-label-zero { color: #78716c; }
+.tl-label { width: 200px; min-width: 200px; font-size: 13px; font-weight: 600; color: #334155; text-align: right; padding-right: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-label-gap { color: #dc2626; } .tl-label-zero { color: #78716c; }
 .tl-track { position: relative; flex: 1; height: 24px; background: #f1f5f9; border-radius: 6px; }
 .tl-bar { position: absolute; top: 2px; height: 20px; border-radius: 4px; opacity: 0.85; cursor: default; transition: opacity 0.15s; }
 .tl-bar:hover { opacity: 1; box-shadow: 0 0 6px rgba(0,0,0,0.25); z-index: 2; }
@@ -1614,13 +1157,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .tl-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; font-size: 13px; }
 .tl-legend-item { display: inline-flex; align-items: center; gap: 6px; color: #334155; }
 .tl-legend-dot { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
-
-/* ===== Totals Info Bar (Lite style) ===== */
-.totals-info-bar {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 24px;
-  margin-bottom: 20px; padding: 16px 20px;
-  background: #dbeafe; border-radius: 8px; border: 1px solid #93c5fd;
-}
+.totals-info-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; margin-bottom: 20px; padding: 16px 20px; background: #dbeafe; border-radius: 8px; border: 1px solid #93c5fd; }
 .totals-info-bar-warning { background: #fef3c7; border-color: #f59e0b; }
 .totals-info-bar-warning .totals-info-msg { color: #b45309; }
 .totals-info-msg { font-size: 16px; font-weight: 600; color: #1e40af; flex: 1; min-width: 200px; }
@@ -1628,13 +1165,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .totals-summary-item { display: flex; flex-direction: column; gap: 4px; }
 .totals-summary-label { font-size: 13px; font-weight: 600; color: #475569; }
 .totals-summary-value { font-size: 22px; font-weight: 800; color: #1e293b; }
-
-/* ===== Totals Filters (Lite style) ===== */
-.totals-filters {
-  display: flex; flex-wrap: wrap; gap: 20px 28px;
-  margin-bottom: 20px; padding: 16px 20px;
-  background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;
-}
+.totals-filters { display: flex; flex-wrap: wrap; gap: 20px 28px; margin-bottom: 20px; padding: 16px 20px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
 .totals-filters .filter-group { display: flex; flex-direction: column; gap: 10px; }
 .totals-filters .filter-label { font-size: 16px; font-weight: 700; color: #1e293b; }
 .totals-filters .filter-options { display: flex; flex-wrap: wrap; gap: 12px 16px; max-height: 160px; overflow-y: auto; }
@@ -1642,26 +1173,14 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .totals-filters .filter-cb input[type="checkbox"] { width: 20px; height: 20px; min-width: 20px; min-height: 20px; cursor: pointer; accent-color: #6366f1; }
 .totals-filters .filter-date { padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 16px; }
 .totals-filters .filter-dropdown { position: relative; }
-.totals-filters .filter-dropdown-trigger {
-  display: inline-flex; align-items: center; min-width: 200px;
-  padding: 10px 14px; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px;
-  font-size: 16px; color: #334155; cursor: pointer; user-select: none;
-}
+.totals-filters .filter-dropdown-trigger { display: inline-flex; align-items: center; min-width: 200px; padding: 10px 14px; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 16px; color: #334155; cursor: pointer; user-select: none; }
 .totals-filters .filter-dropdown-trigger:hover { border-color: #6366f1; }
 .totals-filters .filter-dropdown-trigger::after { content: ''; margin-left: auto; border: 6px solid transparent; border-top-color: #64748b; }
-.totals-filters .filter-dropdown-panel {
-  display: none; position: absolute; top: 100%; left: 0; margin-top: 4px;
-  min-width: 280px; max-height: 320px; overflow-y: auto;
-  background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.12); z-index: 100;
-}
+.totals-filters .filter-dropdown-panel { display: none; position: absolute; top: 100%; left: 0; margin-top: 4px; min-width: 280px; max-height: 320px; overflow-y: auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.12); z-index: 100; }
 .totals-filters .filter-dropdown.open .filter-dropdown-panel { display: block; }
 .totals-filters .filter-dropdown.open .filter-dropdown-trigger { border-color: #6366f1; }
-.totals-filters .filter-dropdown .filter-options { max-height: 280px; flex-direction: column; flex-wrap: nowrap; padding: 8px; gap: 6px 0; }
-.totals-filters .filter-dropdown .filter-cb { white-space: normal; padding: 6px 8px; border-radius: 6px; }
-.totals-filters .filter-dropdown .filter-cb:hover { background: #f1f5f9; }
-
-/* ===== Date Key Panel (Lite style) ===== */
+.totals-filters .filter-dropdown .filter-options { max-height: 280px; flex-direction: column; flex-wrap: nowrap; padding: 8px; }
+.totals-filters .filter-dropdown .filter-cb { white-space: normal; }
 .date-key-panel { margin-top: 24px; padding: 20px 24px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; }
 .date-key-title { font-size: 16px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
 .date-key-desc { font-size: 12px; color: #64748b; margin-bottom: 16px; font-style: italic; }
@@ -1670,115 +1189,14 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .date-key-num { width: 30px; height: 30px; background: #6366f1; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
 .date-key-label { font-size: 13px; color: #475569; line-height: 1.3; }
 .date-key-value { font-size: 20px; font-weight: 800; color: #1e293b; margin-top: 2px; }
-
-/* ===== Copy Target ===== */
+@media print { .totals-filters { display: none !important; } .totals-info-bar { display: none !important; } .date-key-panel { break-inside: avoid; } .lite-exclusion-note { font-size: 9px; margin-bottom: 4px; } }
 .copy-target { cursor: pointer; position: relative; transition: background-color 0.15s; }
-.copy-target:hover { background-color: rgba(99, 102, 241, 0.15) !important; }
-.copy-target:active { background-color: rgba(99, 102, 241, 0.25) !important; }
-
-/* ===== Toast ===== */
+.copy-target:hover { background-color: rgba(99,102,241,0.15) !important; }
+.copy-target:active { background-color: rgba(99,102,241,0.25) !important; }
 #toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 9999; pointer-events: none; }
-.toast {
-  background: #1e293b; color: #fff; padding: 10px 16px; border-radius: 8px;
-  margin-top: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  font-size: 15px; font-weight: 600;
-  opacity: 0; transform: translateY(10px); transition: opacity 0.3s, transform 0.3s;
-}
+.toast { background: #1e293b; color: #fff; padding: 10px 16px; border-radius: 8px; margin-top: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-size: 15px; font-weight: 600; opacity: 0; transform: translateY(10px); transition: opacity 0.3s, transform 0.3s; }
 .toast.show { opacity: 1; transform: translateY(0); }
-
-/* ===== Complex File Warning ===== */
-.complex-file-warning {
-  background: #fef2f2; border: 2px solid #dc2626; border-radius: 8px;
-  padding: 12px 16px; margin-bottom: 16px;
-  color: #991b1b; font-weight: 700; font-size: 1rem;
-}
-
-/* ===== Print Media ===== */
-@media print {
-  .section-actions, .btn-fs, .btn-print-tab, .apodoxes-tooltip { display: none !important; }
-  .count-filters, .totals-filters, .totals-info-bar { display: none !important; visibility: hidden !important; }
-  .date-key-panel { break-inside: avoid; }
-  .lite-exclusion-note { font-size: 9px; margin-bottom: 4px; }
-  html, body { height: auto; overflow: visible; }
-  .app-layout { height: auto; overflow: visible; }
-  .main-content { height: auto; overflow: visible; }
-  .tab-pane.active { overflow: visible; }
-  .sidebar { display: none; }
-  .main-content { margin-left: 0; }
-}
-
-/* ===== Count Tab: filters always visible, scroll only inside table area ===== */
-#pane-count.tab-pane.active {
-  overflow: hidden; display: flex; flex-direction: column; padding-bottom: 0;
-}
-#pane-count > .lite-exclusion-note { flex-shrink: 0; }
-#count-section {
-  display: flex; flex-direction: column; flex: 1; min-height: 0;
-  overflow: hidden; margin-bottom: 0;
-}
-#count-section > h2, #count-section > .print-description { flex-shrink: 0; }
-.count-filters {
-  display: flex; flex-wrap: wrap; gap: 20px 28px;
-  margin-bottom: 20px; padding: 16px 20px; flex-shrink: 0;
-  background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;
-  align-items: flex-end; z-index: 5;
-}
-.count-filters .filter-group { display: flex; flex-direction: column; gap: 10px; }
-.count-filters .filter-label { font-size: 16px; font-weight: 700; color: #1e293b; }
-.count-filters .filter-cb { display: flex; align-items: center; gap: 10px; font-size: 16px; color: #334155; cursor: pointer; white-space: nowrap; line-height: 1.4; }
-.count-filters .filter-cb input[type="checkbox"] { width: 20px; height: 20px; min-width: 20px; min-height: 20px; cursor: pointer; accent-color: #6366f1; }
-.count-filters .filter-date {
-  padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 6px;
-  font-size: 16px; font-family: inherit; background: #fff;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-.count-filters .filter-date:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.1); outline: none; }
-.count-filters .filter-dropdown { position: relative; }
-.count-filters .filter-dropdown-trigger {
-  display: inline-flex; align-items: center; min-width: 200px;
-  padding: 10px 14px; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px;
-  font-size: 16px; color: #334155; cursor: pointer; user-select: none;
-  font-family: inherit; transition: border-color 0.15s;
-}
-.count-filters .filter-dropdown-trigger:hover { border-color: #6366f1; }
-.count-filters .filter-dropdown-trigger::after { content: ''; margin-left: auto; border: 6px solid transparent; border-top-color: #64748b; }
-.count-filters .filter-dropdown-panel {
-  display: none; position: absolute; top: 100%; left: 0; margin-top: 4px;
-  min-width: 280px; max-height: 320px; overflow-y: auto;
-  background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.12); z-index: 100;
-}
-.count-filters .filter-dropdown.open .filter-dropdown-panel { display: block; }
-.count-filters .filter-dropdown.open .filter-dropdown-trigger { border-color: #6366f1; }
-.count-filters .filter-dropdown .filter-options { max-height: 280px; flex-direction: column; flex-wrap: nowrap; padding: 8px; gap: 6px 0; }
-.count-filters .filter-dropdown .filter-cb { white-space: normal; padding: 6px 8px; border-radius: 6px; }
-.count-filters .filter-dropdown .filter-cb:hover { background: #f1f5f9; }
-
-/* Table wrapper: scroll only, no outer border, same background as page */
-#count-tables-wrapper {
-  flex: 1; min-height: 0;
-  overflow: auto; -webkit-overflow-scrolling: touch;
-  background: #f8fafc;
-  padding: 0 2px;
-}
-#count-tables-wrapper .year-section { margin-bottom: 12px; }
-#count-tables-wrapper .year-heading {
-  font-size: 15px; font-weight: 800; padding: 8px 0 6px 0;
-  border-bottom: 2px solid #6366f1;
-  margin-top: 3px; margin-bottom: 11px;
-}
-
-@media print { .count-filters { display: none !important; } }
-@media print {
-  #pane-count.tab-pane.active { overflow: visible !important; display: block !important; }
-  #count-section { overflow: visible !important; display: block !important; }
-  #count-tables-wrapper { overflow: visible !important; }
-}
-
-/* ===== Subtle animations ===== */
-@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-.tab-pane.active > .print-section { animation: fadeIn 0.25s ease-out; }
-.tab-pane.active > .audit-grid { animation: fadeIn 0.3s ease-out; }
+.complex-file-warning { background: #fef2f2; border: 2px solid #dc2626; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; color: #991b1b; font-weight: 700; font-size: 1rem; }
 """
 
 VIEWER_JS = r"""
@@ -1799,7 +1217,7 @@ function showToast(message){var container=document.getElementById('toast-contain
 document.addEventListener('click',function(e){var target=e.target.closest('.copy-target');if(target){var text=target.innerText.trim();if(text&&text!=='-'&&text!==''){navigator.clipboard.writeText(text).then(function(){showToast('Αντιγράφηκε: '+text);}).catch(function(err){console.error('Copy failed:',err);});}}});
 document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.print-section').forEach(function(sec){var actions=document.createElement('div');actions.className='section-actions';var printBtn=document.createElement('button');printBtn.className='btn-print-tab';printBtn.innerHTML='🖨';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(e){e.stopPropagation();printSection(sec);};var fsBtn=document.createElement('button');fsBtn.className='btn-fs';fsBtn.innerHTML='⛶';fsBtn.title='Πλήρης οθόνη';fsBtn.onclick=function(e){e.stopPropagation();openTableFs(sec);};actions.appendChild(printBtn);actions.appendChild(fsBtn);sec.appendChild(actions);});
 document.querySelectorAll('table.print-table').forEach(function(tbl){if(tbl.closest('.print-section'))return;var wrapper=document.createElement('div');wrapper.className='table-container';tbl.parentNode.insertBefore(wrapper,tbl);wrapper.appendChild(tbl);var actions=document.createElement('div');actions.className='section-actions';var printBtn=document.createElement('button');printBtn.className='btn-print-tab';printBtn.innerHTML='🖨';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(e){e.stopPropagation();printSection(tbl);};var fsBtn=document.createElement('button');fsBtn.className='btn-fs';fsBtn.innerHTML='⛶';fsBtn.title='Πλήρης οθόνη';fsBtn.onclick=function(e){e.stopPropagation();openTableFs(tbl);};actions.appendChild(printBtn);actions.appendChild(fsBtn);wrapper.appendChild(actions);});
-var targetColumns=['Συνολικές ημέρες','Μικτές αποδοχές','Συνολικές εισφορές','ΣΥΝΟΛΟ','ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ','ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ','ΑΠΟΔΟΧΕΣ','ΕΙΣΦΟΡΕΣ','Ημέρες Ασφ.','Σύνολο','Μικτές Αποδοχές','Συνολικές Εισφορές'];
+var targetColumns=['Συνολικές ημέρες','Μικτές αποδοχές','Συνολικές εισφορές','ΣΥΝΟΛΟ','ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ','ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ','Ημέρες Ασφ.','Σύνολο','Μικτές Αποδοχές','Συνολικές Εισφορές'];
 var tables=document.querySelectorAll('table.print-table');tables.forEach(function(table){var headers=table.querySelectorAll('thead th');var targetIndices=[];headers.forEach(function(th,index){var headerText=th.textContent.trim();if(targetColumns.some(function(col){return headerText.indexOf(col)!==-1;})){targetIndices.push(index);}});if(targetIndices.length>0){var rows=table.querySelectorAll('tbody tr');rows.forEach(function(row){var cells=row.querySelectorAll('td');targetIndices.forEach(function(index){if(cells[index]){cells[index].classList.add('copy-target');cells[index].title='Κλικ για αντιγραφή';}});});}});
 var cardElements=document.querySelectorAll('.audit-card-result');cardElements.forEach(function(el){el.classList.add('copy-target');el.title='Κλικ για αντιγραφή';});});
 """

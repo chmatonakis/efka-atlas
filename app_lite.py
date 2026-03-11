@@ -39,7 +39,6 @@ from app_final import (
 from html_viewer_builder import (
     build_timeline_html as _build_timeline_html,
     build_totals_with_filters as _build_totals_with_filters,
-    build_count_with_filters as _build_count_with_filters,
     parse_greek_number as _parse_greek_number,
     filter_count_df,
     build_report_tab_entries,
@@ -459,7 +458,7 @@ if st.session_state.get("lite_do_open") is None:
         """, unsafe_allow_html=True)
 
         st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
-        b_col1, b_col2, b_col3 = st.columns([1, 1, 1], gap="small")
+        b_col1, b_col2 = st.columns([1, 1], gap="small")
 
         with b_col1:
             if st.button("Εκτύπωση", type="primary", use_container_width=True):
@@ -472,23 +471,6 @@ if st.session_state.get("lite_do_open") is None:
         with b_col2:
             if st.button("Νέο αρχείο", type="secondary", use_container_width=True):
                 _clear_lite_and_go_initial()
-
-        with b_col3:
-            try:
-                from report_json_export import build_report_json
-                json_str = build_report_json(df, extra_df=None, client_name=client_value or "")
-                safe_name = re.sub(r'[<>:"/\\|?*]', '', (client_value or "").strip())[:40].strip() or "atlas_lite"
-                json_name = safe_name + "_αναφορά.json"
-                st.download_button(
-                    label="Λήψη JSON",
-                    data=json_str.encode("utf-8"),
-                    file_name=json_name,
-                    mime="application/json",
-                    use_container_width=True,
-                    key="lite_download_json_btn",
-                )
-            except Exception:
-                st.caption("JSON")
 
     with col_videos:
         st.markdown(
@@ -1268,10 +1250,11 @@ if section == "all" and st.session_state.get("lite_do_open") in {"viewer", "prin
             tab_entries.append(("totals", "Σύνολα", totals_html))
 
         if not final_display_df.empty:
-            count_html = _build_count_with_filters(
-                final_display_df, print_style_rows, count_df, description_map,
-            )
-            tab_entries.append(("count", "Καταμέτρηση", count_html))
+            count_table_html = build_yearly_print_html(final_display_df, year_column='ΕΤΟΣ', style_rows=print_style_rows)
+            tab_entries.append(("count", "Καταμέτρηση",
+                f"<section class='print-section'><h2>Πίνακας Καταμέτρησης</h2>"
+                f"<p class='print-description'>Αναλυτική καταμέτρηση ημερών ασφάλισης ανά μήνα.</p>{count_table_html}</section>"
+            ))
 
         try:
             gaps_df = find_gaps_in_insurance_data(df)
@@ -1449,9 +1432,6 @@ if section == "all" and st.session_state.get("lite_do_open") in {"viewer", "prin
     # Στυλ εκτύπωσης (ίδια μορφή για συνολική και μεμονωμένη εκτύπωση)
     print_styles_content = """
 @media print { @page { size: A4 landscape; margin: 8mm; } }
-@media print {
-  .count-filters, .totals-filters, .totals-info-bar { display: none !important; visibility: hidden !important; }
-}
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: "Fira Sans", sans-serif; color: #222; margin: 0; padding: 12px 16px; font-size: 11px; line-height: 1.4; background: #ffffff; }
 .prt-name { text-align: center; font-size: 18px; font-weight: 800; margin-bottom: 2px; }
@@ -1545,9 +1525,8 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 <link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-html, body {{ height: 100%; overflow: hidden; }}
-body {{ font-family: "Fira Sans", -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #1e293b; background: #f8fafc; -webkit-font-smoothing: antialiased; }}
-.app-layout {{ display: flex; height: 100vh; overflow: hidden; }}
+body {{ font-family: "Fira Sans", -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #1e293b; background: #ffffff; }}
+.app-layout {{ display: flex; min-height: 100vh; }}
 .sidebar {{
   width: 220px; min-width: 220px; background: #1e293b; color: #e2e8f0;
   display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 10;
@@ -1571,14 +1550,11 @@ body {{ font-family: "Fira Sans", -apple-system, Segoe UI, Roboto, Arial, sans-s
 .btn-save:hover {{ background: #1d4ed8; }}
 .btn-print {{ background: #dc3545; color: white; }}
 .btn-print:hover {{ background: #b91c1c; }}
-.main-content {{
-  margin-left: 220px; flex: 1; min-width: 0;
-  height: 100vh; display: flex; flex-direction: column; overflow: hidden;
-}}
-.header-name {{ font-size: 22px; font-weight: 800; color: #111827; padding: 20px 32px 4px; flex-shrink: 0; }}
-.main-title {{ font-size: 15px; color: #64748b; font-weight: 600; padding: 0 32px 16px; flex-shrink: 0; border-bottom: 1px solid #e2e8f0; }}
+.main-content {{ margin-left: 220px; flex: 1; padding: 24px 32px; min-width: 0; }}
+.header-name {{ font-size: 22px; font-weight: 800; color: #111827; margin-bottom: 4px; }}
+.main-title {{ font-size: 15px; color: #64748b; font-weight: 600; margin-bottom: 20px; }}
 .tab-pane {{ display: none; }}
-.tab-pane.active {{ display: block; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 24px 32px 40px; position: relative; }}
+.tab-pane.active {{ display: block; position: relative; }}
 .lite-exclusion-note {{ text-align: right; font-size: 11px; color: #64748b; font-style: italic; margin-bottom: 8px; }}
 
 /* Cards CSS */
@@ -1752,9 +1728,8 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td {{ 
 .totals-filters .filter-dropdown-panel {{ display: none; position: absolute; top: 100%; left: 0; margin-top: 4px; min-width: 280px; max-height: 320px; overflow-y: auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.12); z-index: 100; }}
 .totals-filters .filter-dropdown.open .filter-dropdown-panel {{ display: block; }}
 .totals-filters .filter-dropdown.open .filter-dropdown-trigger {{ border-color: #6366f1; }}
-.totals-filters .filter-dropdown .filter-options {{ max-height: 280px; flex-direction: column; flex-wrap: nowrap; padding: 8px; gap: 6px 0; }}
-.totals-filters .filter-dropdown .filter-cb {{ white-space: normal; padding: 6px 8px; border-radius: 6px; }}
-.totals-filters .filter-dropdown .filter-cb:hover {{ background: #f1f5f9; }}
+.totals-filters .filter-dropdown .filter-options {{ max-height: 280px; flex-direction: column; flex-wrap: nowrap; padding: 8px; }}
+.totals-filters .filter-dropdown .filter-cb {{ white-space: normal; }}
 /* Date-key calculations panel */
 .date-key-panel {{ margin-top: 24px; padding: 20px 24px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; }}
 .date-key-title {{ font-size: 16px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }}
@@ -1765,71 +1740,6 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td {{ 
 .date-key-label {{ font-size: 13px; color: #475569; line-height: 1.3; }}
 .date-key-value {{ font-size: 20px; font-weight: 800; color: #1e293b; margin-top: 2px; }}
 @media print {{ .totals-filters {{ display: none !important; }} .totals-info-bar {{ display: none !important; }} .date-key-panel {{ break-inside: avoid; }} .lite-exclusion-note {{ font-size: 9px; margin-bottom: 4px; }} }}
-
-/* Count Tab: filters always visible, scroll only inside table area */
-#pane-count.tab-pane.active {{
-  overflow: hidden; display: flex; flex-direction: column; padding-bottom: 0;
-}}
-#pane-count > .lite-exclusion-note {{ flex-shrink: 0; }}
-#count-section {{
-  display: flex; flex-direction: column; flex: 1; min-height: 0;
-  overflow: hidden; margin-bottom: 0;
-}}
-#count-section > h2, #count-section > .print-description {{ flex-shrink: 0; }}
-.count-filters {{
-  display: flex; flex-wrap: wrap; gap: 20px 28px;
-  margin-bottom: 20px; padding: 16px 20px; flex-shrink: 0;
-  background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;
-  align-items: flex-end; z-index: 5;
-}}
-.count-filters .filter-group {{ display: flex; flex-direction: column; gap: 10px; }}
-.count-filters .filter-label {{ font-size: 16px; font-weight: 700; color: #1e293b; }}
-.count-filters .filter-cb {{ display: flex; align-items: center; gap: 10px; font-size: 16px; color: #334155; cursor: pointer; white-space: nowrap; line-height: 1.4; }}
-.count-filters .filter-cb input[type="checkbox"] {{ width: 20px; height: 20px; min-width: 20px; min-height: 20px; cursor: pointer; accent-color: #6366f1; }}
-.count-filters .filter-date {{
-  padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 6px;
-  font-size: 16px; font-family: inherit; background: #fff;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}}
-.count-filters .filter-date:focus {{ border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.1); outline: none; }}
-.count-filters .filter-dropdown {{ position: relative; }}
-.count-filters .filter-dropdown-trigger {{
-  display: inline-flex; align-items: center; min-width: 200px;
-  padding: 10px 14px; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px;
-  font-size: 16px; color: #334155; cursor: pointer; user-select: none;
-  font-family: inherit; transition: border-color 0.15s;
-}}
-.count-filters .filter-dropdown-trigger:hover {{ border-color: #6366f1; }}
-.count-filters .filter-dropdown-trigger::after {{ content: ''; margin-left: auto; border: 6px solid transparent; border-top-color: #64748b; }}
-.count-filters .filter-dropdown-panel {{
-  display: none; position: absolute; top: 100%; left: 0; margin-top: 4px;
-  min-width: 280px; max-height: 320px; overflow-y: auto;
-  background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.12); z-index: 100;
-}}
-.count-filters .filter-dropdown.open .filter-dropdown-panel {{ display: block; }}
-.count-filters .filter-dropdown.open .filter-dropdown-trigger {{ border-color: #6366f1; }}
-.count-filters .filter-dropdown .filter-options {{ max-height: 280px; flex-direction: column; flex-wrap: nowrap; padding: 8px; gap: 6px 0; }}
-.count-filters .filter-dropdown .filter-cb {{ white-space: normal; padding: 6px 8px; border-radius: 6px; }}
-.count-filters .filter-dropdown .filter-cb:hover {{ background: #f1f5f9; }}
-#count-tables-wrapper {{
-  flex: 1; min-height: 0;
-  overflow: auto; -webkit-overflow-scrolling: touch;
-  background: #f8fafc;
-  padding: 0 2px;
-}}
-#count-tables-wrapper .year-section {{ margin-bottom: 12px; }}
-#count-tables-wrapper .year-heading {{
-  font-size: 15px; font-weight: 800; padding: 8px 0 6px 0;
-  border-bottom: 2px solid #6366f1;
-  margin-top: 3px; margin-bottom: 11px;
-}}
-@media print {{ .count-filters, .totals-filters, .totals-info-bar {{ display: none !important; visibility: hidden !important; }} }}
-@media print {{
-  #pane-count.tab-pane.active {{ overflow: visible !important; display: block !important; }}
-  #count-section {{ overflow: visible !important; display: block !important; }}
-  #count-tables-wrapper {{ overflow: visible !important; }}
-}}
 
 /* Copyable values */
 .copy-target {{ cursor: pointer; position: relative; transition: background-color 0.15s; }}
@@ -2162,8 +2072,6 @@ document.addEventListener('DOMContentLoaded', function() {{
     'ΣΥΝΟΛΟ',
     'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ',
     'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ',
-    'ΑΠΟΔΟΧΕΣ',
-    'ΕΙΣΦΟΡΕΣ',
     'Ημέρες Ασφ.',
     'Σύνολο',
     'Μικτές Αποδοχές',
