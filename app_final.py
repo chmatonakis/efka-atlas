@@ -7491,7 +7491,7 @@ def show_results_page(df, filename):
                     + '</style></head><body style="margin:0;height:100%;overflow:hidden">'
                     '<div id="count-outer">' + count_html + '</div></body></html>'
                 )
-                components.v1.html(wrapped, height=720, scrolling=False)
+                components.html(wrapped, height=720, scrolling=False)
                 register_view("Καταμέτρηση", final_display_df)
                 render_print_button(
                     "print_counting",
