@@ -6641,8 +6641,10 @@ def show_results_page(df, filename):
                     if selected_typos_apodochon:
                         apd_df = apd_df[apd_df[earnings_col].isin(selected_typos_apodochon)]
 
-            # Γραμμή 2: Φίλτρα ημερομηνιών και ποσοστού
-            col5, col6, col7, col8, col9 = st.columns([1.2, 1.2, 1.0, 1.4, 1.2])
+            # Γραμμή 2: Φίλτρα ημερομηνιών, ποσοστού και πλαφόν
+            if 'apd_plafond_filter' not in st.session_state:
+                st.session_state['apd_plafond_filter'] = 'Πλαφόν Παλιού' if is_palios else 'Πλαφόν Νέου'
+            col5, col6, col7, col8, col9, col10 = st.columns([1.2, 1.2, 1.0, 1.4, 1.2, 1.4])
             with col5:
                 from_date_str = st.text_input("Από (dd/mm/yyyy):", value="01/01/2002", placeholder="01/01/2002", key="apd_filter_from_date")
             with col6:
@@ -6658,6 +6660,10 @@ def show_results_page(df, filename):
                 )
             with col9:
                 highlight_threshold = st.number_input("Επισήμανση <", min_value=0.0, max_value=100.0, value=21.0, step=0.1, format="%.1f", key="apd_highlight_val")
+            with col10:
+                plafond_filter_options = ["Πλαφόν Παλιού", "Πλαφόν Νέου", "Χωρίς πλαφόν (καμία περικοπή)"]
+                idx = plafond_filter_options.index(st.session_state['apd_plafond_filter']) if st.session_state['apd_plafond_filter'] in plafond_filter_options else (0 if is_palios else 1)
+                st.selectbox("Πλαφόν", options=plafond_filter_options, index=idx, key="apd_plafond_filter")
 
             # Εφαρμογή φίλτρων ημερομηνιών
             if 'Από' in apd_df.columns and (from_date_str or to_date_str):
@@ -6724,12 +6730,21 @@ def show_results_page(df, filename):
                 cols.insert(earnings_idx + 1, 'Περιγραφή Τύπου Αποδοχών')
                 display_apd_df = display_apd_df[cols]
 
-        # Προσθήκη στήλης "Εισφ. πλαφόν"
+        # Προσθήκη στήλης "Εισφ. πλαφόν" (βάσει επιλογής φίλτρου Πλαφόν)
         if 'Από' in display_apd_df.columns and earnings_col_name:
+            plafond_choice = st.session_state.get('apd_plafond_filter', 'Πλαφόν Νέου')
+            if plafond_choice == 'Πλαφόν Παλιού':
+                plafond_map_apd = PLAFOND_PALIOS
+            elif plafond_choice == 'Πλαφόν Νέου':
+                plafond_map_apd = PLAFOND_NEOS
+            else:
+                plafond_map_apd = None  # Χωρίς πλαφόν (καμία περικοπή)
             def calculate_plafond(row):
+                if plafond_map_apd is None:
+                    return None
                 try:
                     year = pd.to_datetime(row['Από'], format='%d/%m/%Y').year
-                    base_plafond = plafond_map.get(str(year), 0)
+                    base_plafond = plafond_map_apd.get(str(year), 0)
                     earnings_type = str(row[earnings_col_name]).strip()
                     if earnings_type in ['04', '05']:
                         return base_plafond / 2
