@@ -8055,6 +8055,11 @@ def show_results_page(df, filename):
                     "#count-outer .count-filters{flex-shrink:0}"
                     "#count-outer #count-tables-wrapper{flex:1;min-height:0;overflow:auto;padding:0 2px;-webkit-overflow-scrolling:touch;background:#f8fafc}"
                 )
+                count_html = (
+                    '<div id="count-section"><div id="count-tables-wrapper">'
+                    + final_display_df.to_html(classes="table", index=False, escape=False)
+                    + '</div></div>'
+                )
                 wrapped = (
                     '<!DOCTYPE html><html><head><meta charset="utf-8"><style>'
                     + COUNT_IFRAME_CSS
