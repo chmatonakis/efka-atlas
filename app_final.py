@@ -8048,25 +8048,6 @@ def show_results_page(df, filename):
                     hide_index=True,
                     key="counting_table"
                 )
-                COUNT_IFRAME_CSS = (
-                    "#count-outer{display:flex;flex-direction:column;height:100%;overflow:hidden}"
-                    "#count-outer #count-section{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}"
-                    "#count-outer #count-section>h2,#count-outer #count-section>.print-description{flex-shrink:0}"
-                    "#count-outer .count-filters{flex-shrink:0}"
-                    "#count-outer #count-tables-wrapper{flex:1;min-height:0;overflow:auto;padding:0 2px;-webkit-overflow-scrolling:touch;background:#f8fafc}"
-                )
-                count_html = (
-                    '<div id="count-section"><div id="count-tables-wrapper">'
-                    + final_display_df.to_html(classes="table", index=False, escape=False)
-                    + '</div></div>'
-                )
-                wrapped = (
-                    '<!DOCTYPE html><html><head><meta charset="utf-8"><style>'
-                    + COUNT_IFRAME_CSS
-                    + '</style></head><body style="margin:0;height:100%;overflow:hidden">'
-                    '<div id="count-outer">' + count_html + '</div></body></html>'
-                )
-                components.html(wrapped, height=720, scrolling=False)
                 register_view("Καταμέτρηση", final_display_df)
                 
                 # Στυλ για εκτύπωση (ίδιοι χρωματισμοί με την οθόνη)
