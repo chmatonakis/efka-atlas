@@ -705,6 +705,8 @@ def _render_year_section(
 
 
 def wrap_print_html(title: str, body_html: str, auto_print: bool = True, scale: float = 1.0) -> str:
+    # Μην βάζετε backslash μέσα σε {…} σε f-string (SyntaxError σε Python < 3.12)
+    _body_onload = ' onload="window.print()"' if auto_print else ""
     return f"""<!DOCTYPE html>
 <html lang="el">
 <head>
@@ -787,7 +789,7 @@ def wrap_print_html(title: str, body_html: str, auto_print: bool = True, scale: 
     #print-root {{ width: 100%; }}
   </style>
 </head>
-<body{(" onload=\"window.print()\"" if auto_print else "")}>
+<body{_body_onload}>
   <div id="print-root">
     {body_html}
   </div>
