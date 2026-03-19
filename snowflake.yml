@@ -36,6 +36,6 @@ entities:
     main_file: app_lite.py
     artifacts:
       - app_lite.py
-      - app_final.py
       - html_viewer_builder.py
+      - html_extra_tabs.py
       - environment.yml

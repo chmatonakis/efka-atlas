@@ -1,0 +1,1786 @@
+/* 
+   ==========================================================================
+   ORIGINAL CUSTOM STYLES (Ported from Root)
+   ========================================================================== 
+*/
+
+/*! normalize.css v8.0.1 | MIT License | github.com/necolas/normalize.css */
+html {
+    line-height: 1.15;
+    -webkit-text-size-adjust: 100%
+}
+
+body {
+    margin: 0
+}
+
+main {
+    display: block
+}
+
+h1 {
+    font-size: 2em;
+    margin: 0.67em 0
+}
+
+hr {
+    box-sizing: content-box;
+    height: 0;
+    overflow: visible;
+    size: 80%;
+    color: aqua;
+}
+
+hr.grey {
+  border: 1px solid #999999;
+    margin-left: 10px;
+    margin-right: 10px;
+}
+
+
+hr.new4 {
+  border: 1px solid red;
+}  
+
+
+pre {
+    font-family: monospace, monospace;
+    font-size: 1em
+}
+
+a {
+    background-color: transparent
+}
+
+abbr[title] {
+    border-bottom: none;
+    text-decoration: underline;
+    text-decoration: underline dotted
+}
+
+b, strong {
+    font-weight: bolder
+}
+
+code, kbd, samp {
+    font-family: monospace, monospace;
+    font-size: 1em
+}
+
+small {
+    font-size: 80%
+}
+
+sub, sup {
+    font-size: 75%;
+    line-height: 0;
+    position: relative;
+    vertical-align: baseline
+}
+
+sub {
+    bottom: -0.25em
+}
+
+sup {
+    top: -0.5em
+}
+
+img {
+    border-style: none
+}
+
+button, input, optgroup, select, textarea {
+    font-family: inherit;
+    font-size: 100%;
+    line-height: 1.15;
+    margin: 0
+}
+
+button, input {
+    overflow: visible
+}
+
+button, select {
+    text-transform: none
+}
+
+[type="button"], [type="reset"], [type="submit"], button {
+    -webkit-appearance: button
+}
+
+[type="button"]::-moz-focus-inner, [type="reset"]::-moz-focus-inner, [type="submit"]::-moz-focus-inner, button::-moz-focus-inner {
+    border-style: none;
+    padding: 0
+}
+
+[type="button"]:-moz-focusring, [type="reset"]:-moz-focusring, [type="submit"]:-moz-focusring, button:-moz-focusring {
+    outline: 1px dotted ButtonText
+}
+
+fieldset {
+    padding: 0.35em 0.75em 0.625em
+}
+
+legend {
+    box-sizing: border-box;
+    color: inherit;
+    display: table;
+    max-width: 100%;
+    padding: 0;
+    white-space: normal
+}
+
+progress {
+    vertical-align: baseline
+}
+
+textarea {
+    overflow: auto
+}
+
+[type="checkbox"], [type="radio"] {
+    box-sizing: border-box;
+    padding: 0
+}
+
+[type="number"]::-webkit-inner-spin-button, [type="number"]::-webkit-outer-spin-button {
+    height: auto
+}
+
+[type="search"] {
+    -webkit-appearance: textfield;
+    outline-offset: -2px
+}
+
+[type="search"]::-webkit-search-decoration {
+    -webkit-appearance: none
+}
+
+::-webkit-file-upload-button {
+    -webkit-appearance: button;
+    font: inherit
+}
+
+details {
+    display: block
+}
+
+summary {
+    display: list-item
+}
+
+template {
+    display: none
+}
+
+[hidden] {
+    display: none
+}
+
+/* APPIZY */
+.appizy * {
+    box-sizing: border-box;
+}
+
+.appizy {
+    box-sizing: border-box;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 14px;
+    padding: 5px;
+    width: 100%;
+   
+}
+
+.application-align-center {
+    margin: auto;
+}
+
+.application-align-right {
+    margin-left: auto;
+    margin-right: 0;
+}
+
+.application-layout-fixed .tabs {
+    overflow-x: auto;
+}
+
+.application-layout-fit-parent {
+    width: 100%;
+}
+
+.application-layout-fit-parent table {
+    table-layout: auto;
+    width: 100%;
+}
+
+.draw-frame {
+    padding: 0;
+    position: relative;
+    z-index: 1;
+}
+
+.draw-frame-layout-fixed {
+    margin: 0;
+    position: absolute;
+}
+
+.draw-frame-layout-fluid,
+.draw-frame-layout-fit-parent {
+    margin: 10px 0;
+    width: 100%;
+}
+
+.chart {
+    background: white;
+    border: 1px solid #ebebeb;
+}
+
+
+
+
+/* ------------ dropdown button----------------- */ 
+/* ----------------------------------------------------------------------- */  
+
+              .dropbtn {
+  background-color: #3498DB;
+  color: white;
+  padding: 16px;
+  font-size: 16px;
+  border: none;
+  cursor: pointer;
+}
+
+.dropbtn:hover, .dropbtn:focus {
+  background-color: #2980B9;
+}
+
+.dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-content {
+  display: none;
+  position: absolute;
+  background-color: #f1f1f1;
+  min-width: 160px;
+  overflow: auto;
+  box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+  z-index: 1;
+}
+
+.dropdown-content a {
+  color: black;
+  padding: 12px 16px;
+  text-decoration: none;
+  display: block;
+}
+
+.dropdown a:hover {background-color: #ddd;}
+
+.show {display: block;}
+
+
+
+
+
+
+/* ------------ κλάσεις που δεν λειτουργούν στο style.css----------------- */ 
+/* ----------------------------------------------------------------------- */  
+          
+
+/* δεξιά μπάρα με εικονίδια και συνδέσμους */ 
+          
+.icon-bar {
+  position: fixed;
+  top: 50%;
+  right: 0%;
+  -webkit-transform: translateY(-50%);
+  -ms-transform: translateY(-50%);
+  transform: translateY(-50%);
+}
+
+.icon-bar a {
+  display: block;
+  text-align: center;
+  padding: 16px;
+  transition: all 0.3s ease;
+  color: white;
+  font-size: 20px;
+}
+
+.icon-bar a:hover {
+  background-color: #000;
+}
+
+.facebook {
+  background: #3B5998;
+  color: white;
+}
+
+.twitter {
+  background: #55ACEE;
+  color: white;
+}
+
+.google {
+  background: #dd4b39;
+  color: white;
+}
+
+.linkedin {
+  background: #007bb5;
+  color: white;
+}
+
+.youtube {
+  background: #bb0000;
+  color: white;
+}
+
+          
+/* ----------------------------------------------------------------------- */
+/* ----------------------------------------------------------------------- */ 
+          
+          
+          
+/* κουτάκι με περισσότερες πληροφορίες on hover */ 
+          
+      .tooltip {
+  position: relative;
+  display: inline-block;
+  font-size: 14px;
+          text-align:end;
+}
+
+.tooltip .tooltiptext {
+  visibility: hidden;
+  width: 220px;
+  background-color: #111;
+  color: aliceblue;
+  text-align: left;
+  border-radius: 2px;
+  padding: 10px;
+ font-size: 14px;
+
+  /* Position the tooltip */
+  position: absolute;
+  z-index: 1;
+    
+}
+
+.tooltip:hover .tooltiptext {
+  visibility: visible;
+}
+          
+          
+          
+/* ----------------------------------------------------------------------- */ 
+/* ----------------------------------------------------------------------- */ 
+          
+          
+/* πάνω μπάρα με νούμερα σταθερή */ 
+          
+          
+    .topbar {
+    border-bottom: 0px solid #d4d4d1;
+    padding: 10px;
+    margin-bottom: 15px;
+    position: -webkit-sticky;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background-color: white;
+    box-shadow: 0px 3px 8px 0px rgba(0,0,0,0.2);
+    border-radius: 2px;
+    text-align: center;
+    }  
+          
+.topnumber {
+    font-size: 19px;
+    color: #01ae03;
+    }
+          
+.topnumber2 {
+    font-size: 19px;
+    color: #0666ba;
+    }          
+          
+          
+          /* ----------------------------------------------------------------------- */ 
+          
+@media print {
+    .pagebreak {
+        clear: both;
+        page-break-after: always;
+    }
+}
+          
+
+
+
+/*----------------------------------------------------- */
+/*----------------------------------------------------- */
+/* κελιά και πίνακες */
+
+table {
+    table-layout: fixed;
+    border: none;
+    border-collapse: collapse;
+    
+}
+
+tbody {
+    border: none;
+}
+
+tr {
+    min-height: 3px;
+}
+
+td {
+    padding-bottom: 2px;
+    padding-top: 2px;
+    padding-left: 4px;
+    padding-right: 4px;
+    
+    line-height: normal;
+}
+
+td {
+    padding-bottom: 2px;
+    padding-top: 2px;
+    padding-left: 4px;
+    padding-right: 4px;
+    
+    line-height: normal;
+}
+
+td > div {
+    padding: 3px 0;
+}
+
+
+
+/*----------------------------------------------------- */
+/*----------------------------------------------------- */
+
+/* πεδία εισαγωγής */
+
+input {
+    background: white repeat scroll 0 0 rgba(0, 0, 0, 0);
+    border: 1px solid #8a8987;
+    border-radius: 0px;
+    color: black;
+    font-family: "Inter", sans-serif;
+    font-size: 18px;
+    font-weight: 800;
+    padding: 5px;
+    text-align: inherit;
+    vertical-align: text-bottom;
+    width: 100%;
+   height: 39px;
+}
+
+
+input:hover {
+  border: 1px solid orange;
+    
+}
+
+input:focus {
+    outline: none !important;
+    border:1px solid orange;
+    
+  }
+
+
+select {
+    font-family: "Inter", sans-serif;
+    font-size: 18px;
+    font-weight: 800;
+    text-align: center;
+    width: 95%;
+    padding: 5px;
+    border: 1px solid #8a8987;
+    border-radius: 0px;
+    height: 37px;
+}
+
+select:hover {
+  border: 1px solid orange;
+}
+
+select:focus {
+    outline: none !important;
+    border:1px solid orange;
+    
+  }
+
+
+/*----------------------------------------------------- */
+/*----------------------------------------------------- */
+
+
+p {
+    margin: 0;
+}
+
+.in {
+    text-align: right;
+}
+
+.in--text {
+    text-align: left;
+}
+
+.out {
+    text-align: right;
+}
+
+.out--text {
+    text-align: left;
+}
+
+.help-text {
+    color: #6c757d;
+    font-size: 0.7rem;
+    margin-top: .25rem;
+    padding: 0;
+    text-align: left;
+}
+
+.hidden-cell {
+    display: none;
+}
+
+.hidden-row {
+    display: none;
+}
+
+textarea {
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    border: 1px solid #8a8987;
+    border-radius: 0px;
+    color: black;
+    font-family: "Inter", sans-serif;
+    resize: none;
+    width: 100%;
+    height: 150px;
+}
+
+textarea:hover {
+  border: 1px solid orange;
+    
+}
+
+textarea:focus {
+    outline: none !important;
+    border:1px solid orange;
+    
+  }
+
+/*----------------------------------------------------- */
+/*----------------------------------------------------- */
+
+/* κουμπιά και μπάρα εργαλείων */
+
+.btn {
+    background-color: #111;
+    border: 1px solid #111;
+    border-radius: 25px;
+    color: #818181;
+    padding: 10px 20px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 16px;
+    font-family: 'segoe ui black';
+    cursor: pointer;
+   
+}
+
+.btn:hover {
+  color: ghostwhite;
+    
+    
+    /* custom purple */
+    background-color: rebeccapurple;
+    border: 1px solid rebeccapurple;
+}
+
+
+.btn2 {
+    background-color: #e88e10;
+    border: 1px solid #e88e10;
+    border-radius: 25px;
+    color: #818181;
+    padding: 10px 20px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 16px;
+    font-family: 'segoe ui black';
+    cursor: pointer;
+   
+}
+
+.btn2:hover {
+  color: ghostwhite;
+    background-color: #111;
+    border: 1px solid #111;
+}
+
+
+/*-------εσωτερικά κουμπιά---------------------------------- */
+
+.innerbtn {
+    background-color: #e88e10;
+    border: 3px solid #e88e10;
+    border-radius: 2px;
+    color: black;
+    padding: 10px 20px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 14px;
+    font-family: "Inter", sans-serif;
+    font-weight: 800;
+    cursor: pointer;
+    width: 99%;
+  
+   
+}
+
+.innerbtn:hover {
+  color: ghostwhite;
+    background-color: #111;
+    border: 3px solid #111;
+}
+
+
+.innerbtn2 {
+    background-color: transparent;
+    border: 3px solid #111;
+    border-radius: 2px;
+    color: black;
+    padding: 10px 20px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 14px;
+    font-family: "Inter", sans-serif;
+    font-weight: 800;
+    cursor: pointer;
+    width: 99%;
+  
+   
+}
+
+.innerlink:hover {
+  color: #0c2aed;
+   
+}
+
+
+.innerlink {
+    
+    color: #4055e3;
+   
+    text-align: left;
+    text-decoration: none;
+    font-size: 18px;
+    font-family: "Inter", sans-serif;
+    font-weight: 800;
+    cursor: pointer;
+    width: 99%;
+  
+   
+}
+
+.innerbtn2:hover {
+  color: ghostwhite;
+    background-color: #111;
+    border: 3px solid #111;
+}
+
+
+
+
+a {
+    text-decoration: none;
+  color: black;
+}
+
+a:hover {
+  color: ghostwhite;
+}
+
+
+
+
+.action-bar {
+    margin-top: 10px;
+    padding-top: 10px;
+    padding-bottom: 5px;
+    position: fixed;
+  bottom: 0;
+  right: 0;
+  width: auto;
+  z-index: 9999;
+  border-top: none !important; /* Remove top border line */
+}
+
+@media print {
+    .action-bar {
+        display: none;
+    }
+}
+
+@media print {
+   body {
+      zoom: 0.69;
+   }
+}
+
+
+
+/*----------------------------------------------------- */
+/*----------------------------------------------------- */
+
+
+.tab-content {
+    padding: 0 10px;
+    position: relative;
+    page-break-after: always;
+    display: block !important; /* Fix for new Appizy structure */
+}
+
+.tab-pane {
+    display: none;
+}
+.tab-pane.active {
+    display: block;
+}
+
+
+
+
+/* ------------ κλάσεις που δεν λειτουργούν στο style.css----------------- */ 
+/* ----------------------------------------------------------------------- */  
+          
+          
+          
+/* δεξιά μπάρα με εικονίδια και συνδέσμους */ 
+          
+.icon-bar {
+  position: fixed;
+  top: 50%;
+  right: 0%;
+  -webkit-transform: translateY(-50%);
+  -ms-transform: translateY(-50%);
+  transform: translateY(-50%);
+}
+
+.icon-bar a {
+  display: block;
+  text-align: center;
+  padding: 16px;
+  transition: all 0.3s ease;
+  color: white;
+  font-size: 20px;
+}
+
+.icon-bar a:hover {
+  background-color: #000;
+}
+
+.facebook {
+  background: #3B5998;
+  color: white;
+}
+
+.twitter {
+  background: #55ACEE;
+  color: white;
+}
+
+.google {
+  background: #dd4b39;
+  color: white;
+}
+
+.linkedin {
+  background: #007bb5;
+  color: white;
+}
+
+.youtube {
+  background: #bb0000;
+  color: white;
+}
+
+          
+/* ----------------------------------------------------------------------- */
+/* ----------------------------------------------------------------------- */ 
+          
+          
+          
+/* κουτάκι με περισσότερες πληροφορίες on hover */ 
+          
+      .tooltip {
+  position: relative;
+  display: inline-block;
+  
+          font-size: 14px;
+}
+
+.tooltip .tooltiptext {
+  visibility: hidden;
+  width: 220px;
+  background-color: #111;
+  color: aliceblue;
+  text-align: left;
+  border-radius: 2px;
+  padding: 10px;
+ font-size: 14px;
+
+  /* Position the tooltip */
+  position: absolute;
+  z-index: 1;
+    
+}
+
+.tooltip:hover .tooltiptext {
+  visibility: visible;
+}
+          
+          
+          
+/* ----------------------------------------------------------------------- */ 
+/* ----------------------------------------------------------------------- */ 
+          
+          
+/* πάνω μπάρα με νούμερα σταθερή */ 
+          
+          
+    .topbar {
+    border-bottom: 0px solid #d4d4d1;
+    padding: 10px;
+    margin-bottom: 15px;
+    position: -webkit-sticky;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background-color: white;
+    box-shadow: 0px 3px 8px 0px rgba(0,0,0,0.2);
+    border-radius: 2px;
+    text-align: center;
+    }  
+          
+.topnumber {
+    font-size: 19px;
+    color: #01ae03;
+    }
+          
+.topnumber2 {
+    font-size: 19px;
+    color: #0666ba;
+    }    
+
+
+.barnumber {
+    font-size: 28px;
+    color: #01ae03;
+    font-weight: 600;
+    }
+          
+          
+          /* ----------------------------------------------------------------------- */ 
+          
+@media print {
+    .pagebreak {
+        clear: both;
+        page-break-after: always;
+    }
+}
+
+/* ----------------------------------------------------------------------- */ 
+/* -------------------------- μπαρα εσωτερική------------------------------------ */  
+          
+          
+ .bar {
+  height: 100%;
+  width: 120px;
+ margin-left: 17%;
+  position: fixed;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  /*background-color: #eeeeee;*/
+  overflow-x: hidden;
+  padding-top: 30px;
+}
+
+.bar a {
+  padding: 6px 8px 20px 20px;
+  text-decoration: none;
+  font-size: 14px;
+  color: #241b01;
+  display: block;
+ font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-weight: 600;
+}
+
+.bar a:hover {
+  color: #e88e10;
+}
+
+@media screen and (max-height: 450px) {
+  .bar {padding-top: 15px;}
+  .bar a {font-size: 18px;}
+}
+      
+
+
+.Info {
+    color: #0a70d1;
+    font-size: 14px;
+    background-color: #CCE6FF;
+    font-weight: 800;
+    padding: 20px;
+}
+
+.Message {
+    color: #996600;
+    font-size: 16px;
+    background-color: #ffffcc;
+    font-weight: 800;
+    padding: 20px;
+}
+.Error {
+    color: #cc0000;
+    font-size: 16px;
+    background-color: #ffcccc;
+    font-weight: 800;
+    padding: 20px;
+}
+          
+/* ----------------------------------------------------------------------- */ 
+/* -------------------------- scroll bar------------------------------------ */            
+          
+          
+
+
+
+
+/*----------------------------------------------------- */
+/*----------------------------------------------------- */
+
+/*---------------------------------------------------------------δυναμικό css  ------------------------------------------ */
+/*------------------------------------------------------------------------------------------------------------------------ */
+
+
+
+
+/* ---------------------------------------------------------------------------------------------------------- */ 
+/* ------------------------------------------------------custom μετατροπες-------------------------------------- */ 
+
+
+/* της μπάρας μενού που βγάζει το appizy */  
+
+.nav li {
+    height: 60px;
+    width: 100%;
+    line-height: 30px;
+    list-style: none;
+    background-color: #111;
+    display: inline-block;
+    margin-right: 0px;
+}
+
+.nav li.active {
+    position: relative;
+    background-color: #fff;
+    border-bottom: 1px solid #fff;
+    z-index: 5;
+}
+
+
+
+
+.nav .active a {
+    color: #000;
+}
+
+
+.nav li a:hover {
+  color: mintcream;
+}
+   
+
+.nav {
+  list-style-type: none;
+  margin-top: 20px;
+  padding: 0;
+  width: 17%;
+  background-color: #111;
+  position: fixed;
+  height: 100%;
+  overflow: auto;
+}
+
+@media print {
+    .nav li.active {
+        font-weight: bold;
+    }
+}
+
+@media print {
+    .nav {
+        display: none;}
+}
+
+
+
+.nav li a {
+  padding: 20px;
+  height: 70px;
+  line-height: normal;
+  text-decoration: none;
+  
+  display: block;
+ list-style: none;
+  width: 95%;
+  text-align: left;
+  vertical-align: middle;
+  font-weight: 800;
+  font-size: 16px;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #b4b2af;
+  text-decoration: none;
+                
+}
+        
+        
+    .nav li {
+    height: 60px;
+    width: 100%;
+    line-height: 30px;
+    list-style: none;
+    background-color: #111;
+    display: inline-block;
+    margin-right: 0px;
+    }
+
+    .nav .active a {
+    color: #000;
+    }
+
+    .nav .active a:hover {
+    color: #111;
+    }
+
+
+
+
+/* ------------------------------------------------- */ 
+/* ------------------------------------------------- */ 
+
+
+
+
+/* μορφοποίηση του ενθέματος αριστερά μέσα στο οποίο έβαλα τη μπάρα μενού που βγάζει app */  
+
+.sidenav {
+  height: 100%;
+  width: 17%;
+  position: fixed;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  background-color: #111;
+  overflow-x: hidden;
+  padding-top: 20px;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+
+.sidenav a {
+  padding: 19px 8px 6px 16px;
+  text-decoration: none;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  color: #818181;
+  display: block;
+}
+
+.sidenav a:hover {
+  color: #f1f1f1;
+}
+
+/* Some media queries for responsiveness */
+@media screen and (max-height: 450px) {
+  .sidenav {padding-top: 15px;}
+  .sidenav a {font-size: 18px;}
+}
+
+@media print {
+    .sidenav {
+        display: none;
+    }
+}
+
+
+
+/* ------------------------------------------------- */ 
+/* ------------------------------------------------- */ 
+
+
+
+/* μορφοποίηση του ενθέματος αριστερά μέσα στο οποίο έβαλα τη μπάρα μενού που βγάζει app */  
+
+.sidenav {
+  height: 100%;
+  width: 17%;
+  position: fixed;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  background-color: #111;
+  overflow-x: hidden;
+  padding-top: 20px;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+
+.sidenav a {
+  padding: 19px 8px 6px 16px;
+  text-decoration: none;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  color: #818181;
+  display: block;
+}
+
+.sidenav a:hover {
+  color: #f1f1f1;
+}
+
+/* Some media queries for responsiveness */
+@media screen and (max-height: 450px) {
+  .sidenav {padding-top: 15px;}
+  .sidenav a {font-size: 18px;}
+}
+
+@media print {
+    .sidenav {
+        display: none;
+    }
+}
+
+
+
+/* ------------------------------------------------- */ 
+/* ------------------------------------------------- */ 
+
+
+/* για το κυρίως κομμάτι που είναι το υπολογιστικό και η μπάρα μενού */ 
+.main {
+  margin-left: 17%; /* Same as the width of the sidenav */
+  font-size: 28px; /* Increased text to enable scrolling */
+  padding: 0px 0px;
+}
+
+@media screen and (max-height: 450px) {
+  .sidenav {padding-top: 15px;}
+  .sidenav a {font-size: 18px;}
+}
+
+
+/* εκτύπωση σελίδων χωρίς το κενό στα αριστερά που έχει τη μπάρα-μενού */ 
+@media print {
+    .main {
+        margin-left: 5px;
+        background: none;
+    }
+}
+
+
+
+
+/* αυτό το κουμπί είναι το scroll top και έτσι υπάρχει σαν όνομα και μέσα στο js/ html */ 
+#myBtn {
+  display: none !important; /* disable scroll-to-top button */
+  position: fixed;
+  bottom: 4px;
+  right: 50%;
+  z-index: 99;
+  font-size: 16px;
+  border: none;
+  outline: none;
+  background-color: red;
+  color: white;
+  cursor: pointer;
+  padding: 12px;
+  padding-left: 30px;
+  padding-right: 30px;
+  border-radius: 25px;
+    font-family: "segoe ui Black"
+}
+
+#myBtn:hover {
+  background-color: #555;
+}
+
+
+.next-step {
+    font-size:20px;
+    display: flex;
+    justify-content: center;
+    align-items:center;
+}
+
+
+@media print {
+    .tabs {
+        box-shadow: none;
+    
+}
+    
+  
+/* μορφοποίηση των αριθμών στην μπάρα αποτελεσμάτων */  
+.topnumber {
+    font-size: 12px;
+    color: #00ff04;
+    }
+    
+}
+
+/* ==========================================================================
+   ESSENTIAL BOOTSTRAP FIXES (To restore layout)
+   ========================================================================== */
+
+/* 1. Sidebar Structure Fixes (Bootstrap nav conflict) */
+.sidenav .nav {
+    display: block !important;
+    padding-left: 0 !important;
+    margin-bottom: 0 !important;
+    list-style: none !important;
+}
+.sidenav .nav-item {
+    display: block !important;
+    width: 100% !important;
+}
+.sidenav .nav-item a {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+}
+
+/* ==========================================================================
+   ESSENTIAL BOOTSTRAP & APPIZY FIXES (GLOBAL)
+   ========================================================================== */
+
+/* 0. GLOBAL FONT OVERRIDE */
+body, .appizy, input, select, textarea, button, .btn, .custom-sidenav {
+    font-family: "Inter", sans-serif !important;
+}
+
+/* =========================================
+   CUSTOM SIDEBAR (REBUILT FROM SCRATCH)
+   ========================================= */
+
+.custom-sidenav {
+    height: 100%;
+    width: 17%;
+    position: fixed;
+    z-index: 1000;
+    top: 0;
+    left: 0;
+    background-color: #111 !important; /* Solid Dark Background */
+    overflow-x: hidden;
+    padding-top: 20px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.1); /* Subtle shadow */
+}
+
+/* Offset main content so it is not hidden under the fixed sidebar */
+.application-container.main {
+    width: 83% !important;
+    max-width: 83% !important;
+    padding: 0 !important;
+    margin-left: 17% !important; /* Match sidebar width */
+}
+
+/* Additional offset for any element using the plain .main class */
+.main {
+    margin-left: 17% !important;
+    padding: 0 !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* GENERAL TAB RULE: 85% Width, Centered */
+/* ------------------------------------------------------------------ */
+/* Override specific sheets rule first, then override with specificity for exceptions */
+.tab-content > .tab-pane {
+    width: 90% !important;
+    margin: 0 auto !important; /* Center horizontally */
+    display: none; /* Default state handled by bootstrap, but good to be explicit */
+}
+
+/* Active state for normal tabs */
+.tab-content > .tab-pane.active {
+    display: block !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* SPECIAL LAYOUT TABS (Exceptions to the rule) */
+/* ------------------------------------------------------------------ */
+
+/* Sheet 2 layout padding (align with template's sheet6 fix)         */
+/* Move pane content away from the fixed sidebar/header               */
+/* ------------------------------------------------------------------ */
+#sheet2-tab-pane {
+    padding-left: 170px !important;
+    padding-top: 100px !important; 
+    /* For sheet 2/3 we keep full width minus padding/margin logic from template, or adapt if needed */
+    /* Template used padding-left to push content. width should be adjusted or kept auto. */
+    width: auto !important;
+    margin: 0 !important; /* Reset auto margin */
+}
+
+/* Sheet 3 Settings */
+#sheet3-tab-pane {
+    padding-left: 170px !important;
+    padding-right: 20px !important;
+    padding-top: 20px !important;
+    width: auto !important;
+    margin: 0 !important;
+}
+
+/* Sheet 28 layout padding (align with template's sheet6 fix)         */
+/* Move pane content away from the fixed sidebar/header               */
+/* ------------------------------------------------------------------ */
+#sheet28-tab-pane {
+    padding-left: 200px !important;
+    padding-top: 130px !important;
+    /* Force wide content area relative to viewport, overriding inline widths */
+    width: calc(90vw - 220px) !important;
+    min-width: calc(90vw - 220px) !important;
+    max-width: none !important;
+    margin: 0 !important; /* Reset auto margin */
+}
+
+/* Reset inner container margins since offset is on the pane */
+#sheet28, .custom-sheet-layout {
+    margin-left: 0 !important;
+    padding-top: 0 !important;
+}
+
+/* Apply same layout/padding logic for scenarios B, Γ, Δ (sheet29-31) */
+#sheet29-tab-pane,
+#sheet30-tab-pane,
+#sheet31-tab-pane {
+    padding-left: 200px !important;
+    padding-top: 130px !important;
+    width: calc(90vw - 220px) !important;
+    min-width: calc(90vw - 220px) !important;
+    max-width: none !important;
+    margin: 0 !important;
+}
+
+#sheet29,
+#sheet30,
+#sheet31 {
+    margin-left: 0 !important;
+    padding-top: 0 !important;
+}
+
+.sidebar-header {
+    padding: 0 20px 20px 20px;
+    color: #999;
+    font-size: 14px;
+    text-align: left;
+}
+
+.sidebar-title strong {
+    font-weight: bold;
+}
+
+.custom-nav {
+    list-style-type: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.custom-nav-item {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: none;
+    display: block;
+}
+
+.custom-nav-item a {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 15px 20px;
+    min-height: 60px;
+    text-decoration: none !important;
+    font-size: 16px;
+    font-weight: 600; /* Bolder text (was 500) */
+    color: #d1d1d1 !important; /* Whiter text (was #999999) */
+    background-color: transparent !important;
+    transition: color 0.2s ease, background-color 0.2s ease;
+    border: none !important;
+    outline: none !important;
+    cursor: pointer;
+}
+
+.custom-nav-item a i {
+    margin-right: 15px;
+    width: 20px;
+    text-align: center;
+}
+
+/* HOVER STATE */
+.custom-nav-item a:hover {
+    color: #ffffff !important; /* White text */
+    background-color: #000000 !important; /* Pure black background */
+}
+
+/* ACTIVE STATE */
+.custom-nav-item.active a {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    font-weight: 800 !important;
+}
+
+/* 2. Input Styles Override */
+div.appizy input, 
+div.appizy select {
+    background-color: white !important;
+    border: 1px solid #8a8987 !important;
+    border-radius: 0px !important;
+    box-shadow: none !important;
+    height: 45px !important; /* Slightly increased height to accommodate padding */
+    min-height: 45px !important;
+    padding: 8px 10px !important; /* Increased internal padding */
+    color: black !important;
+    font-size: 18px !important;
+    font-weight: 800 !important;
+    line-height: normal !important;
+    transition: border-color 0.2s ease-in-out;
+}
+
+div.appizy textarea {
+    background-color: white !important;
+    border: 1px solid #8a8987 !important;
+    border-radius: 0px !important;
+    box-shadow: none !important;
+    height: 120px !important; /* Adjusted height for textareas */
+    min-height: 120px !important;
+    padding: 5px !important;
+    color: black !important;
+    font-size: 18px !important;
+    font-weight: 800 !important;
+    line-height: normal !important;
+    transition: border-color 0.2s ease-in-out;
+    resize: vertical !important;
+}
+
+div.appizy input:hover, 
+div.appizy select:hover, 
+div.appizy textarea:hover {
+    border: 1px solid orange !important;
+}
+
+div.appizy input:focus, 
+div.appizy select:focus, 
+div.appizy textarea:focus {
+    border: 1px solid orange !important;
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+/* 3. Text Alignment Defaults */
+.out {
+    text-align: right;
+}
+
+/* 4. Container Width Fix */
+.application-container.main {
+    width: 83% !important;
+    max-width: 83% !important;
+    padding: 0 !important;
+    margin-left: 17% !important; /* Match sidebar width */
+}
+
+/* ==========================================================================
+   ACTION BAR & PRINT FIXES
+   ========================================================================== */
+
+/* 1. Action Bar Fonts & Styling */
+.action-bar .btn, 
+.action-bar .btn2,
+.action-bar label,
+.action-bar a { /* Include links */
+    font-family: "Inter", sans-serif !important;
+    font-weight: 800 !important; /* Extra heavy font */
+    font-size: 16px !important;
+    text-transform: none !important;
+}
+
+/* Specific fix for Orange Button (btn2) inside Action Bar */
+.action-bar .btn2 a,
+.action-bar .btn2 {
+    color: black !important; /* Black text on orange button */
+}
+
+.action-bar .btn2:hover a,
+.action-bar .btn2:hover {
+    color: white !important; /* White text on hover */
+}
+
+/* Ensure icons have correct spacing */
+.action-bar i {
+    margin-right: 8px;
+}
+
+/* 2. Print Styles - Hide UI elements & Control Tabs */
+@media print {
+    /* Hide Sidebar */
+    .custom-sidenav, 
+    .sidenav {
+        display: none !important;
+    }
+
+    /* Hide Action Bar */
+    .action-bar {
+        display: none !important;
+    }
+
+    /* Hide Scroll Top Button */
+    #myBtn {
+        display: none !important;
+    }
+
+    /* Adjust Main Container for Print */
+    .application-container.main {
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        position: static !important;
+    }
+
+    /* Ensure Content is Visible */
+    body, html {
+        background-color: white !important;
+        width: 100%;
+    }
+    
+    /* TAB VISIBILITY CONTROL FOR PRINT */
+    /* Crucial: Hide all tabs initially */
+    .tab-content > .tab-pane {
+        display: none !important;
+        opacity: 0 !important;
+        visibility: hidden !important;
+        height: 0 !important;
+        overflow: hidden !important;
+    }
+
+    /* Show ONLY the active tab */
+    .tab-content > .tab-pane.active {
+        display: block !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        height: auto !important;
+        overflow: visible !important;
+    }
+}
+
+/* ==========================================================================
+   LAYOUT REFINEMENTS (TOPBAR, INNER SIDEBAR, FONTS)
+   ========================================================================== */
+
+/* 1. Inner Sidebar (.bar) - Fix transparency and sizing */
+.bar {
+    background-color: #f9f9f9 !important; /* Solid light grey background */
+    border-right: 1px solid #ddd; /* Optional border */
+    z-index: 10 !important;
+    /* Ensure correct positioning */
+    margin-left: 17% !important;
+    width: 140px !important;
+    padding-top: 20px !important;
+    height: 100vh !important; /* Ensure it covers full height */
+    position: fixed !important; /* Keep it fixed as per request */
+    top: 0 !important;
+}
+
+.bar a {
+    font-size: 14px !important; /* Slightly larger */
+    padding: 8px 10px 8px 15px !important;
+    font-weight: 600 !important;
+    color: #333 !important;
+    text-decoration: none !important;
+    display: block !important;
+}
+
+.bar a:hover {
+    color: orange !important; /* Changed to orange */
+}
+
+.bar .barnumber {
+    font-size: 28px !important; /* Increased from 22px */
+    margin-left: 15px !important;
+    color: #00b050 !important;
+    font-weight: bold !important;
+}
+
+.bar p {
+    font-size: 13px !important;
+}
+
+/* 2. Top Bar (.topbar) - FIXED POSITION */
+.topbar {
+    background-color: #ffffff !important;
+    border-bottom: 2px solid #e0e0e0 !important;
+    padding: 10px 0 !important;
+    z-index: 900 !important;
+    
+    /* Fixed Positioning Logic */
+    position: fixed !important;
+    top: 0 !important;
+    right: 0 !important;
+    /* Left starts after Main Sidebar (17%) AND Inner Sidebar (140px) */
+    left: calc(17% + 140px) !important;
+    width: auto !important; /* Let left/right define width */
+}
+
+.topbar table {
+    margin-bottom: 0 !important;
+}
+
+.topbar th {
+    font-size: 16px !important;
+    font-weight: 700 !important;
+    color: #333 !important;
+    padding: 5px !important;
+    vertical-align: bottom !important;
+    text-align: center !important;
+}
+
+.topbar td {
+    font-size: 16px !important; /* Smaller values below headers */
+    font-weight: 600 !important;
+    text-align: center !important;
+    padding: 5px !important;
+    color: #000 !important;
+}
+
+/* BIG GREEN NUMBERS */
+.topnumber {
+    font-size: 24px !important;
+    color: #00b050 !important;
+    font-weight: 800 !important;
+    display: block !important;
+    margin-bottom: 2px !important;
+    line-height: 1.2 !important;
+}
+
+/* 3. Global Font Adjustments */
+div.appizy input, 
+div.appizy select,
+.form-select {
+    font-size: 18px !important; /* Much larger */
+    font-weight: 800 !important; /* Extra Bold */
+}
+
+div.appizy textarea {
+    font-size: 20px !important; /* Increased to 20px as requested */
+    font-weight: 400 !important; /* Normal weight */
+}
+
+/* Adjust Main Container to accommodate Inner Sidebar AND Fixed Topbar */
+
+/* Sheet 2 Settings - Increased padding for more air */
+#sheet2-tab-pane {
+    padding-left: 170px !important;
+    padding-top: 100px !important; 
+}
+
+/* Sheet 3 Settings */
+#sheet3-tab-pane {
+    padding-left: 170px !important;
+    padding-right: 20px !important;
+    padding-top: 20px !important;
+}
+
+/* Sheet 6 Settings - Treat as standard tab (no extra bar) */
+#sheet6-tab-pane {
+    padding: 0 !important;
+    width: 90% !important;
+    margin: 0 auto !important;
+}
+
+/* Reset inner container margins since we moved them to the pane */
+#sheet2, #sheet6, .custom-sheet-layout {
+    margin-left: 0 !important;
+    padding-top: 0 !important;
+}
+
+/* BIG BLUE NUMBERS (Sheet 6) */
+.topnumber2 {
+    font-size: 24px !important;
+    color: #0666ba !important;
+    font-weight: 800 !important;
+    display: block !important;
+    margin-bottom: 2px !important;
+    line-height: 1.2 !important;
+}
+
+/* Increase Horizontal Spacing in Tables - REVERTED */
+td {
+    padding: 2px 4px !important; /* Back to tight padding */
+    vertical-align: middle !important;
+    /* Fonts removed to respect Excel/Appizy defaults */
+}
+
+/* FIX CUSTOM TOOLTIPS (Conflict with Bootstrap .tooltip) */
+div.tooltip, span.tooltip, .tooltip {
+    opacity: 1 !important;
+    position: relative !important;
+    display: inline-block !important;
+    z-index: auto !important;
+    margin: 0 !important;
+}
+
+.tooltip .tooltiptext {
+    visibility: hidden !important;
+    opacity: 0 !important;
+    width: 220px !important;
+    background-color: #111 !important;
+    color: aliceblue !important;
+    text-align: left !important;
+    border-radius: 2px !important;
+    padding: 10px !important;
+    font-size: 14px !important;
+    position: absolute !important;
+    z-index: 9999 !important;
+    /* Adjust positioning as needed */
+}
+
+.tooltip:hover .tooltiptext {
+    visibility: visible !important;
+    opacity: 1 !important;
+}

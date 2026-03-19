@@ -1,0 +1,381 @@
+================================================================================
+ΟΔΗΓΙΕΣ: Εκτυπώσιμο HTML από Streamlit DataFrame
+================================================================================
+Πλήρης ανάλυση λειτουργικότητας και οδηγίες αντιγραφής σε άλλο project.
+
+================================================================================
+1. ΣΥΝΟΨΗ ΛΕΙΤΟΥΡΓΙΚΟΤΗΤΑΣ
+================================================================================
+
+Η λειτουργία εκτύπωσης σε Streamlit app δουλεύει ως εξής:
+
+  Χρήστης πατάει κουμπί "Εκτύπωση"
+    → Ανοίγει νέα καρτέλα browser με πλήρες HTML αρχείο (blob URL)
+    → Ο χρήστης βλέπει τον πίνακα μορφοποιημένο
+    → Πατάει "Εκτύπωση" μέσα στη σελίδα → window.print() → εκτυπωτής
+
+Δεν αποθηκεύεται κανένα αρχείο στον server. Όλα γίνονται client-side.
+
+================================================================================
+2. ΑΠΑΙΤΟΥΜΕΝΑ IMPORTS
+================================================================================
+
+import streamlit as st
+import streamlit.components.v1 as components
+import pandas as pd
+import json
+import html
+import re
+
+ΣΗΜΑΝΤΙΚΟ: Το "components" (streamlit.components.v1) είναι απαραίτητο γιατί
+μέσω αυτού ενσωματώνουμε custom HTML/JS μέσα στο Streamlit app (iframe).
+
+================================================================================
+3. ΑΡΧΙΤΕΚΤΟΝΙΚΗ - 2 ΣΥΝΑΡΤΗΣΕΙΣ
+================================================================================
+
+Η λειτουργία χτίζεται με 2 ανεξάρτητες συναρτήσεις:
+
+  ┌─────────────────────────────────┐
+  │ dataframe_to_printable_html()   │  ← Παράγει πλήρες HTML document
+  └──────────────┬──────────────────┘
+                 │ (html string)
+                 ▼
+  ┌─────────────────────────────────┐
+  │ html_open_in_new_tab_component()│  ← Τυλίγει σε JS/Blob URL opener
+  └──────────────┬──────────────────┘
+                 │ (html snippet με button)
+                 ▼
+  ┌─────────────────────────────────┐
+  │ components.html(snippet, h=56)  │  ← Ενσωματώνεται στο Streamlit
+  └─────────────────────────────────┘
+
+================================================================================
+4. ΣΥΝΑΡΤΗΣΗ 1: dataframe_to_printable_html()
+================================================================================
+
+ΣΚΟΠΟΣ: Παίρνει ένα pandas DataFrame και επιστρέφει πλήρες HTML document
+(string) έτοιμο για προβολή/εκτύπωση.
+
+ΥΠΟΓΡΑΦΗ:
+  def dataframe_to_printable_html(df, title="Πίνακας", person_name=None):
+
+ΠΑΡΑΜΕΤΡΟΙ:
+  - df: pandas DataFrame (ο πίνακας προς εκτύπωση)
+  - title: str (τίτλος που φαίνεται στην κεφαλίδα και στο <title>)
+  - person_name: str ή None (αν δοθεί, εμφανίζεται ως κεντρική κεφαλίδα)
+
+ΕΠΙΣΤΡΕΦΕΙ: str (πλήρες HTML document) ή None αν το df είναι κενό
+
+ΒΗΜΑΤΑ ΕΣΩΤΕΡΙΚΑ:
+
+  4a. Καθαρισμός NaN
+      df_clean = df.fillna("")
+
+  4b. Μετατροπή σε HTML πίνακα μέσω pandas
+      table_html = df_clean.to_html(index=False, classes="print-table", border=0)
+
+      - index=False: δεν εμφανίζει τον αριθμό γραμμής pandas
+      - classes="print-table": προσθέτει CSS class στο <table>
+      - border=0: χωρίς HTML border attribute
+
+  4c. Εντοπισμός γραμμών "ΣΥΝΟΛΟ" με regex
+      Κάθε <tr> που περιέχει τη λέξη "ΣΥΝΟΛΟ" αποκτά class="row-total"
+      ώστε να μορφοποιηθεί διαφορετικά (γκρι φόντο, bold).
+
+      table_html = re.sub(
+          r'<tr[^>]*>((?:(?!</tr>).)*?ΣΥΝΟΛΟ(?:(?!</tr>).)*?)</tr>',
+          r'<tr class="row-total">\1</tr>',
+          table_html, flags=re.DOTALL | re.IGNORECASE
+      )
+
+      ΣΗΜΕΙΩΣΗ: Αν η εφαρμογή σου δεν χρησιμοποιεί "ΣΥΝΟΛΟ", αντικατέστησε
+      τη λέξη ή αφαίρεσε αυτό το βήμα.
+
+  4d. XSS protection
+      safe_title = html.escape(str(title))
+      safe_name = html.escape(str(person_name)) if person_name else ""
+
+  4e. Σύνθεση HTML document
+      Επιστρέφεται πλήρες <!DOCTYPE html> document με ενσωματωμένο CSS.
+
+================================================================================
+5. CSS ΣΤΥΛ ΤΟΥ ΕΚΤΥΠΩΣΙΜΟΥ HTML
+================================================================================
+
+--- Γενικά ---
+body: sans-serif, margin 1rem, σκούρο γκρι χρώμα (#262730)
+
+--- Ονοματεπώνυμο (προαιρετικό) ---
+.print-name: κεντρική στοίχιση, bold, 1.1rem
+
+--- Τίτλος ---
+.print-title: 1.25rem, bold, αριστερή στοίχιση
+
+--- Πίνακας ---
+.print-table: 100% πλάτος, border-collapse, αριστερή στοίχιση, 0.9rem
+
+--- Κελιά ---
+.print-table th, td:
+  - padding: 10px 12px (μεγάλο padding για ευανάγνωστο πίνακα)
+  - border: κανένα (χωρίς πλέγμα)
+  - border-bottom: 1px solid #d1d5db (μόνο οριζόντια γραμμή)
+
+--- Κεφαλίδες ---
+.print-table th:
+  - background: #f9fafb (πολύ ελαφρύ γκρι)
+  - font-weight: 700
+  - font-size: 0.8rem (μικρότερη από το περιεχόμενο)
+
+--- Bold στήλες 1 & 2 ---
+.print-table td:nth-child(1), td:nth-child(2): font-weight: 700
+  ΣΗΜΕΙΩΣΗ: Αυτό κάνει bold τις 2 πρώτες στήλες (π.χ. ΕΤΟΣ, ΠΕΡΙΟΔΟΣ).
+  Αν η εφαρμογή σου έχει διαφορετική δομή, προσάρμοσε ή αφαίρεσε.
+
+--- Γραμμές ΣΥΝΟΛΟ ---
+.print-table tr.row-total:
+  - background: #e5e7eb (ελαφρύ γκρι)
+  - font-weight: 700
+
+--- Hover ---
+.print-table tbody tr:hover:
+  - background: #fff4e6 (πολύ ελαφρύ πορτοκαλί)
+
+--- Κουμπί εκτύπωσης (μέσα στο HTML) ---
+.btn-print:
+  - background: #dc3545 (κόκκινο)
+  - color: white, border: none
+  - padding: 8px 16px, border-radius: 6px
+  - Κρύβεται στην εκτύπωση (class="no-print")
+
+--- Header row ---
+.header-row: flex, space-between (τίτλος αριστερά, κουμπί δεξιά)
+
+--- Footer (Disclaimer) ---
+.print-footer:
+  - margin-top: 1.5rem, padding-top: 0.75rem
+  - border-top: 1px solid #d1d5db
+  - font-size: 0.75rem, color: #6b7280
+
+--- @media print ---
+  @page: landscape orientation
+  body: margin 1.5cm
+  .no-print: display: none (κρύβει κουμπί εκτύπωσης)
+  .print-table tr: page-break-inside: avoid (δεν κόβει γραμμή στη μέση)
+  .print-table: page-break-inside: auto
+
+================================================================================
+6. ΣΥΝΑΡΤΗΣΗ 2: html_open_in_new_tab_component()
+================================================================================
+
+ΣΚΟΠΟΣ: Παίρνει ένα HTML string (αυτό που παρήγαγε η πρώτη συνάρτηση)
+και επιστρέφει ένα HTML snippet με κουμπί "Εκτύπωση" που ανοίγει
+το HTML σε νέα καρτέλα μέσω Blob URL.
+
+ΥΠΟΓΡΑΦΗ:
+  def html_open_in_new_tab_component(html_content):
+
+ΠΑΡΑΜΕΤΡΟΙ:
+  - html_content: str (πλήρες HTML document)
+
+ΕΠΙΣΤΡΕΦΕΙ: str (μικρό HTML snippet με κουμπί + JavaScript)
+
+ΒΗΜΑΤΑ ΕΣΩΤΕΡΙΚΑ:
+
+  6a. Escape του HTML content σε JavaScript string
+      js_content = json.dumps(html_content).replace("</script>", "<\\/script>")
+
+      ΚΡΙΣΙΜΟ: Το json.dumps() μετατρέπει το string σε valid JS string literal
+      (χειρίζεται quotes, newlines, special chars). Μετά, αντικαθιστούμε
+      "</script>" με "<\/script>" γιατί αλλιώς ο browser θα νομίζει ότι
+      κλείνει το <script> tag του wrapper και θα σπάσει.
+
+  6b. Δημιουργία HTML snippet
+      Περιέχει:
+      - Ένα <button> με id="openTabBtn" (στοιχισμένο δεξιά)
+      - <script> block με:
+        1. Αποθηκεύει το HTML content σε JS μεταβλητή
+        2. Στο click: δημιουργεί Blob → objectURL → window.open
+
+  6c. ΤΕΧΝΟΛΟΓΙΑ BLOB URL:
+      var blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+      var url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+
+      Αυτό δημιουργεί μια προσωρινή URL (blob:...) στη μνήμη του browser
+      χωρίς να αποθηκεύεται τίποτα στον server.
+
+  6d. Styling κουμπιού:
+      - background: #dc3545 (κόκκινο, ίδιο με τα υπόλοιπα κουμπιά)
+      - padding: 14px 28px (μεγάλο, ευδιάκριτο)
+      - font-size: 1.15rem, font-weight: 700
+      - border-radius: 8px
+      - Στοίχιση δεξιά μέσω flex + justify-content: flex-end
+
+================================================================================
+7. ΚΛΗΣΗ ΣΤΟ STREAMLIT APP
+================================================================================
+
+Μετά από κάθε st.dataframe(), καλούμε τις 2 συναρτήσεις ως εξής:
+
+  # 1. Εμφάνιση πίνακα στο Streamlit
+  st.dataframe(my_dataframe, use_container_width=True, hide_index=True)
+
+  # 2. Δημιουργία εκτυπώσιμου HTML
+  html_content = dataframe_to_printable_html(my_dataframe, "Τίτλος Πίνακα")
+
+  # 3. Εμφάνιση κουμπιού "Εκτύπωση" κάτω από τον πίνακα
+  if html_content:
+      components.html(html_open_in_new_tab_component(html_content), height=56)
+
+ΣΗΜΑΝΤΙΚΟ: height=56 δίνει αρκετό χώρο μόνο για το κουμπί (14px padding
+× 2 + font size + body padding ≈ 56px). Αν αλλάξεις το μέγεθος κουμπιού,
+πρέπει να προσαρμόσεις αυτό το height.
+
+================================================================================
+8. COPY-PASTE ΚΩΔΙΚΑΣ (ΕΤΟΙΜΟΣ ΓΙΑ ΑΛΛΟ PROJECT)
+================================================================================
+
+--- Βήμα 1: Πρόσθεσε αυτά τα imports στην αρχή του αρχείου ---
+
+import streamlit as st
+import streamlit.components.v1 as components
+import pandas as pd
+import json
+import html
+import re
+
+
+--- Βήμα 2: Πρόσθεσε αυτές τις 2 συναρτήσεις (αντίγραψε ως έχουν) ---
+
+def dataframe_to_printable_html(df, title="Πίνακας", person_name=None):
+    if df is None or df.empty:
+        return None
+    df_clean = df.fillna("")
+    table_html = df_clean.to_html(index=False, classes="print-table", border=0)
+    table_html = re.sub(
+        r'<tr[^>]*>((?:(?!</tr>).)*?ΣΥΝΟΛΟ(?:(?!</tr>).)*?)</tr>',
+        r'<tr class="row-total">\1</tr>',
+        table_html, flags=re.DOTALL | re.IGNORECASE
+    )
+    safe_title = html.escape(str(title))
+    safe_name = html.escape(str(person_name)) if person_name else ""
+    name_block = f'<p class="print-name">{safe_name}</p>' if safe_name else ""
+    doc = f"""<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{safe_title}</title>
+<style>
+body {{ font-family: sans-serif; margin: 1rem; color: #262730; }}
+.print-name {{ text-align: center; font-size: 1.1rem; font-weight: 700; margin-bottom: 0.5rem; }}
+.print-title {{ font-size: 1.25rem; font-weight: 700; margin-bottom: 1rem; text-align: left; }}
+.print-table {{ width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }}
+.print-table th, .print-table td {{ padding: 10px 12px; text-align: left; border: none; border-bottom: 1px solid #d1d5db; }}
+.print-table th {{ background: #f9fafb; font-weight: 700; font-size: 0.8rem; }}
+.print-table td:nth-child(1), .print-table td:nth-child(2), .print-table th:nth-child(1), .print-table th:nth-child(2) {{ font-weight: 700; }}
+.print-table tr.row-total {{ background: #e5e7eb; font-weight: 700; }}
+.print-table tbody tr:hover {{ background: #fff4e6; }}
+.header-row {{ display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; }}
+.header-row .print-title {{ margin: 0; }}
+.btn-print {{ background: #dc3545; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-size: 0.9rem; font-weight: 600; cursor: pointer; }}
+.btn-print:hover {{ background: #c82333; }}
+@media print {{
+  @page {{ size: landscape; }}
+  body {{ margin: 1.5cm; }}
+  .no-print {{ display: none !important; }}
+  .print-title {{ margin-bottom: 12px; }}
+  .print-table {{ page-break-inside: auto; }}
+  .print-table tr {{ page-break-inside: avoid; page-break-after: auto; }}
+  .print-footer {{ margin-top: 1.5rem; }}
+}}
+.print-footer {{ margin-top: 1.5rem; padding-top: 0.75rem; border-top: 1px solid #d1d5db; font-size: 0.75rem; color: #6b7280; line-height: 1.4; }}
+</style>
+</head>
+<body>
+{name_block}
+<div class="header-row">
+  <h1 class="print-title">{safe_title}</h1>
+  <div class="no-print" style="display:flex;gap:8px;">
+    <button type="button" class="btn-print" onclick="window.print();">🖨 Εκτύπωση</button>
+  </div>
+</div>
+{table_html}
+<div class="print-footer">ΣΗΜΕΙΩΣΗ: Αντικαταστήστε αυτό το κείμενο με το δικό σας disclaimer.</div>
+</body>
+</html>"""
+    return doc
+
+
+def html_open_in_new_tab_component(html_content):
+    if not html_content:
+        return ""
+    js_content = json.dumps(html_content).replace("</script>", "<\\/script>")
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:6px 0;font-family:sans-serif;display:flex;justify-content:flex-end;">
+<button type="button" id="openTabBtn" style="background:#dc3545;color:white;border:none;padding:14px 28px;border-radius:8px;cursor:pointer;font-weight:700;font-size:1.15rem;">Εκτύπωση</button>
+<script>
+(function() {{
+  var htmlContent = {js_content};
+  document.getElementById('openTabBtn').onclick = function() {{
+    var blob = new Blob([htmlContent], {{ type: 'text/html;charset=utf-8' }});
+    var url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+  }};
+}})();
+</script>
+</body></html>"""
+
+
+--- Βήμα 3: Χρήση σε οποιοδήποτε σημείο ---
+
+st.dataframe(df, use_container_width=True, hide_index=True)
+html_out = dataframe_to_printable_html(df, "Ο τίτλος μου", person_name="Όνομα")
+if html_out:
+    components.html(html_open_in_new_tab_component(html_out), height=56)
+
+================================================================================
+9. ΣΗΜΕΙΑ ΠΡΟΣΑΡΜΟΓΗΣ ΓΙΑ ΑΛΛΗ ΕΦΑΡΜΟΓΗ
+================================================================================
+
+  A. DISCLAIMER: Αντικατέστησε το κείμενο στο <div class="print-footer">
+     με το δικό σου κείμενο ή αφαίρεσε τελείως τη γραμμή.
+
+  B. BOLD ΣΤΗΛΕΣ: Η γραμμή με nth-child(1) & nth-child(2) κάνει bold
+     τις 2 πρώτες στήλες. Αν δεν το θέλεις, αφαίρεσε τη γραμμή:
+       .print-table td:nth-child(1), .print-table td:nth-child(2)...
+
+  C. ΓΡΑΜΜΕΣ ΣΥΝΟΛΟ: Αν δεν χρησιμοποιείς "ΣΥΝΟΛΟ", αφαίρεσε το re.sub()
+     block και τη γραμμή .print-table tr.row-total στο CSS.
+
+  D. ΧΡΩΜΑΤΑ: Αντικατέστησε #dc3545 (κόκκινο) με το χρώμα της εφαρμογής σου.
+
+  E. ORIENTATION: Αν θέλεις portrait αντί landscape, αλλαξε:
+       @page { size: landscape; }  →  @page { size: portrait; }
+
+  F. PERSON NAME: Αν δεν χρειάζεσαι ονοματεπώνυμο, μη δίνεις person_name
+     (ή δώσε None). Δεν θα εμφανιστεί τίποτα.
+
+  G. ΚΟΥΜΠΙ: Αν θέλεις αλλαγή κειμένου, μέγεθος ή στυλ, τροποποίησε:
+     - Στο html_open_in_new_tab_component(): style + text του <button>
+     - Αντίστοιχα height= στο components.html()
+
+================================================================================
+10. ΓΝΩΣΤΑ ΘΕΜΑΤΑ & ΛΥΣΕΙΣ
+================================================================================
+
+  ΘΕΜΑ 1: "</script>" μέσα στο HTML content σπάει τον wrapper
+  ΛΥΣΗ: json.dumps().replace("</script>", "<\\/script>")
+
+  ΘΕΜΑ 2: Κουμπί "Εκτύπωση" κρύβεται πίσω από πίνακα
+  ΛΥΣΗ: Αύξησε height= στο components.html()
+
+  ΘΕΜΑ 3: Pop-up blocker εμποδίζει το window.open()
+  ΛΥΣΗ: Λειτουργεί κανονικά γιατί καλείται μέσα σε onclick (user gesture).
+         Κανένα πρόβλημα σε Chrome/Edge/Firefox.
+
+  ΘΕΜΑ 4: Ελληνικοί χαρακτήρες σε εκτύπωση
+  ΛΥΣΗ: Το charset="utf-8" στο <meta> καλύπτει πλήρως τα ελληνικά.
+
+================================================================================

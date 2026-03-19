@@ -10,6 +10,14 @@ html_extra_tabs.py
 Χρησιμοποιείται από html_viewer_builder.py.
 """
 
+import sys
+from pathlib import Path as _Path
+
+_root = _Path(__file__).resolve().parent
+_kyria = _root / "LOCAL_DEV" / "kyria"
+if _kyria.exists() and not (_root / "app_final.py").exists():
+    sys.path.insert(0, str(_kyria))
+
 import html as html_mod
 import json
 import pandas as pd

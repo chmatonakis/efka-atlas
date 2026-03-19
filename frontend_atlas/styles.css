@@ -1,0 +1,147 @@
+.app-bg {
+  background:
+    radial-gradient(circle at 0% 0%, rgba(99, 102, 241, 0.08), transparent 30%),
+    radial-gradient(circle at 100% 100%, rgba(6, 182, 212, 0.08), transparent 30%),
+    #f8fafc;
+}
+
+.panel {
+  border-radius: 1rem;
+  border: 1px solid rgb(241 245 249);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.08);
+}
+
+.panel:hover {
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.08);
+  transition: box-shadow 180ms ease;
+}
+
+.input-base {
+  border-radius: 0.75rem;
+  border: 1px solid rgb(226 232 240);
+  background: rgb(248, 250, 252);
+  padding: 1rem 1rem;
+  font-size: 0.95rem;
+  color: rgb(15 23 42);
+  font-weight: 700;
+}
+
+.input-base:focus {
+  outline: none;
+  border-color: rgb(99 102 241);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+  background: white;
+}
+
+.btn-primary {
+  border-radius: 0.75rem;
+  background: rgb(79 70 229);
+  color: white;
+  font-size: 0.95rem;
+  font-weight: 700;
+  padding: 0.8rem 1.2rem;
+  white-space: nowrap;
+  transition: transform 140ms ease, filter 140ms ease;
+  box-shadow: 0 10px 20px rgba(99, 102, 241, 0.3);
+}
+
+.btn-primary:hover {
+  background: rgb(67 56 202);
+  transform: translateY(-1px);
+}
+
+.nav-btn {
+  width: 100%;
+  border-radius: 10px;
+  padding: 0.6rem 0.7rem;
+  text-align: left;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: 1px solid transparent;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  transition: all 140ms ease;
+}
+
+.nav-btn.active {
+  color: white;
+  background: linear-gradient(120deg, #4f46e5, #4338ca);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.nav-btn.idle {
+  color: #475569;
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.nav-btn.idle:hover {
+  background: #eef2ff;
+  color: #1e1b4b;
+  transform: translateX(2px);
+}
+
+.fade-in {
+  animation: fadeInUp 220ms ease;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Πίνακες: ευρεία σελίδα, scroll μόνο μέσα στο wrapper (δεν σπάει η δομή) */
+.table-scroll-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  border-radius: 0.75rem;
+  border: 1px solid rgb(226 232 240);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-wide {
+  width: 100%;
+  min-width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.7rem;
+}
+
+.table-th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgb(241 245 249);
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: rgb(71 85 105);
+  border-bottom: 1px solid rgb(226 232 240);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table-td {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid rgb(241 245 249);
+  color: rgb(51 65 85);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table-wide tbody tr:hover .table-td {
+  background: rgb(248 250 252);
+}

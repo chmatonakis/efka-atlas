@@ -58,7 +58,28 @@ function isAnalysisPage() {
 
 function initFromStorage() {
   if (!isAnalysisPage()) return;
-  const raw = sessionStorage.getItem("atlas_report");
+  // Embedded payload (π.χ. από Lite instance / generated HTML)
+  if (window.__ATLAS_PAYLOAD__) {
+    try {
+      var payload = window.__ATLAS_PAYLOAD__;
+      window.__ATLAS_PAYLOAD__ = null;
+      state.payload = payload;
+      state.activeTab = getAvailableTabs(payload)[0]?.id || "synopsis";
+      hydrateDefaultsFromPayload(payload);
+      var yearEl = document.getElementById("currentYearBadge");
+      if (yearEl) yearEl.textContent = "● " + new Date().getFullYear();
+      renderAll();
+      return;
+    } catch (e) {
+      if (ui.noDataRoot) {
+        ui.noDataRoot.classList.remove("hidden");
+        ui.appRoot.classList.add("hidden");
+        ui.noDataRoot.querySelector("p").textContent = "Μη έγκυρα δεδομένα.";
+      }
+      return;
+    }
+  }
+  var raw = sessionStorage.getItem("atlas_report");
   if (!raw) {
     if (ui.noDataRoot) {
       ui.noDataRoot.classList.remove("hidden");
@@ -67,11 +88,11 @@ function initFromStorage() {
     return;
   }
   try {
-    const payload = JSON.parse(raw);
+    var payload = JSON.parse(raw);
     state.payload = payload;
     state.activeTab = getAvailableTabs(payload)[0]?.id || "synopsis";
     hydrateDefaultsFromPayload(payload);
-    const yearEl = document.getElementById("currentYearBadge");
+    var yearEl = document.getElementById("currentYearBadge");
     if (yearEl) yearEl.textContent = "● " + new Date().getFullYear();
     renderAll();
   } catch (e) {

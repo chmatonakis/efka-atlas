@@ -1,0 +1,146 @@
+================================================================================
+ΕΠΙΤΥΧΗΜΕΝΕΣ ΜΕΤΑΤΡΟΠΕΣ - e-EFKA Parser
+================================================================================
+Αρχείο καταγραφής αλλαγών που υλοποιήθηκαν με επιτυχία, για επαναχρησιμοποίηση.
+
+--------------------------------------------------------------------------------
+1. Μεγαλύτερα στοιχεία ελέγχου στους πίνακες (DataFrame toolbar)
+--------------------------------------------------------------------------------
+Ημερομηνία: 2026-02-07
+
+Περιγραφή:
+Τα εικονίδια ελέγχου του Streamlit στους πίνακες (λήψη, αναζήτηση, fullscreen)
+ήταν μικρά. Ζητήθηκε να γίνουν μεγαλύτερα χωρίς να κρύβονται πίσω από τον πίνακα.
+
+Υλοποίηση (CSS στο streamlit_app.py, μέσα στο <style>):
+
+  /* DataFrame toolbar: above table + larger buttons */
+  [data-testid="stElementToolbar"] {
+      z-index: 9999 !important;
+  }
+  [data-testid="stElementToolbar"] button {
+      min-width: 40px !important;
+      min-height: 40px !important;
+      padding: 10px !important;
+  }
+  [data-testid="stElementToolbar"] button svg {
+      width: 22px !important;
+      height: 22px !important;
+  }
+
+Σημειώσεις:
+- Το data-testid="stElementToolbar" στοχεύει τη μπάρα ελέγχου των st.dataframe.
+- Το z-index: 9999 κρατά το toolbar πάνω από τον πίνακα (αποφυγή overlap).
+- Αποφεύγουμε transform: scale() γιατί έκανε το toolbar να εξαφανίζεται ή να
+  κρύβεται πίσω από τον πίνακα· αντί για scale χρησιμοποιούμε min-width/height
+  και μεγαλύτερα svg.
+
+--------------------------------------------------------------------------------
+2. Λειτουργικότητα εκτύπωσης και στυλ εμφάνισης (printable HTML)
+--------------------------------------------------------------------------------
+Ημερομηνία: 2026-02-07
+
+ΛΕΠΤΟΜΕΡΗΣ ΑΝΑΛΥΣΗ
+
+--- 1. Λειτουργικότητα εκτύπωσης ---
+
+1.1 Ροή λειτουργίας
+
+- Στην εφαρμογή: Σε κάθε καρτέλα που εμφανίζει πίνακα, μετά το st.dataframe()
+  καλείται η dataframe_to_printable_html(df, title="...", person_name=None). Η
+  συνάρτηση επιστρέφει ένα πλήρες HTML string (document με DOCTYPE, head, body,
+  πίνακα και CSS).
+
+- Κουμπί «Εκτύπωση» στη σελίδα: Το html_open_in_new_tab_component(html_content)
+  δημιουργεί ένα μικρό HTML snippet που εμφανίζεται σε iframe (μέσω
+  st.components.v1.html()). Το snippet περιέχει μόνο το κόκκινο κουμπί
+  «Εκτύπωση».
+
+- Άνοιγμα σε νέα καρτέλα (blob URL): Όταν ο χρήστης πατά το κουμπί «Εκτύπωση»
+  στο Streamlit, το html_content (το πλήρες printable HTML) είναι ήδη
+  ενσωματωμένο στο iframe ως JavaScript string (json.dumps(html_content)). Γίνεται
+  escape του </script> σε <\/script> ώστε να μην κλείνει πρόωρα το <script> του
+  wrapper. Στο onclick του κουμπιού: δημιουργείται Blob([htmlContent], { type:
+  'text/html;charset=utf-8' }), μετά URL.createObjectURL(blob) και
+  window.open(url, '_blank'). Έτσι ανοίγει νέα καρτέλα με blob URL που δείχνει
+  ακριβώς το παραγόμενο HTML.
+
+- Μέσα στο ανοιγμένο HTML (νέα καρτέλα): Ο χρήστης βλέπει τον πίνακα και το
+  κουμπί «Εκτύπωση». Με κλικ καλείται window.print() και ανοίγει το παράθυρο
+  εκτύπωσης του browser με το ίδιο document (οριζόντιο προσανατολισμό κ.λπ.).
+
+1.2 Συνάρτηση dataframe_to_printable_html(df, title, person_name=None)
+
+- Είσοδος: DataFrame, τίτλος, προαιρετικό ονοματεπώνυμο.
+- Βήματα: df.fillna("") και df.to_html(index=False, classes="print-table",
+  border=0) για τον πίνακα. Regex: αναζήτηση γραμμών που περιέχουν το κείμενο
+  ΣΥΝΟΛΟ και αντικατάσταση του <tr...> με <tr class="row-total"> ώστε να
+  εφαρμόζεται ειδικό στυλ (γκρι φόντο + bold). Δημιουργία πλήρους HTML document
+  με safe_title, safe_name (ονοματεπώνυμο) με html.escape(). Αν υπάρχει
+  person_name, εμφανίζεται κεντραρισμένο πάνω από τον τίτλο (name_block).
+- Έξοδος: ένα string που είναι έγκυρο HTML document (UTF-8, ελληνική γλώσσα).
+
+1.3 Συνάρτηση html_open_in_new_tab_component(html_content)
+
+- Σκοπός: Να δείξει στην εφαρμογή ένα κουμπί που ανοίγει το html_content σε
+  νέα καρτέλα.
+- Υλοποίηση: js_content = json.dumps(html_content).replace("</script>",
+  "<\\/script>") ώστε το HTML να μην σπάει το <script> tag όταν περιέχει
+  </script>. Το snippet είναι ένα μικρό HTML με ένα κουμπί και script που στο
+  onclick κάνει: new Blob([htmlContent], { type: 'text/html;charset=utf-8' }) →
+  URL.createObjectURL(blob) → window.open(url, '_blank'). Αυτό το snippet περνάει
+  στο components.html(..., height=56) ώστε να εμφανίζεται δίπλα/κάτω από τον
+  πίνακα σε κάθε καρτέλα.
+
+--- 2. Στυλ εμφάνισης (CSS) ---
+
+2.1 Γενικά – body και τίτλοι
+
+- body: font-family sans-serif, margin 1rem, color #262730.
+- Ονοματεπώνυμο (αν υπάρχει): κλάση .print-name – text-align center, font-size
+  1.1rem, font-weight 700, margin-bottom 0.5rem.
+- Τίτλος πίνακα: .print-title – font-size 1.25rem, font-weight 700, text-align
+  left.
+
+2.2 Πίνακας – πλέγμα και γραμμές
+
+- Πίνακας: .print-table – width 100%, border-collapse collapse, text-align left,
+  font-size 0.9rem.
+- Κελιά (th, td): Χωρίς πλέγμα (border none), μόνο οριζόντια γραμμή ανά σειρά:
+  border-bottom 1px solid #d1d5db. Padding: 10px 12px για ευανάγνωστο κείμενο.
+
+2.3 Κεφαλίδες (th)
+
+- Φόντο: background #f9fafb. Βάρος: font-weight 700. Μέγεθος: font-size 0.8rem
+  (μικρότερα από το body/πίνακα).
+
+2.4 Στήλες Έτος και Περίοδος (1η και 2η στήλη)
+
+- Κανόνας: .print-table td:nth-child(1), td:nth-child(2), th:nth-child(1),
+  th:nth-child(2). Στυλ: font-weight 700 (bold).
+
+2.5 Γραμμές ΣΥΝΟΛΟ (row-total)
+
+- Κλάση .row-total (προστίθεται με regex σε γραμμές που περιέχουν «ΣΥΝΟΛΟ»).
+- Στυλ: background #e5e7eb (ελαφρύ γκρι), font-weight 700 (ολόκληρη η γραμμή
+  bold).
+
+2.6 Hover ανά γραμμή
+
+- Κανόνας: .print-table tbody tr:hover. Στυλ: background #fff4e6 (πολύ ελαφρύ
+  πορτοκαλί/κρεμ).
+
+2.7 Κουμπί και μη-εκτύπωση
+
+- Header row: .header-row – flex, κουμπί(α) δεξιά. Κουμπί Εκτύπωση: .btn-print –
+  background #dc3545, λευκό κείμενο, padding 8px 16px, border-radius 6px,
+  font-weight 600, cursor pointer· hover background #c82333. Στην εκτύπωση όλα
+  τα στοιχεία με κλάση .no-print έχουν display none !important στο @media print.
+
+2.8 Εκτύπωση (@media print)
+
+- Σελίδα: @page { size: landscape; } (οριζόντιος προσανατολισμός). Body: margin
+  1.5cm. Πίνακας: page-break-inside auto, tr με page-break-inside avoid και
+  page-break-after auto για να μην κόβονται γραμμές ανά μέρη σελίδων.
+
+================================================================================

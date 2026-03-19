@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="el">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ATLAS — Φόρτωση αναφοράς</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body class="app-bg min-h-screen flex flex-col">
+  <header class="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
+    <div class="mx-auto max-w-3xl px-4 py-4">
+      <p class="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">ATLAS JSON</p>
+      <h1 class="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Φόρτωση αναφοράς ATLAS</h1>
+      <p class="mt-1 text-sm text-slate-600">Επιλέξτε αρχείο JSON ή δώστε URL για να προχωρήσετε στην ανάλυση.</p>
+    </div>
+  </header>
+
+  <main class="flex-1 mx-auto w-full max-w-3xl px-4 py-10">
+    <section class="panel p-8">
+      <label class="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-600">Φόρτωση από URL</label>
+      <div class="flex flex-col gap-3 sm:flex-row">
+        <input id="jsonUrl" type="url" placeholder="https://example.com/αναφορά.json" class="input-base flex-1">
+        <button id="loadFromUrlBtn" class="btn-primary">Φόρτωση</button>
+      </div>
+
+      <div class="mt-8 pt-6 border-t border-slate-200">
+        <label class="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-600">Φόρτωση από αρχείο</label>
+        <input id="jsonFileInput" type="file" accept=".json,application/json" class="block w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm file:mr-4 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-4 file:py-2 file:font-semibold file:text-white hover:file:bg-indigo-500">
+      </div>
+
+      <p id="loaderMessage" class="mt-4 text-sm text-slate-600">Ανεβάστε JSON που δημιουργήθηκε από το ATLAS (Λήψη JSON).</p>
+    </section>
+  </main>
+
+  <script src="./load.js"></script>
+</body>
+</html>
