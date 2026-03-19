@@ -976,8 +976,14 @@ def extract_tables_adaptive(pdf_path):
     """
     Προσαρμοστική εξαγωγή πινάκων με πολλές στρατηγικές
     """
-    import pdfplumber
-    
+    if not PDFPLUMBER_AVAILABLE:
+        st.error(
+            "Λείπει το πακέτο **pdfplumber**. Τοπικά: `pip install pdfplumber`. "
+            "Στο Streamlit Cloud: στη ρίζα του repo πρέπει να υπάρχει `requirements.txt` με `pdfplumber`· "
+            "στο μενού της εφαρμογής κάντε **Manage app → Reboot** ή νέο deploy."
+        )
+        return []
+
     all_tables = []
     current_taimeio = ""
     current_typos = ""

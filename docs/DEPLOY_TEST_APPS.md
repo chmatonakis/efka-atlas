@@ -41,6 +41,7 @@ git push -u origin test
    - **Main file path:** `app_lite.py`
    - **App URL:** π.χ. `atlas-lite-test`
    - Όνομα: "ATLAS Lite Test".
+   - **Εξαρτήσεις:** Στο **Advanced settings** άστε το αρχείο εξαρτήσεων στο προεπιλεγμένο (ή ρητά `requirements.txt` στη **ρίζα** του repo). Αν εμφανιστεί `No module named 'pdfplumber'`, το Cloud δεν διάβασε/δεν εγκατέστησε το `requirements.txt` — έλεγξε το path, κάνε **Reboot** ή νέο deploy μετά από push.
 
 ### Βήμα 2: Επίσημες εφαρμογές
 

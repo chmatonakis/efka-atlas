@@ -1,6 +1,8 @@
 streamlit
 pandas
-pdfplumber
+# Ρητές εκδόσεις ώστε το Streamlit Cloud να εγκαθιστά σταθερά την αλυσίδα PDF
+pdfminer.six>=20221105
+pdfplumber>=0.10.0
 openpyxl
 google-generativeai
 anthropic
