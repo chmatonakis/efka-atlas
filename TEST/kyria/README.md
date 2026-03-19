@@ -10,5 +10,5 @@
 ## Ροή
 
 1. Αλλαγές στο **`LOCAL_DEV/kyria/`** (και κοινά modules στη ρίζα).
-2. Push στο `test` → test Streamlit / Snowflake.
+2. Push στο `test` → test Streamlit.
 3. OK → merge στο `main` ([`../../docs/GIT_WORKFLOW_TEST_TO_MAIN.md`](../../docs/GIT_WORKFLOW_TEST_TO_MAIN.md)).

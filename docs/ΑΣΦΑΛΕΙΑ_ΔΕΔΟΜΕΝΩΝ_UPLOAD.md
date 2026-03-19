@@ -6,7 +6,7 @@
 
 Όταν ο χρήστης ανεβάζει PDF μέσω του **Streamlit** (`st.file_uploader`):
 
-1. **Το αρχείο στέλνεται από το browser στον server** όπου τρέχει η Streamlit εφαρμογή (Community Cloud ή Streamlit in Snowflake). Δεν μένει μόνο στον browser.
+1. **Το αρχείο στέλνεται από το browser στον server** όπου τρέχει η Streamlit εφαρμογή (π.χ. Streamlit Community Cloud ή δικό σας server). Δεν μένει μόνο στον browser.
 2. **Στον server** το αρχείο κρατιέται σε **μνήμη (RAM)** σε αντικείμενο τύπου BytesIO, όχι σε μόνιμο δίσκο.
 3. Κατά την επεξεργασία, η συνάρτηση `extract_efka_data` γράφει **προσωρινά** ολόκληρο το PDF σε ένα προσωρινό αρχείο στο δίσκο του server, το διαβάζει για εξαγωγή πινάκων και στο τέλος **το διαγράφει** (`os.unlink`).
 

@@ -10,5 +10,5 @@
 ## Ροή
 
 1. Αλλαγές στο **`LOCAL_DEV/lite/`** (και κοινά modules στη ρίζα).
-2. Push στο `test` → test Streamlit / Snowflake Lite.
+2. Push στο `test` → test Streamlit Lite.
 3. OK → merge στο `main`.

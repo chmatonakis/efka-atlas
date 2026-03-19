@@ -6,7 +6,6 @@
 |--------|--------|
 | `GIT_WORKFLOW_TEST_TO_MAIN.md` | Οδηγία μεταφοράς test → main χωρίς αλλαγή local. |
 | `DEPLOY_TEST_APPS.md` | Οδηγός deployment (Streamlit Cloud, test/main). |
-| `SNOWFLAKE_DEPLOY_ΟΔΗΓΟΣ.md` | Οδηγός ανάπτυξης στο Snowflake. |
 | `documentation.html` / `streamlit_page.html` | Στατικές σελίδες τεκμηρίωσης. |
 | `ΑΣΦΑΛΕΙΑ_ΔΕΔΟΜΕΝΩΝ_UPLOAD.md` | Ασφάλεια δεδομένων και upload. |
 | `ΔΙΑΦΟΡΕΣ_HTML_ΚΥΡΙΑ_LITE.md` | Διαφορές viewer κύριας vs Lite. |

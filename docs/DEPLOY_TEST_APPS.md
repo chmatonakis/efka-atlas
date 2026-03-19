@@ -41,7 +41,7 @@ git push -u origin test
    - **Main file path:** `app_lite.py`
    - **App URL:** π.χ. `atlas-lite-test`
    - Όνομα: "ATLAS Lite Test".
-   - **Εξαρτήσεις:** Στο **Advanced settings** άστε το αρχείο εξαρτήσεων στο προεπιλεγμένο (ή ρητά `requirements.txt` στη **ρίζα** του repo). Αν εμφανιστεί `No module named 'pdfplumber'`, το Cloud δεν διάβασε/δεν εγκατέστησε το `requirements.txt` — έλεγξε το path, κάνε **Reboot** ή νέο deploy μετά από push.
+   - **Εξαρτήσεις:** Το Streamlit Community Cloud χρησιμοποιεί **`requirements.txt`** στη ρίζα. Αν υπάρχει **`environment.yml`** ή **`Pipfile`** στη ρίζα, το Cloud μπορεί να τα προτιμήσει και να **μην** εγκαταστήσει τα πακέτα του `requirements.txt` (π.χ. `pdfplumber`). Στο **Advanced settings** μπορείς να ορίσεις ρητά `requirements.txt`· μετά από αλλαγές κάνε **Reboot** ή νέο deploy.
 
 ### Βήμα 2: Επίσημες εφαρμογές
 
@@ -56,20 +56,7 @@ git push -u origin test
 
 ---
 
-## 2. Snowflake (Streamlit στο Snowflake)
-
-Στο **snowflake.yml** υπάρχουν δύο νέες εφαρμογές (ATLAS_APP_TEST, ATLAS_LITE_TEST). Στο Snowflake ο διαχωρισμός γίνεται με **από ποιο branch/project κάνεις deploy**:
-
-- **Επίσημες (ATLAS_APP):** deploy όταν είσαι στο branch **`main`** (ή αφού κάνεις merge).
-- **Test (ATLAS_APP_TEST, ATLAS_LITE_TEST):** deploy όταν είσαι στο branch **`test`** (ή `staging`).
-
-Δηλαδή: κάνεις checkout στο `test`, κάνεις τις αλλαγές σου, deploy (Snowflake CLI/UI) → ενημερώνονται μόνο οι test εφαρμογές. Όταν είσαι έτοιμος, merge στο `main`, checkout `main`, deploy → ενημερώνονται οι επίσημες.
-
-(Αν το deploy στο Snowflake τραβάει πάντα από ένα branch, ρύθμισε το ώστε τα test apps να τραβούν από το `test` branch, αν η πλατφόρμα το υποστηρίζει.)
-
----
-
-## 3. Σύνοψη
+## 2. Σύνοψη
 
 - **Ίδιο repo + ίδιο branch** → όλες οι εφαρμογές τρέχουν τον ίδιο κώδικα· κάθε push επηρεάζει όλες.
 - **Ίδιο repo + διαφορετικό branch για test** → οι test εφαρμογές τρέχουν κώδικα από το `test`, οι επίσημες από το `main`. Επηρεάζονται μόνο όταν αλλάζεις το branch από το οποίο τραβάνε ή κάνεις merge.

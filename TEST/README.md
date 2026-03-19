@@ -14,5 +14,5 @@
 ## Ροή
 
 1. Αλλαγές στο `LOCAL_DEV` → commit στο branch `test`.
-2. `git push origin test` → Streamlit / Snowflake test apps.
+2. `git push origin test` → Streamlit test apps.
 3. Έλεγχος OK → merge `test` → `main` (δες [`../docs/GIT_WORKFLOW_TEST_TO_MAIN.md`](../docs/GIT_WORKFLOW_TEST_TO_MAIN.md)).
