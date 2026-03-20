@@ -17,6 +17,7 @@
 - **TEST/** – τεκμηρίωση σταδίου **branch `test`** (δοκιμή πριν το production)· υποφάκελοι `kyria/`, `lite/`. Δες [`TEST/README.md`](TEST/README.md).
 - **MAIN/** – τεκμηρίωση σταδίου **branch `main`** (production)· υποφάκελοι `kyria/`, `lite/`. Δες [`MAIN/README.md`](MAIN/README.md).
 - **docs/** – τεκμηρίωση, οδηγοί, PDF/έγγραφα δοκιμών.
+- **dev_html/** – προσχέδια εξαγόμενου HTML για βελτιώσεις πριν τη μεταφορά στον παραγωγικό κώδικα· δες [`dev_html/ATLAS_DEV_2/README.md`](dev_html/ATLAS_DEV_2/README.md).
 - **scripts/** – βοηθητικά scripts (π.χ. `install_ghostscript.bat`).
 - Στη **ρίζα**: κοινά modules (`html_viewer_builder.py`, `html_extra_tabs.py`, `report_json_export.py`), `frontend_atlas/`, `requirements.txt`, `run_app.bat`.
 
