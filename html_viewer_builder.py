@@ -313,6 +313,72 @@ def build_timeline_html(source_df):
     """
 
 
+# CSS για embedding στο Streamlit: το components.html είναι ξεχωριστό iframe χωρίς το VIEWER_STYLES του πλήρους HTML.
+TIMELINE_STREAMLIT_EMBED_CSS = """
+* { box-sizing: border-box; }
+body { margin: 0; padding: 12px 14px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color: #1e293b; background: #fff; }
+.atlas-streamlit-timeline-host { --tl-label-w: min(200px, 36vw); }
+.atlas-streamlit-timeline-host .tl-label { width: var(--tl-label-w); max-width: var(--tl-label-w); }
+.atlas-streamlit-timeline-host .tl-ref-lines { left: var(--tl-label-w); }
+.atlas-streamlit-timeline-host .tl-axis { margin-left: calc(var(--tl-label-w) + 14px); }
+.print-section { margin-bottom: 16px; }
+.print-section h2 { font-size: 1.2rem; font-weight: 700; color: #0f172a; margin: 0 0 8px 0; padding-bottom: 6px; border-bottom: 1.5px solid #e2e8f0; }
+.print-description { font-size: 13px; color: #64748b; margin: 0 0 14px 0; line-height: 1.45; }
+.tl-container { position: relative; padding-bottom: 36px; padding-top: 26px; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
+.tl-row { display: flex; align-items: center; margin-bottom: 8px; min-height: 28px; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
+.tl-label { font-size: 13px; font-weight: 600; color: #334155; text-align: right; padding-right: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; box-sizing: border-box; }
+.tl-label-gap { color: #dc2626; } .tl-label-zero { color: #78716c; }
+.tl-track { position: relative; flex: 1 1 0; min-width: 0; height: 24px; background: #f1f5f9; border-radius: 6px; }
+.tl-bar { position: absolute; top: 2px; height: 20px; border-radius: 4px; opacity: 0.85; cursor: default; transition: opacity 0.15s; }
+.tl-bar:hover { opacity: 1; box-shadow: 0 0 6px rgba(0,0,0,0.25); z-index: 2; }
+.tl-gap { background: repeating-linear-gradient(45deg,#fca5a5,#fca5a5 3px,#fecaca 3px,#fecaca 6px) !important; border: 1px solid #ef4444; opacity: 0.7; }
+.tl-zero { background: repeating-linear-gradient(-45deg,#a8a29e,#a8a29e 3px,#d6d3d1 3px,#d6d3d1 6px) !important; border: 1px solid #78716c; opacity: 0.85; }
+.tl-legend-zero { background: repeating-linear-gradient(-45deg,#a8a29e,#a8a29e 3px,#d6d3d1 3px,#d6d3d1 6px) !important; border: 1px solid #78716c; }
+.tl-zoom-wrapper { margin-top: 8px; border: 1px solid #e2e8f0; border-radius: 10px; overflow-x: hidden; overflow-y: auto; max-height: 70vh; min-height: 360px; background: #fafafa; max-width: 100%; box-sizing: border-box; }
+.tl-zoom-controls { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #f1f5f9; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
+.tl-zoom-label { font-size: 13px; font-weight: 600; color: #475569; }
+.tl-zoom-btn { padding: 6px 12px; font-size: 12px; font-weight: 600; color: #64748b; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
+.tl-zoom-btn:hover { background: #e2e8f0; color: #334155; border-color: #94a3b8; }
+.tl-zoom-btn.active { background: #6366f1; color: #fff; border-color: #4f46e5; }
+.tl-zoom-inner { display: block; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; transform-origin: top left; transition: transform 0.2s ease; padding: 12px 16px; }
+.tl-axis { position: relative; height: 28px; margin-top: 4px; border-top: 1px solid #cbd5e1; }
+.tl-tick { position: absolute; top: 4px; font-size: 11px; color: #64748b; transform: translateX(-50%); }
+.tl-tick::before { content: ''; position: absolute; top: -6px; left: 50%; width: 1px; height: 6px; background: #cbd5e1; }
+.tl-ref-lines { position: absolute; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 0; }
+.tl-ref-line { position: absolute; top: 0; bottom: 0; left: 0; display: flex; flex-direction: column; align-items: center; transform: translateX(-50%); }
+.tl-ref-label { font-size: 10px; color: #64748b; white-space: nowrap; margin-bottom: 4px; font-weight: 600; }
+.tl-ref-vline { flex: 1; width: 1px; min-height: 0; background: #64748b; opacity: 0.7; }
+.tl-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; font-size: 13px; max-width: 100%; }
+.tl-legend-item { display: inline-flex; align-items: center; gap: 6px; color: #334155; }
+.tl-legend-dot { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+.tl-paketo-block { margin-top: 20px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 16px; background: #fafafa; overflow: visible; max-width: 100%; box-sizing: border-box; }
+.tl-paketo-zoom-scroll { overflow-x: hidden; overflow-y: visible; max-width: 100%; margin-top: 4px; box-sizing: border-box; }
+.tl-paketo-block .tl-paketo-zoom-scroll .tl-zoom-inner { padding: 0; }
+.tl-paketo-block .tl-paketo-title { margin-top: 0; }
+.tl-paketo-title { font-size: 1.05rem; font-weight: 700; color: #1e293b; margin: 20px 0 6px; }
+.tl-paketo-sub { font-size: 13px; color: #64748b; margin: 0 0 12px; max-width: 920px; line-height: 1.45; }
+#tl-paketo-wrap .tl-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#tl-paketo-wrap .tl-label[title] { cursor: help; }
+#tl-paketo-wrap .tl-label.tl-label-cell { min-width: 0; display: flex; flex-direction: column; align-items: stretch; justify-content: center; white-space: normal; overflow: visible; box-sizing: border-box; }
+#tl-paketo-wrap .tl-label-main { font-family: inherit; font-size: 13px; font-weight: 600; color: #334155; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; text-align: right; }
+#tl-paketo-wrap .tl-label-meta { margin-top: 1px; font-size: 9px; line-height: 1.15; color: #64748b; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; font-weight: 400; text-align: right; box-sizing: border-box; }
+#tl-paketo-wrap .tl-bar.has-tl-paketo-tooltip { cursor: help; }
+"""
+
+
+def build_timeline_html_for_streamlit(source_df):
+    """Πλήρες mini-HTML με ενσωματωμένο CSS — το iframe του Streamlit δεν κληρονομεί το stylesheet του viewer."""
+    inner = build_timeline_html(source_df)
+    if not inner:
+        return ""
+    return (
+        '<!DOCTYPE html>\n<html lang="el"><head><meta charset="utf-8"/>'
+        '<meta name="viewport" content="width=device-width, initial-scale=1"/>'
+        "<style>\n" + TIMELINE_STREAMLIT_EMBED_CSS + "\n</style></head><body>"
+        '<div class="atlas-streamlit-timeline-host">' + inner + "</div></body></html>"
+    )
+
+
 # Καρτέλα «Προσωπικά Στοιχεία» (φόρμα + σημειώσεις) — ίδιο περιεχόμενο με dev HTML
 PERSONAL_TAB_HTML = """
       <section class="print-section">
@@ -821,7 +887,7 @@ def build_totals_with_filters(display_summary, raw_df=None, desc_map=None,
             if typos_col in raw_df.columns:
                 cap_group_keys.append(typos_col)
             _cap_result = compute_summary_capped_days_by_group(
-                raw_df, cap_group_keys, month_days=25, year_days=300, ika_month_days=30
+                raw_df, cap_group_keys, month_days=25, year_days=300, ika_month_days=31
             )
             if isinstance(_cap_result, tuple):
                 _, exceeded_months = _cap_result
@@ -853,7 +919,7 @@ def build_totals_with_filters(display_summary, raw_df=None, desc_map=None,
     if exceeded_lines_html:
         exceeded_warning_div = (
             '<div id="totals-exceeded-warning" class="totals-exceeded-warning" role="alert">'
-            '<strong>Υπέρβαση ορίου ημερών ανά μήνα</strong> (πλαφόν: ΙΚΑ 30 ημ./μήνα, '
+            '<strong>Υπέρβαση ορίου ημερών ανά μήνα</strong> (πλαφόν: ΙΚΑ 31 ημ./μήνα, '
             'ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ και υπόλοιπα 25 ημ./μήνα· μήνυμα για ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ μόνο όταν &gt;30):<br><br>'
             + exceeded_lines_html + '</div>'
         )
@@ -875,7 +941,7 @@ def build_totals_with_filters(display_summary, raw_df=None, desc_map=None,
     if raw_df is not None and not raw_df.empty:
         try:
             dk_df = compute_summary_capped_dk(
-                raw_df, group_keys, month_days=25, year_days=300, ika_month_days=30,
+                raw_df, group_keys, month_days=25, year_days=300, ika_month_days=31,
                 from_dt=None, to_dt=None, description_map=desc_map
             )
             if not dk_df.empty:
@@ -1000,7 +1066,7 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
   var HD=""" + has_desc_js + """;
   var HT=""" + has_typos_js + """;
   var HE=""" + has_et_js + """;
-  var CAP=25,IKACAP=30,YD=300;
+  var CAP=25,IKACAP=31,YD=300,ETAAMSGCAP=30;
   var MN={1:'\\u0399\\u03B1\\u03BD',2:'\\u03A6\\u03B5\\u03B2',3:'\\u039C\\u03B1\\u03C1',4:'\\u0391\\u03C0\\u03C1',5:'\\u039C\\u03B1\\u03CA',6:'\\u0399\\u03BF\\u03C5\\u03BD',7:'\\u0399\\u03BF\\u03C5\\u03BB',8:'\\u0391\\u03C5\\u03B3',9:'\\u03A3\\u03B5\\u03C0',10:'\\u039F\\u03BA\\u03C4',11:'\\u039D\\u03BF\\u03B5',12:'\\u0394\\u03B5\\u03BA'};
 
   function pd(s){if(!s)return null;var m=s.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})$/);return m?new Date(+m[3],m[2]-1,+m[1]):null;}
@@ -1037,7 +1103,7 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
     });
     var ika=isIka(tameio),etaa=isEtaa(tameio);
     var cap=ika?IKACAP:CAP;
-    var rptThresh=(ika||etaa)?IKACAP:CAP;
+    var rptThresh=ika?IKACAP:(etaa?ETAAMSGCAP:CAP);
     var total=0,exc=[],monthCapped={};
     for(var k in ms){
       var d=ms[k],capped=Math.min(d,cap);
@@ -1192,7 +1258,7 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
             pp.push('\\u039C\\u03AE\\u03BD\\u03B1\\u03C2 '+ms+' '+e.y+': '+Math.round(e.days)+' \\u03B7\\u03BC\\u03AD\\u03C1\\u03B5\\u03C2 (\\u03CC\\u03C1\\u03B9\\u03BF '+e.limit+', \\u03C5\\u03C0\\u03AD\\u03C1\\u03B2\\u03B1\\u03C3\\u03B7 +'+ov+')');
             return esc(pp.join(' | '));
           });
-          exEl.innerHTML='<strong>\\u03A5\\u03C0\\u03AD\\u03C1\\u03B2\\u03B1\\u03C3\\u03B7 \\u03BF\\u03C1\\u03AF\\u03BF\\u03C5 \\u03B7\\u03BC\\u03B5\\u03C1\\u03CE\\u03BD \\u03B1\\u03BD\\u03AC \\u03BC\\u03AE\\u03BD\\u03B1</strong> (\\u03C0\\u03BB\\u03B1\\u03C6\\u03CC\\u03BD: \\u0399\\u039A\\u0391 30, \\u03C5\\u03C0\\u03CC\\u03BB\\u03BF\\u03B9\\u03C0\\u03B1 25):<br><br>'+exL.join('<br>');
+          exEl.innerHTML='<strong>\\u03A5\\u03C0\\u03AD\\u03C1\\u03B2\\u03B1\\u03C3\\u03B7 \\u03BF\\u03C1\\u03AF\\u03BF\\u03C5 \\u03B7\\u03BC\\u03B5\\u03C1\\u03CE\\u03BD \\u03B1\\u03BD\\u03AC \\u03BC\\u03AE\\u03BD\\u03B1</strong> (\\u03C0\\u03BB\\u03B1\\u03C6\\u03CC\\u03BD: \\u0399\\u039A\\u0391 31 \\u03B7\\u03BC./\\u03BC\\u03AE\\u03BD\\u03B1, \\u0395\\u03A4\\u0391\\u0391-\\u03A4\\u0391\\u039D/\\u039A\\u0395\\u0391\\u0394 \\u03BA\\u03B1\\u03B9 \\u03C5\\u03C0\\u03CC\\u03BB\\u03BF\\u03B9\\u03C0\\u03B1 25 \\u03B7\\u03BC./\\u03BC\\u03AE\\u03BD\\u03B1\\u00B7 \\u03BC\\u03AE\\u03BD\\u03C5\\u03BC\\u03B1 \\u03B3\\u03B9\\u03B1 \\u0395\\u03A4\\u0391\\u0391-\\u03A4\\u0391\\u039D/\\u039A\\u0395\\u0391\\u0394 \\u03BC\\u03CC\\u03BD\\u03BF \\u03CC\\u03C4\\u03B1\\u03BD &gt;30):<br><br>'+exL.join('<br>');
           exEl.style.display='block';
         }else{exEl.innerHTML='';exEl.style.display='none';}
       }
@@ -2637,8 +2703,9 @@ function initPersonalForm(){var i,y,o,o2;var daySel=document.getElementById('per
 function showTab(tabId){document.querySelectorAll('.tab-pane').forEach(function(p){p.classList.remove('active');});document.querySelectorAll('.nav-item').forEach(function(a){a.classList.remove('active');});var pane=document.getElementById('pane-'+tabId);var link=document.querySelector('.nav-item[data-tab="'+tabId+'"]');if(pane)pane.classList.add('active');if(link)link.classList.add('active');var main=document.querySelector('.main-content');if(main){if(tabId==='count')main.classList.add('count-tab-active');else main.classList.remove('count-tab-active');}var tip=document.getElementById('apodoxes-tooltip');if(tip){tip.classList.remove('visible');tip.setAttribute('aria-hidden','true');}var tipP=document.getElementById('tl-paketo-tooltip');if(tipP){tipP.classList.remove('visible');tipP.setAttribute('aria-hidden','true');}if(tabId==='count')applyApodoxesTooltips();if(tabId==='timeline'){buildPaketoTimeline();}}
 document.addEventListener('DOMContentLoaded',function(){applyApodoxesTooltips();applyDescriptionColumn();initPersonalForm();buildPaketoTimeline();});
 function buildSinglePrintDoc(title,bodyContent){var styles=typeof _printStyles==='string'?_printStyles:'';var name=(typeof _clientName==='string'?_clientName:'').trim();var fullTitle=(name?name+' - '+(title||'')+' - ':(title||'ATLAS')+' - ')+(typeof _printBrandSuffix==='string'?_printBrandSuffix:'Atlas');var safeTitle=fullTitle.replace(/</g,'&lt;').replace(/"/g,'&quot;');var safeName=name.replace(/</g,'&lt;').replace(/&/g,'&amp;');var nameBlock=name?'<div class="prt-name">'+safeName+'</div>':'';return'<!DOCTYPE html><html lang="el"><head><meta charset="utf-8"><title>'+safeTitle+'</title><link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,200..900;1,200..900&display=swap" rel="stylesheet"><style>'+styles+'</style></head><body>'+nameBlock+'<div class="prt-title">Ασφαλιστικό Βιογραφικό '+(typeof _printBrandSuffix==='string'?_printBrandSuffix:'Atlas')+'</div>'+bodyContent+'<div style="margin-top:12px;font-size:9px;color:#888;text-align:left;">© Syntaksi Pro - my advisor</div></body></html>';}
-function printSection(el){if(typeof updatePersonalTitle==='function')updatePersonalTitle();var source=el.classList&&el.classList.contains('print-section')?el:(el.closest&&el.closest('.print-section')||el);var clone=source.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});var title=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'ATLAS';var bodyContent;var totalsTable=clone.querySelector('#totals-filter-table');if(totalsTable){var h2Text=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'Σύνολα';bodyContent='<div class="print-section"><h2>'+h2Text.replace(/</g,'&lt;')+'</h2>'+totalsTable.outerHTML+'</div>';}else{bodyContent=clone.outerHTML;}var printDoc=buildSinglePrintDoc(title,bodyContent);var w=window.open('','_blank');w.document.write(printDoc);w.document.close();w.focus();setTimeout(function(){w.print();w.close();},400);}
-function openTableFs(el){var overlay=document.createElement('div');overlay.className='table-fullscreen';overlay.id='fs-overlay';var section=el.classList.contains('print-section')?el:el.closest('.print-section');var source=section||el;var heading=source.querySelector?source.querySelector('h2'):null;var titleText=heading?heading.textContent:'Πίνακας';var hasInteractive=source.querySelector&&source.querySelector('script');var toolbar=document.createElement('div');toolbar.className='fs-toolbar';toolbar.innerHTML='<span class="fs-title">'+titleText+'</span>';var actions=document.createElement('div');actions.className='fs-toolbar-actions';var printBtn=document.createElement('button');printBtn.className='fs-print-btn';printBtn.innerHTML='🖨 Εκτύπωση';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(){var bodyEl=overlay.querySelector('.fs-body');if(bodyEl){var clone=bodyEl.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});var totalsTable=clone.querySelector('#totals-filter-table');var bodyContent=totalsTable?'<div class="print-section"><h2>'+(titleText.replace(/</g,'&lt;')||'Σύνολα')+'</h2>'+totalsTable.outerHTML+'</div>':clone.innerHTML;var printDoc=buildSinglePrintDoc(titleText,bodyContent);var w=window.open('','_blank');w.document.write(printDoc);w.document.close();w.focus();setTimeout(function(){w.print();w.close();},400);}};actions.appendChild(printBtn);var closeBtn=document.createElement('button');closeBtn.className='fs-close';closeBtn.innerHTML='✕';closeBtn.title='Κλείσιμο (Esc)';closeBtn.onclick=closeTableFs;actions.appendChild(closeBtn);toolbar.appendChild(actions);var body=document.createElement('div');body.className='fs-body';if(hasInteractive){var placeholder=document.createElement('div');placeholder.id='fs-placeholder';placeholder.style.display='none';source.parentNode.insertBefore(placeholder,source);body.appendChild(source);overlay._fsSource=source;overlay._fsPlaceholder=placeholder;}else{body.appendChild(source.cloneNode(true));}overlay.appendChild(toolbar);overlay.appendChild(body);document.body.appendChild(overlay);document.body.style.overflow='hidden';}
+function _stripHiddenCountForPrint(root){if(!root||!root.querySelectorAll)return;var sec=root.id==='count-section'?root:root.querySelector('#count-section');if(!sec||!sec.querySelector('#count-tables-wrapper'))return;sec.querySelectorAll('script').forEach(function(s){s.remove();});sec.querySelectorAll('#count-tables-wrapper .year-section').forEach(function(ys){if(ys.style.display==='none')ys.remove();});sec.querySelectorAll('#count-tables-wrapper tbody tr').forEach(function(tr){if(tr.style.display==='none')tr.remove();});}
+function printSection(el){if(typeof updatePersonalTitle==='function')updatePersonalTitle();var source=el.classList&&el.classList.contains('print-section')?el:(el.closest&&el.closest('.print-section')||el);var clone=source.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var title=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'ATLAS';var bodyContent;var totalsTable=clone.querySelector('#totals-filter-table');if(totalsTable){var h2Text=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'Σύνολα';bodyContent='<div class="print-section"><h2>'+h2Text.replace(/</g,'&lt;')+'</h2>'+totalsTable.outerHTML+'</div>';}else{bodyContent=clone.outerHTML;}var printDoc=buildSinglePrintDoc(title,bodyContent);var w=window.open('','_blank');w.document.write(printDoc);w.document.close();w.focus();setTimeout(function(){w.print();w.close();},400);}
+function openTableFs(el){var overlay=document.createElement('div');overlay.className='table-fullscreen';overlay.id='fs-overlay';var section=el.classList.contains('print-section')?el:el.closest('.print-section');var source=section||el;var heading=source.querySelector?source.querySelector('h2'):null;var titleText=heading?heading.textContent:'Πίνακας';var hasInteractive=source.querySelector&&source.querySelector('script');var toolbar=document.createElement('div');toolbar.className='fs-toolbar';toolbar.innerHTML='<span class="fs-title">'+titleText+'</span>';var actions=document.createElement('div');actions.className='fs-toolbar-actions';var printBtn=document.createElement('button');printBtn.className='fs-print-btn';printBtn.innerHTML='🖨 Εκτύπωση';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(){var bodyEl=overlay.querySelector('.fs-body');if(bodyEl){var clone=bodyEl.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var totalsTable=clone.querySelector('#totals-filter-table');var bodyContent=totalsTable?'<div class="print-section"><h2>'+(titleText.replace(/</g,'&lt;')||'Σύνολα')+'</h2>'+totalsTable.outerHTML+'</div>':clone.innerHTML;var printDoc=buildSinglePrintDoc(titleText,bodyContent);var w=window.open('','_blank');w.document.write(printDoc);w.document.close();w.focus();setTimeout(function(){w.print();w.close();},400);}};actions.appendChild(printBtn);var closeBtn=document.createElement('button');closeBtn.className='fs-close';closeBtn.innerHTML='✕';closeBtn.title='Κλείσιμο (Esc)';closeBtn.onclick=closeTableFs;actions.appendChild(closeBtn);toolbar.appendChild(actions);var body=document.createElement('div');body.className='fs-body';if(hasInteractive){var placeholder=document.createElement('div');placeholder.id='fs-placeholder';placeholder.style.display='none';source.parentNode.insertBefore(placeholder,source);body.appendChild(source);overlay._fsSource=source;overlay._fsPlaceholder=placeholder;}else{body.appendChild(source.cloneNode(true));}overlay.appendChild(toolbar);overlay.appendChild(body);document.body.appendChild(overlay);document.body.style.overflow='hidden';}
 function closeTableFs(){var overlay=document.getElementById('fs-overlay');if(overlay){if(overlay._fsSource&&overlay._fsPlaceholder){overlay._fsPlaceholder.parentNode.insertBefore(overlay._fsSource,overlay._fsPlaceholder);overlay._fsPlaceholder.remove();}overlay.remove();document.body.style.overflow='';}}
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeTableFs();});
 function openPrint(){if(typeof updatePersonalTitle==='function')updatePersonalTitle();var safeName=(typeof _clientName==='string'?_clientName:'').trim().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');var html=_printHtml;if(safeName)html=_printHtml.replace(/<body>/,'<body><div class="prt-name">'+safeName+'</div>');var blob=new Blob([html],{type:'text/html;charset=utf-8'});var url=URL.createObjectURL(blob);window.open(url,'_blank');}
