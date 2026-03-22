@@ -4203,16 +4203,25 @@ def _compute_koinwnikoi_poroi_column(syn_f: pd.DataFrame, tipo_sel: str) -> pd.S
 
 
 @st.cache_data(show_spinner=False)
+def _load_dtk_table_json_cached(path_str: str, mtime_ns: int):
+    """Εσωτερικό: cache μόνο επιτυχημένου φορτώματος· κλειδί mtime ώστε νέο/ενημερωμένο αρχείο να ξαναφορτώνει."""
+    try:
+        with open(path_str, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
 def _load_dtk_table_json():
     """Φόρτωση dtk_table.json από τη ρίζα του repo (συντελεστές ΔΤΚ ανά έτος αναφοράς / έτος εισφοράς)."""
     p = REPO_ROOT / "dtk_table.json"
     if not p.is_file():
         return None
     try:
-        with open(p, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
+        mtime_ns = p.stat().st_mtime_ns
+    except OSError:
         return None
+    return _load_dtk_table_json_cached(str(p.resolve()), mtime_ns)
 
 
 def _dtk_coeff_lookup(dtk_doc: dict | None, ref_year: str, contrib_year: int) -> float | None:
