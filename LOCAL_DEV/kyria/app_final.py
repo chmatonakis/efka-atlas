@@ -20,6 +20,8 @@ import subprocess
 import datetime
 import html
 import json
+import math
+from contextlib import nullcontext
 
 # Ρίζα repo: LOCAL_DEV/kyria ή LOCAL_DEV/lite → ATLAS root για imports (html_viewer_builder κ.λπ.)
 _APP_DIR = Path(__file__).resolve().parent
@@ -28,8 +30,15 @@ REPO_ROOT = (
     if (_APP_DIR.name in ("kyria", "lite") and _APP_DIR.parent.name == "LOCAL_DEV")
     else _APP_DIR
 )
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+# Σειρά διαδρομών: πρώτα φάκελος εφαρμογής (kyria/lite), μετά ρίζα repo — για `html_viewer_builder` → `app_final`
+for _p_rm in (str(_APP_DIR), str(REPO_ROOT)):
+    if _p_rm in sys.path:
+        try:
+            sys.path.remove(_p_rm)
+        except ValueError:
+            pass
+for _p_ins in (str(REPO_ROOT), str(_APP_DIR)):
+    sys.path.insert(0, _p_ins)
 
 # Προσπάθεια εισαγωγής διαφορετικών PDF readers
 try:
@@ -75,6 +84,7 @@ def parse_birthdate_and_age(birthdate_str: str) -> tuple[str, int | None]:
             continue
     return raw, None
 
+
 # Ρύθμιση σελίδας (Κυρία)
 st.set_page_config(
     page_title="Ασφαλιστικό βιογραφικό ΑΤΛΑΣ",
@@ -83,15 +93,43 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Global CSS
-st.markdown("""
+# Global CSS (Fira Sans — ίδια με εκτυπώσεις / χρονολόγια· Streamlit ενίοτε εφαρμόζει serif σε τίτλους)
+st.markdown(
+    """
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700;800&display=swap');
+html, body, .stApp, [data-testid="stAppViewContainer"] {
+  font-family: "Fira Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+}
+/* Κεφαλίδες/κείμενο Streamlit (st.markdown, caption, tabs) — override theme serif */
+.stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+.stApp p, .stApp li, .stApp label,
+.stApp [data-testid="stMarkdownContainer"],
+.stApp [data-testid="stMarkdownContainer"] p,
+.stApp [data-testid="stMarkdownContainer"] span,
+.stApp [data-testid="stMarkdownContainer"] li,
+.stApp [data-testid="stCaption"],
+.stApp [data-testid="stHeading"] h1,
+.stApp [data-testid="stHeading"] h2,
+.stApp [data-testid="stHeading"] h3,
+.stApp [data-baseweb="tab"],
+.stApp .stButton > button {
+  font-family: "Fira Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+}
+.stApp pre, .stApp code, .stApp .stCodeBlock {
+  font-family: ui-monospace, "Cascadia Code", "Segoe UI Mono", Consolas, monospace !important;
+}
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: #f1f1f1; }
 ::-webkit-scrollbar-thumb { background: #888; border-radius: 5px; }
 ::-webkit-scrollbar-thumb:hover { background: #555; }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 components.html("""
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-34VGNYK55C"></script>
 <script>
@@ -361,12 +399,48 @@ div[data-testid="stExpander"] details summary p {
     font-family: var(--font-main) !important;
 }
 
-/* --- Tabs --- */
-.stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
-    font-size: 1.15rem !important; font-weight: 600 !important;
-    font-family: var(--font-main) !important;
+/* --- Tabs: συμπαγή γραμμή, μικρότερο κείμενο, λιγότερο κενό --- */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0.2rem 0.45rem !important;
+    flex-wrap: wrap !important;
+    row-gap: 0.25rem !important;
+    border-bottom: 1px solid var(--color-border) !important;
+    padding-bottom: 0 !important;
 }
-.stTabs [data-baseweb="tab-list"] { gap: 1.5rem !important; }
+.stTabs [data-baseweb="tab-list"] button {
+    padding: 0.32rem 0.55rem 0.42rem !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    border-radius: 8px 8px 0 0 !important;
+    border: 1px solid transparent !important;
+    border-bottom: none !important;
+    background: transparent !important;
+    transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease !important;
+}
+.stTabs [data-baseweb="tab-list"] button:hover {
+    background: rgba(111, 66, 193, 0.06) !important;
+}
+.stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
+    background: var(--color-surface) !important;
+    border-color: var(--color-border) !important;
+    border-bottom: 2px solid var(--color-primary) !important;
+    margin-bottom: -1px !important;
+    box-shadow: 0 -1px 0 var(--color-surface) !important;
+}
+.stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
+    font-size: 0.95rem !important;
+    font-weight: 700 !important;
+    line-height: 1.2 !important;
+    letter-spacing: -0.015em !important;
+    margin: 0 !important;
+    font-family: var(--font-main) !important;
+    color: #1e293b !important;
+    -webkit-font-smoothing: antialiased !important;
+}
+.stTabs [data-baseweb="tab-list"] button[aria-selected="true"] [data-testid="stMarkdownContainer"] p {
+    color: #4c1d95 !important;
+    font-weight: 800 !important;
+}
 
 /* --- Metrics --- */
 div[data-testid="stMetric"] label {
@@ -609,6 +683,27 @@ def build_yearly_print_html(
         vals = [str(dataframe.iloc[row_idx].get(c, '')).strip() for c in all_group_cols]
         return ' | '.join(v for v in vals if v)
 
+    # Γραμμές συνόλου στην καταμέτρηση έχουν κενό ΕΤΟΣ· το έτος είναι στην ΠΕΡΙΓΡΑΦΗ («ΣΥΝΟΛΟ 2020 — …»).
+    _total_desc_year = re.compile(r"ΣΥΝΟΛΟ\s+(\d{4})")
+    _last_effective: str | None = None
+
+    def _effective_group_key(row_idx: int) -> str:
+        nonlocal _last_effective
+        k = _group_key(row_idx)
+        if k:
+            _last_effective = k
+            return k
+        desc = str(dataframe.iloc[row_idx].get("ΠΕΡΙΓΡΑΦΗ", "") or "")
+        md = _total_desc_year.search(desc)
+        if md:
+            _last_effective = md.group(1)
+            return _last_effective
+        if _last_effective:
+            return _last_effective
+        out = f"row_{row_idx}"
+        _last_effective = out
+        return out
+
     sections: list[str] = []
     current_key: str | None = None
     current_rows: list[int] = []
@@ -621,9 +716,9 @@ def build_yearly_print_html(
         if is_empty_row:
             continue
 
-        row_key = _group_key(idx)
-        if row_key and row_key != current_key:
-            if current_rows and current_key:
+        row_key = _effective_group_key(idx)
+        if current_key is None or row_key != current_key:
+            if current_rows and current_key is not None:
                 sections.append(_render_year_section(
                     dataframe, current_rows, current_key, all_group_cols,
                     style_rows, wrap_cells, bold_columns, col_width_overrides, collapse_cols
@@ -704,7 +799,12 @@ def _render_year_section(
     )
 
 
-def wrap_print_html(title: str, body_html: str, auto_print: bool = True, scale: float = 1.0) -> str:
+def wrap_print_html(
+    title: str,
+    body_html: str,
+    auto_print: bool = True,
+    scale: float = 1.0,
+) -> str:
     # Μην βάζετε backslash μέσα σε {…} σε f-string (SyntaxError σε Python < 3.12)
     _body_onload = ' onload="window.print()"' if auto_print else ""
     return f"""<!DOCTYPE html>
@@ -851,6 +951,7 @@ def build_print_html(
     )
     return wrap_print_html(title, body_html, auto_print, scale)
 
+
 def render_print_button(
     button_key: str,
     title: str,
@@ -865,9 +966,33 @@ def render_print_button(
     bold_columns: list[str] | None = None,
     col_width_overrides: dict[str, str] | None = None,
     footer_note: str | None = None,
+    download_data: str | bytes | None = None,
+    download_file_name: str = "export.json",
+    download_label: str = "Λήψη",
+    download_key: str | None = None,
+    download_mime: str = "application/json",
 ) -> None:
-    col_spacer, col_btn = st.columns([1, 0.12])
-    with col_btn:
+    if download_data is not None:
+        # Λήψη πριν την εκτύπωση· ευρύτερη στήλη ώστε το κείμενο να μην ανασπάται
+        _col_sp, col_download, col_print = st.columns([1, 0.38, 0.12])
+    else:
+        _col_sp, col_print = st.columns([1, 0.12])
+        col_download = None
+
+    if download_data is not None and col_download is not None:
+        with col_download:
+            _dl_lbl = download_label.replace(" ", "\u00a0")
+            st.download_button(
+                label=_dl_lbl,
+                data=download_data,
+                file_name=download_file_name,
+                mime=download_mime,
+                use_container_width=False,
+                key=download_key or f"{button_key}_download",
+                type="primary",
+            )
+
+    with col_print:
         if st.button("Εκτύπωση", key=button_key, use_container_width=True):
             # Μοναδικό nonce ώστε το component να επανα-τοποθετείται και να εκτελείται κάθε φορά
             nonce_key = f"_print_nonce_{button_key}"
@@ -1734,7 +1859,7 @@ def extract_efka_data(uploaded_file):
             all_tables[i] = normalize_column_names(all_tables[i])
         
         # Συνδυάζουμε όλα τα DataFrames
-        with st.spinner("Συνδυασμός δεδομένων..."):
+        with nullcontext():
             combined_df = pd.concat(all_tables, ignore_index=True)
         
         st.success(f"🎉 Συνολικά εξήχθησαν {len(combined_df)} γραμμές δεδομένων από {len(all_tables)} πίνακες")
@@ -2449,7 +2574,7 @@ def compute_complex_file_metrics(data_df: pd.DataFrame) -> tuple[int, int, int]:
         n_limits_25 = len(capped) if capped else 0
     except Exception:
         pass
-    # 3. Απλήρωτοι μήνες (από καταμέτρηση, 1995+, K/ΚΣ/ΜΕ)
+    # 3. Απλήρωτοι μήνες (από καταμέτρηση, 1995+, K/ΚΣ/ΜΕ + ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ Κ)
     try:
         days_df, contrib_df = get_count_allocation(data_df)
         if not days_df.empty and not contrib_df.empty:
@@ -2467,6 +2592,8 @@ def compute_complex_file_metrics(data_df: pd.DataFrame) -> tuple[int, int, int]:
                 cond_tsmede = (K.isin(['ΚΣ', 'KS'])) & (T.str.contains('ΤΣΜΕΔΕ|TSMEDE', na=False))
                 cond_oga = (K.isin(['K', 'Κ'])) & (T.str.contains('ΟΓΑ|OGA', na=False))
                 cond_tsay = (K.isin(['ME', 'ΜΕ'])) & (T.str.contains('ΤΣΑΥ|TSAY', na=False))
+                cond_etaa_tan = (K.isin(['K', 'Κ'])) & (T.str.contains('ΕΤΑΑ-ΤΑΝ|ETAA-TAN', na=False))
+                cond_etaa_kead = (K.isin(['K', 'Κ'])) & (T.str.contains('ΕΤΑΑ-ΚΕΑΔ|ETAA-KEAD', na=False))
                 month_cols_int = [c for c in days_df.columns if isinstance(c, int)] or list(range(1, 13))
                 def _count_unpaid(days_row, contrib_row):
                     cnt = 0
@@ -2478,7 +2605,7 @@ def compute_complex_file_metrics(data_df: pd.DataFrame) -> tuple[int, int, int]:
                         except (TypeError, ValueError): d_val, c_val = 0, 0
                         if d_val > 0 and (c_val == 0 or abs(c_val) < 1e-6): cnt += 1
                     return cnt
-                for cond in [cond_oaee, cond_tsmede, cond_oga, cond_tsay]:
+                for cond in [cond_oaee, cond_tsmede, cond_oga, cond_tsay, cond_etaa_tan, cond_etaa_kead]:
                     if cond.any():
                         sub_d = days_df.loc[cond].reset_index(drop=True)
                         sub_c = contrib_df.loc[cond].reset_index(drop=True)
@@ -2514,7 +2641,7 @@ def compute_summary_capped_days_by_group(
     group_keys: list[str],
     month_days: int = 25,
     year_days: int = 300,
-    ika_month_days: int = 30,
+    ika_month_days: int = 31,
     from_dt: pd.Timestamp | None = None,
     to_dt: pd.Timestamp | None = None
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -2605,9 +2732,9 @@ def compute_summary_capped_days_by_group(
     per_month.loc[is_ika, 'Όριο'] = ika_month_days
     per_month['Συνολικές_Ημέρες_cap'] = per_month[['Συνολικές_Ημέρες', 'Όριο']].min(axis=1)
 
-    # Μήνυμα υπέρβασης: ΙΚΑ και ΕΤΑΑ-ΤΑΝ/ΕΤΑΑ-ΚΕΑΔ μόνο όταν > 30 ημέρες, υπόλοιπα όταν > 25
+    # Πλαφόν υπολογισμού: 25/μήνα (ΙΚΑ 31). ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ: μήνυμα υπέρβασης μόνο όταν >30 ημ./μήνα (ξεχωριστό από πλαφόν ΙΚΑ).
     per_month['Όριο_μήνυμα'] = per_month['Όριο']
-    per_month.loc[is_etaa_tan_kead, 'Όριο_μήνυμα'] = ika_month_days
+    per_month.loc[is_etaa_tan_kead, 'Όριο_μήνυμα'] = 30
     exceeded = per_month[per_month['Συνολικές_Ημέρες'] > per_month['Όριο_μήνυμα']].copy()
     if not exceeded.empty:
         exceeded = exceeded.rename(columns={'Συνολικές_Ημέρες': 'Ημέρες'})
@@ -2625,7 +2752,7 @@ def compute_summary_capped_dk(
     group_keys: list[str],
     month_days: int = 25,
     year_days: int = 300,
-    ika_month_days: int = 30,
+    ika_month_days: int = 31,
     from_dt: pd.Timestamp | None = None,
     to_dt: pd.Timestamp | None = None,
     description_map: dict | None = None
@@ -3321,6 +3448,8 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
                 cond_tsmede = (K.isin(['ΚΣ', 'KS'])) & (T.str.contains('ΤΣΜΕΔΕ|TSMEDE', na=False))
                 cond_oga = (K.isin(['K', 'Κ'])) & (T.str.contains('ΟΓΑ|OGA', na=False))
                 cond_tsay = (K.isin(['ME', 'ΜΕ'])) & (T.str.contains('ΤΣΑΥ|TSAY', na=False))
+                cond_etaa_tan = (K.isin(['K', 'Κ'])) & (T.str.contains('ΕΤΑΑ-ΤΑΝ|ETAA-TAN', na=False))
+                cond_etaa_kead = (K.isin(['K', 'Κ'])) & (T.str.contains('ΕΤΑΑ-ΚΕΑΔ|ETAA-KEAD', na=False))
                 month_cols_int = [c for c in days_df.columns if isinstance(c, int)]
                 if not month_cols_int:
                     month_cols_int = list(range(1, 13))
@@ -3355,10 +3484,12 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
                 f_tsmede = _sum_unpaid_for_cond(cond_tsmede, "ΤΣΜΕΔΕ (ΚΣ)")
                 f_oga = _sum_unpaid_for_cond(cond_oga, "ΟΓΑ (Κ)")
                 f_tsay = _sum_unpaid_for_cond(cond_tsay, "ΤΣΑΥ (ΜΕ)")
-                all_funds = [x for x in [f_oaee, f_tsmede, f_oga, f_tsay] if x]
+                f_etaa_tan = _sum_unpaid_for_cond(cond_etaa_tan, "ΕΤΑΑ-ΤΑΝ (Κ)")
+                f_etaa_kead = _sum_unpaid_for_cond(cond_etaa_kead, "ΕΤΑΑ-ΚΕΑΔ (Κ)")
+                all_funds = [x for x in [f_oaee, f_tsmede, f_oga, f_tsay, f_etaa_tan, f_etaa_kead] if x]
                 if all_funds:
                     details_msg = ", ".join(all_funds) + " με ημέρες αλλά χωρίς εισφορές."
-                    any_cond = cond_oaee | cond_tsmede | cond_oga | cond_tsay
+                    any_cond = cond_oaee | cond_tsmede | cond_oga | cond_tsay | cond_etaa_tan | cond_etaa_kead
                     sample_d = days_df.loc[any_cond].reset_index(drop=True)
                     sample_c = contrib_df.loc[any_cond].reset_index(drop=True)
                     unpaid_pairs = []  # (year, month) για ταξινόμηση
@@ -3770,7 +3901,7 @@ def build_summary_grouped_display(summary_df: pd.DataFrame, source_df: pd.DataFr
         grouped['Μήνες'].fillna(0) * month_days +
         grouped['Έτη'].fillna(0) * year_days
     )
-    capped_days, _ = compute_summary_capped_days_by_group(summary_df, group_keys, month_days=month_days, year_days=year_days, ika_month_days=30)
+    capped_days, _ = compute_summary_capped_days_by_group(summary_df, group_keys, month_days=month_days, year_days=year_days, ika_month_days=31)
     if not capped_days.empty:
         merge_keys = [k for k in group_keys if k in capped_days.columns]
         grouped = grouped.merge(capped_days, on=merge_keys, how='left')
@@ -3931,10 +4062,405 @@ def get_count_allocation(count_df: pd.DataFrame, description_map: dict[str, str]
     return days_out, contrib_out
 
 
-def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] | None = None, show_count_totals_only: bool = False):
+def insurance_kind_classify_count(typos) -> str | None:
+    s = str(typos).strip().upper()
+    if 'ΜΙΣΘΩΤΗ' in s and 'ΜΗ ΜΙΣΘΩΤΗ' not in s and not s.startswith('ΜΗ '):
+        return 'ΜΙΣΘΩΤΗ'
+    if ('ΜΗ' in s and 'ΜΙΣΘΩΤΗ' in s) or ('NON' in s and 'SAL' in s):
+        return 'ΜΗ ΜΙΣΘΩΤΗ'
+    return None
+
+
+def tameio_monthly_cap_days_count(tameio_val: str) -> float:
+    t = str(tameio_val).upper()
+    if 'ΙΚΑ' in t or 'IKA' in t:
+        return 31.0
+    return 25.0
+
+
+def compute_kind_monthly_capped_from_c_df(c_df_src: pd.DataFrame, year: int, kind_code: str | None) -> dict[int, float]:
+    """Μηνιαίες ημέρες με πλαφόν ανά ταμείο (ΙΚΑ: 31, λοιπά: 25), μετά άθροιση ανά μήνα."""
+    sub = c_df_src[c_df_src['ΕΤΟΣ'] == year].copy()
+    if sub.empty:
+        return {m: 0.0 for m in range(1, 13)}
+    sub['_k'] = sub['ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ'].apply(insurance_kind_classify_count)
+    if kind_code is not None:
+        sub = sub[sub['_k'] == kind_code]
+    if sub.empty:
+        return {m: 0.0 for m in range(1, 13)}
+    g = sub.groupby(['ΤΑΜΕΙΟ', 'Μήνας_Num'], as_index=False)['Ημέρες'].sum()
+    g['_cap'] = g['ΤΑΜΕΙΟ'].apply(tameio_monthly_cap_days_count)
+    g['_capped'] = g.apply(
+        lambda r: min(float(r['Ημέρες']), float(r['_cap'])),
+        axis=1,
+    )
+    by_m = g.groupby('Μήνας_Num')['_capped'].sum()
+    return {m: float(by_m.get(m, 0.0) or 0.0) for m in range(1, 13)}
+
+
+def build_syntaksi_annual_table(c_df: pd.DataFrame) -> pd.DataFrame:
+    """Πίνακας ανά έτος: ημέρες μισθωτή/μη μισθωτή (με πλαφόν), μικτές μόνο μισθωτή, εισφορές μόνο μη μισθωτή, τεκμαρτές (εισφορές μη μισθωτή×5), συνολικές αποδοχές (μικτές μισθωτή+τεκμαρτές)."""
+    if c_df is None or c_df.empty:
+        return pd.DataFrame()
+    years = sorted({int(y) for y in c_df['ΕΤΟΣ'].dropna().unique()})
+    rows = []
+    for y in years:
+        md_m = compute_kind_monthly_capped_from_c_df(c_df, y, 'ΜΙΣΘΩΤΗ')
+        md_nm = compute_kind_monthly_capped_from_c_df(c_df, y, 'ΜΗ ΜΙΣΘΩΤΗ')
+        days_m = sum(md_m.values())
+        days_nm = sum(md_nm.values())
+        sub = c_df[c_df['ΕΤΟΣ'] == y].copy()
+        sub['_k'] = sub['ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ'].apply(insurance_kind_classify_count)
+        gross_m = float(sub[sub['_k'] == 'ΜΙΣΘΩΤΗ']['Μικτές_Part'].sum()) if 'Μικτές_Part' in sub.columns else 0.0
+        contrib_t = (
+            float(sub[sub['_k'] == 'ΜΗ ΜΙΣΘΩΤΗ']['Εισφορές_Part'].sum())
+            if 'Εισφορές_Part' in sub.columns
+            else 0.0
+        )
+        tekmark = contrib_t * 5.0
+        rows.append({
+            'Έτος': y,
+            'Σύνολο ημερών (μισθωτή)': days_m,
+            'Συνολικές μικτές αποδοχές': gross_m,
+            'Σύνολο ημερών (μη μισθωτή)': days_nm,
+            'Συνολικές εισφορές': contrib_t,
+            'Τεκμαρτές αποδοχές': tekmark,
+            'Συνολικές αποδοχές': gross_m + tekmark,
+        })
+    return pd.DataFrame(rows)
+
+
+SYN_TAXI_COLUMN_ORDER = [
+    'Έτος',
+    'Σύνολο ημερών (μισθωτή)',
+    'Συνολικές μικτές αποδοχές',
+    'Σύνολο ημερών (μη μισθωτή)',
+    'Συνολικές εισφορές',
+    'Κοινωνικοί Πόροι',
+    'Τεκμαρτές αποδοχές',
+    'Συνολικές αποδοχές',
+    'ΔΤΚ',
+    'Τελικές Συντ. Αποδοχές',
+]
+
+# ΚΟΙΝΩΝΙΚΟΙ ΠΟΡΟΙ (€) — πίνακας αναφοράς ανά έτος (ΔΙΚΗΓΟΡΟΙ / ΟΑΕΕ / ΤΣΜΕΔΕ)
+koinwnikoi_table: dict[int, dict[str, float]] = {
+    2002: {"ΔΙΚΗΓΟΡΟΙ": 44.17, "ΟΑΕΕ": 3.71, "ΤΣΜΕΔΕ": 48.32},
+    2003: {"ΔΙΚΗΓΟΡΟΙ": 53.45, "ΟΑΕΕ": 3.61, "ΤΣΜΕΔΕ": 57.57},
+    2004: {"ΔΙΚΗΓΟΡΟΙ": 607.59, "ΟΑΕΕ": 3.59, "ΤΣΜΕΔΕ": 52.65},
+    2005: {"ΔΙΚΗΓΟΡΟΙ": 143.90, "ΟΑΕΕ": 3.62, "ΤΣΜΕΔΕ": 40.19},
+    2006: {"ΔΙΚΗΓΟΡΟΙ": 166.88, "ΟΑΕΕ": 3.55, "ΤΣΜΕΔΕ": 46.27},
+    2007: {"ΔΙΚΗΓΟΡΟΙ": 191.06, "ΟΑΕΕ": 6.54, "ΤΣΜΕΔΕ": 62.01},
+    2008: {"ΔΙΚΗΓΟΡΟΙ": 202.56, "ΟΑΕΕ": 6.32, "ΤΣΜΕΔΕ": 57.80},
+    2009: {"ΔΙΚΗΓΟΡΟΙ": 307.88, "ΟΑΕΕ": 6.48, "ΤΣΜΕΔΕ": 89.49},
+    2010: {"ΔΙΚΗΓΟΡΟΙ": 165.39, "ΟΑΕΕ": 1.28, "ΤΣΜΕΔΕ": 67.15},
+    2011: {"ΔΙΚΗΓΟΡΟΙ": 133.41, "ΟΑΕΕ": 1.03, "ΤΣΜΕΔΕ": 40.73},
+    2012: {"ΔΙΚΗΓΟΡΟΙ": 106.46, "ΟΑΕΕ": 2.40, "ΤΣΜΕΔΕ": 35.35},
+    2013: {"ΔΙΚΗΓΟΡΟΙ": 96.18, "ΟΑΕΕ": 4.33, "ΤΣΜΕΔΕ": 26.31},
+    2014: {"ΔΙΚΗΓΟΡΟΙ": 66.53, "ΟΑΕΕ": 0.01, "ΤΣΜΕΔΕ": 28.15},
+    2015: {"ΔΙΚΗΓΟΡΟΙ": 59.30, "ΟΑΕΕ": 0.00, "ΤΣΜΕΔΕ": 13.03},
+    2016: {"ΔΙΚΗΓΟΡΟΙ": 24.12, "ΟΑΕΕ": 0.00, "ΤΣΜΕΔΕ": 3.18},
+}
+
+KOINWNIKOI_TIPO_OPTIONS = ("ΟΧΙ", "ΔΙΚΗΓΟΡΟΙ", "ΟΑΕΕ", "ΤΣΜΕΔΕ")
+
+
+def _compute_koinwnikoi_poroi_column(syn_f: pd.DataFrame, tipo_sel: str) -> pd.Series:
+    """(ποσό πίνακα / 25) × ημέρες μη μισθωτή (2002–2016). Κενό αν ΟΧΙ, εκτός εύρους, 0 ημέρες ή μηδενικό αποτέλεσμα."""
+    n = len(syn_f)
+    if tipo_sel == "ΟΧΙ" or not tipo_sel:
+        return pd.Series([pd.NA] * n, index=syn_f.index, dtype=object)
+    if tipo_sel not in ("ΔΙΚΗΓΟΡΟΙ", "ΟΑΕΕ", "ΤΣΜΕΔΕ"):
+        return pd.Series([pd.NA] * n, index=syn_f.index, dtype=object)
+    out: list = []
+    nm_col = 'Σύνολο ημερών (μη μισθωτή)'
+    for _, row in syn_f.iterrows():
+        ey_raw = row.get('Έτος')
+        try:
+            ey = int(float(ey_raw))
+        except (TypeError, ValueError):
+            out.append(pd.NA)
+            continue
+        if ey < 2002 or ey > 2016:
+            out.append(pd.NA)
+            continue
+        row_tbl = koinwnikoi_table.get(ey)
+        if not row_tbl:
+            out.append(pd.NA)
+            continue
+        base = row_tbl.get(tipo_sel)
+        if base is None:
+            out.append(pd.NA)
+            continue
+        days_nm = pd.to_numeric(row.get(nm_col), errors='coerce')
+        if pd.isna(days_nm) or float(days_nm) == 0.0:
+            out.append(pd.NA)
+            continue
+        val = (float(base) / 25.0) * float(days_nm)
+        out.append(pd.NA if abs(val) < 1e-9 else val)
+    return pd.Series(out, index=syn_f.index)
+
+
+@st.cache_data(show_spinner=False)
+def _load_dtk_table_json():
+    """Φόρτωση dtk_table.json από τη ρίζα του repo (συντελεστές ΔΤΚ ανά έτος αναφοράς / έτος εισφοράς)."""
+    p = REPO_ROOT / "dtk_table.json"
+    if not p.is_file():
+        return None
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _dtk_coeff_lookup(dtk_doc: dict | None, ref_year: str, contrib_year: int) -> float | None:
+    """Επιστρέφει συντελεστή ΔΤΚ για έτος αναφοράς ref_year και έτος γραμμής contrib_year."""
+    if not dtk_doc or not isinstance(dtk_doc, dict):
+        return None
+    data = dtk_doc.get("data")
+    if not isinstance(data, dict):
+        return None
+    ref_key = str(ref_year).strip()
+    row = data.get(ref_key)
+    if row is None:
+        try:
+            row = data.get(str(int(ref_key)))
+        except ValueError:
+            row = None
+    if not isinstance(row, dict):
+        return None
+    cy = int(contrib_year)
+    v = row.get(str(cy))
+    if v is None:
+        v = row.get(cy)
+    try:
+        if v is None or v == "":
+            return None
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _append_exagora_footer_rows(
+    syn_f: pd.DataFrame,
+    dtk_doc: dict | None,
+    dtk_ref_sel: str,
+    poso_raw: str,
+    imeres_raw: str,
+    etos_ex_str: str,
+) -> pd.DataFrame:
+    """Κενή γραμμή + γραμμή «ΕΞΑΓΟΡΑ» με ποσό/ημέρες εξαγοράς, ΔΤΚ(έτος εξαγοράς), τεκμαρτές×5, τελικές×ΔΤΚ."""
+    syn_f = syn_f.copy() if syn_f is not None else pd.DataFrame()
+    cols = [c for c in SYN_TAXI_COLUMN_ORDER if c in syn_f.columns]
+    if not cols:
+        cols = list(SYN_TAXI_COLUMN_ORDER)
+        syn_f = pd.DataFrame(columns=cols)
+    else:
+        syn_f = syn_f[cols].copy()
+    empty_row = {c: pd.NA for c in cols}
+
+    raw_p = str(poso_raw or "").strip()
+    poso_f = None
+    if raw_p:
+        v = clean_numeric_value(raw_p, exclude_drx=True)
+        if v is not None:
+            poso_f = float(v)
+
+    imeres_t = str(imeres_raw or "").strip()
+    imeres_val = None
+    if imeres_t:
+        try:
+            imeres_val = float(imeres_t.replace(",", ".").replace(" ", ""))
+        except ValueError:
+            imeres_val = None
+
+    try:
+        etos_ex = int(str(etos_ex_str).strip())
+    except (ValueError, TypeError):
+        etos_ex = 2026
+
+    dtk_v = _dtk_coeff_lookup(dtk_doc, dtk_ref_sel, etos_ex)
+
+    tek = None
+    syn_ap_total = None
+    telikes = None
+    if poso_f is not None:
+        tek = poso_f * 5.0
+        syn_ap_total = 0.0 + tek
+        if dtk_v is not None:
+            telikes = float(syn_ap_total) * float(dtk_v)
+
+    ex_row = {c: pd.NA for c in cols}
+    ex_row['Έτος'] = 'ΕΞΑΓΟΡΑ'
+    ex_row['Σύνολο ημερών (μισθωτή)'] = imeres_val if imeres_val is not None else pd.NA
+    ex_row['Συνολικές μικτές αποδοχές'] = 0.0 if poso_f is not None else pd.NA
+    ex_row['Σύνολο ημερών (μη μισθωτή)'] = pd.NA
+    ex_row['Συνολικές εισφορές'] = poso_f if poso_f is not None else pd.NA
+    ex_row['Τεκμαρτές αποδοχές'] = tek if tek is not None else pd.NA
+    ex_row['Συνολικές αποδοχές'] = syn_ap_total if syn_ap_total is not None else pd.NA
+    ex_row['ΔΤΚ'] = dtk_v
+    ex_row['Τελικές Συντ. Αποδοχές'] = telikes if telikes is not None else pd.NA
+
+    return pd.concat([syn_f, pd.DataFrame([empty_row]), pd.DataFrame([ex_row])], ignore_index=True)
+
+
+def _append_syntaksi_grand_total_row(syn_f: pd.DataFrame) -> pd.DataFrame:
+    """Τελευταία γραμμή ΣΥΝΟΛΟ: αθροίσματα στηλών (ίδιο εύρος με την Καταμέτρηση για αριθμούς), χωρίς άθροισμα ΔΤΚ."""
+    if syn_f is None or syn_f.empty:
+        return syn_f
+    syn_f = syn_f.copy()
+    cols = list(syn_f.columns)
+    sub = syn_f[syn_f['Έτος'].notna()].copy()
+    total_row = {c: pd.NA for c in cols}
+    total_row['Έτος'] = 'ΣΥΝΟΛΟ'
+    _sum_cols = [
+        'Σύνολο ημερών (μισθωτή)',
+        'Σύνολο ημερών (μη μισθωτή)',
+        'Συνολικές μικτές αποδοχές',
+        'Συνολικές εισφορές',
+        'Κοινωνικοί Πόροι',
+        'Τεκμαρτές αποδοχές',
+        'Συνολικές αποδοχές',
+        'Τελικές Συντ. Αποδοχές',
+    ]
+    for c in _sum_cols:
+        if c in sub.columns:
+            s = pd.to_numeric(sub[c], errors='coerce')
+            total_row[c] = float(s.sum()) if s.notna().any() else pd.NA
+    if 'ΔΤΚ' in cols:
+        total_row['ΔΤΚ'] = pd.NA
+    return pd.concat([syn_f, pd.DataFrame([total_row])], ignore_index=True)
+
+
+def _syntaksi_summary_metrics_from_syn_f(syn_f: pd.DataFrame) -> tuple[float | None, float | None, float | None]:
+    """Από γραμμή ΣΥΝΟΛΟ: Μήνες=(ημ.μισθωτή+ημ.μη μισθωτή)/25, συντάξιμες=άθροισμα τελικών, μισθός=συντάξιμες/μήνες."""
+    if syn_f is None or syn_f.empty:
+        return None, None, None
+    row_tot = syn_f[syn_f['Έτος'].astype(str).str.strip() == 'ΣΥΝΟΛΟ']
+    if row_tot.empty:
+        return None, None, None
+    r = row_tot.iloc[0]
+    d_m = pd.to_numeric(r.get('Σύνολο ημερών (μισθωτή)'), errors='coerce')
+    d_nm = pd.to_numeric(r.get('Σύνολο ημερών (μη μισθωτή)'), errors='coerce')
+    d_m = float(d_m) if pd.notna(d_m) else 0.0
+    d_nm = float(d_nm) if pd.notna(d_nm) else 0.0
+    tot_days = d_m + d_nm
+    months = tot_days / 25.0 if tot_days else 0.0
+    tel = pd.to_numeric(r.get('Τελικές Συντ. Αποδοχές'), errors='coerce')
+    tel_f = float(tel) if pd.notna(tel) else None
+    syn_sal = (tel_f / months) if (tel_f is not None and months > 0) else None
+    return months, tel_f, syn_sal
+
+
+def _syntaksi_pro_num_field(value: float | int) -> dict[str, str | float | int]:
+    """Μορφή τιμής για Syntaksi Pro: value + type 'number' (string)."""
+    return {"value": value, "type": "number"}
+
+
+def _syntaksi_pro_text_field(value: str) -> dict[str, str]:
+    """Μορφή τιμής για Syntaksi Pro: value + type 'text'."""
+    return {"value": value, "type": "text"}
+
+
+def build_syntaksi_pro_json_str(
+    syn_f_core: pd.DataFrame,
+    dtk_doc: dict | None,
+    dtk_ref_sel: str,
+    poso_raw: str,
+    imeres_raw: str,
+    etos_ex_str: str,
+) -> str:
+    """
+    JSON για εισαγωγή σε Syntaksi Pro (βλ. ΟΔΗΓΙΕΣ_JSON_EXPORT_STREAMLIT.txt).
+    ika_YYYY = ημέρες μισθωτή, apodoxes_YYYY = συνολικές μικτές αποδοχές (μισθωτή).
+    elep_YYYY = ceil(ημέρες μη μισθωτή / 25) ως κείμενο, eisfores_YYYY = συνολικές εισφορές.
+    kerdi_YYYY: μόνο για 2017, 2018, 2019 — συνολικές εισφορές × 5 (πάντα ακριβώς τρία κλειδιά kerdi_*).
+    """
+    json_data: dict[str, dict[str, str | float | int]] = {}
+    _kerdi_years = (2017, 2018, 2019)
+    col_days = "Σύνολο ημερών (μισθωτή)"
+    col_days_nm = "Σύνολο ημερών (μη μισθωτή)"
+    col_gross = "Συνολικές μικτές αποδοχές"
+    col_eis = "Συνολικές εισφορές"
+    if syn_f_core is not None and not syn_f_core.empty and "Έτος" in syn_f_core.columns:
+        for _, row in syn_f_core.iterrows():
+            ey_raw = row.get("Έτος")
+            try:
+                if isinstance(ey_raw, str) and ey_raw.strip() in ("ΕΞΑΓΟΡΑ", "ΣΥΝΟΛΟ", ""):
+                    continue
+                y = int(float(ey_raw))
+            except (TypeError, ValueError):
+                continue
+            year_str = str(y)
+            dm = pd.to_numeric(row.get(col_days), errors="coerce")
+            ika_val = int(round(float(dm))) if pd.notna(dm) else 0
+            gr = pd.to_numeric(row.get(col_gross), errors="coerce")
+            apod_val = round(float(gr), 2) if pd.notna(gr) else 0.0
+            json_data[f"ika_{year_str}"] = _syntaksi_pro_num_field(ika_val)
+            json_data[f"apodoxes_{year_str}"] = _syntaksi_pro_num_field(apod_val)
+
+            d_nm = pd.to_numeric(row.get(col_days_nm), errors="coerce")
+            if pd.notna(d_nm) and float(d_nm) > 0:
+                elep_m = math.ceil(float(d_nm) / 25.0)
+                json_data[f"elep_{year_str}"] = _syntaksi_pro_text_field(str(int(elep_m)))
+            else:
+                json_data[f"elep_{year_str}"] = _syntaksi_pro_text_field("")
+
+            eis = pd.to_numeric(row.get(col_eis), errors="coerce")
+            eis_raw = float(eis) if pd.notna(eis) else 0.0
+            eis_val = round(eis_raw, 2)
+            json_data[f"eisfores_{year_str}"] = _syntaksi_pro_num_field(eis_val)
+            if y in _kerdi_years:
+                json_data[f"kerdi_{year_str}"] = _syntaksi_pro_num_field(round(eis_raw * 5.0, 2))
+
+    for _ky in _kerdi_years:
+        _ks = str(_ky)
+        if f"kerdi_{_ks}" not in json_data:
+            json_data[f"kerdi_{_ks}"] = _syntaksi_pro_num_field(0.0)
+
+    raw_p = str(poso_raw or "").strip()
+    poso_f = 0.0
+    if raw_p:
+        v = clean_numeric_value(raw_p, exclude_drx=True)
+        if v is not None:
+            poso_f = float(v)
+
+    imeres_t = str(imeres_raw or "").strip()
+    imeres_val = 0
+    if imeres_t:
+        try:
+            imeres_val = int(float(imeres_t.replace(",", ".").replace(" ", "")))
+        except ValueError:
+            imeres_val = 0
+
+    try:
+        etos_ex = int(str(etos_ex_str).strip())
+    except (ValueError, TypeError):
+        etos_ex = 2026
+
+    dtk_v = _dtk_coeff_lookup(dtk_doc, dtk_ref_sel, etos_ex)
+    dtk_eksagoras_f = round(float(dtk_v if dtk_v is not None else 0.0), 5)
+
+    try:
+        ref_y = int(str(dtk_ref_sel).strip())
+    except (ValueError, TypeError):
+        ref_y = datetime.date.today().year
+
+    json_data["eksagorasmenes_imeres"] = _syntaksi_pro_num_field(imeres_val)
+    json_data["synoliko_poso_eksagoras"] = _syntaksi_pro_num_field(round(poso_f, 2))
+    json_data["dtk_eksagoras"] = _syntaksi_pro_num_field(dtk_eksagoras_f)
+    json_data["dtk"] = _syntaksi_pro_num_field(ref_y)
+    json_data["etos_ethnikis"] = _syntaksi_pro_num_field(ref_y)
+
+    return json.dumps(json_data, indent=2, ensure_ascii=False)
+
+
+def build_count_c_dataframe(count_df: pd.DataFrame, description_map: dict[str, str] | None = None) -> pd.DataFrame:
+    """Ίδια κατανομή με Καταμέτρηση: ημέρες/μικτές/εισφορές ανά μήνα (γραμμές c_df)."""
     required_cols = ['Από', 'Έως', 'Ημέρες']
     if not all(col in count_df.columns for col in required_cols):
-        return pd.DataFrame(), [], None, [], []
+        return pd.DataFrame()
 
     counting_rows = []
 
@@ -4070,9 +4596,18 @@ def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] |
             continue
 
     if not counting_rows:
+        return pd.DataFrame()
+    return pd.DataFrame(counting_rows)
+
+
+def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] | None = None, show_count_totals_only: bool = False):
+    required_cols = ['Από', 'Έως', 'Ημέρες']
+    if not all(col in count_df.columns for col in required_cols):
         return pd.DataFrame(), [], None, [], []
 
-    c_df = pd.DataFrame(counting_rows)
+    c_df = build_count_c_dataframe(count_df, description_map)
+    if c_df.empty:
+        return pd.DataFrame(), [], None, [], []
 
     annual_totals = c_df.groupby(['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'])[['Ημέρες', 'Μικτές_Part', 'Εισφορές_Part']].sum().reset_index()
     annual_totals.rename(columns={
@@ -4610,7 +5145,7 @@ def render_totals_tab(
         grouped['Έτη'].fillna(0) * year_days
     )
     capped_days, exceeded_months = compute_summary_capped_days_by_group(
-        summary_df, group_keys, month_days=month_days, year_days=year_days, ika_month_days=30,
+        summary_df, group_keys, month_days=month_days, year_days=year_days, ika_month_days=31,
         from_dt=from_dt, to_dt=to_dt
     )
     if not capped_days.empty:
@@ -4709,7 +5244,7 @@ def render_totals_tab(
             over = r.get('Υπέρβαση', 0)
             lines.append(f"**Πακέτο {pkg}**" + (f" | Ταμείο: {tameio}" if tameio else "") + (f" | Τύπος: {typos}" if typos else "") + f" — Μήνας **{m_str} {y}**: {int(r.get('Ημέρες', 0))} ημέρες (όριο {lim}, υπέρβαση +{over})")
         st.warning(
-            "**Υπέρβαση ορίου ημερών ανά μήνα** (εφαρμόστηκε πλαφόν: ΙΚΑ 30 ημ./μήνα, υπόλοιπα 25 ημ./μήνα):\n\n" + "\n\n".join(lines)
+            "**Υπέρβαση ορίου ημερών ανά μήνα** (εφαρμόστηκε πλαφόν: ΙΚΑ 31 ημ./μήνα, ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ και υπόλοιπα 25 ημ./μήνα· για ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ το μήνυμα μόνο όταν >30 ημ./μήνα):\n\n" + "\n\n".join(lines)
         )
 
     st.dataframe(display_summary, use_container_width=True)
@@ -4731,7 +5266,7 @@ def render_totals_tab(
             dk_group_keys.append('Τύπος Ασφάλισης')
         dk_df = compute_summary_capped_dk(
             summary_df_for_dk, dk_group_keys, month_days=month_days, year_days=year_days,
-            ika_month_days=30, from_dt=from_dt, to_dt=to_dt, description_map=description_map
+            ika_month_days=31, from_dt=from_dt, to_dt=to_dt, description_map=description_map
         )
         if not dk_df.empty:
             dk_calc1 = int(dk_df['dk1'].sum())
@@ -4840,6 +5375,56 @@ def show_results_page(df, filename):
             code = str(row['Κωδικός Κλάδων / Πακέτων Κάλυψης']).strip()
             desc = str(row['Περιγραφή']).strip()
             description_map[code] = desc
+
+    def _klados_apd_sel_equal(a, b) -> bool:
+        la = list(a or [])
+        lb = list(b or [])
+        return sorted(la) == sorted(lb)
+
+    def _sync_cnt_klados_to_apd(sel_labels: list, klados_map_cnt: dict) -> bool:
+        """Συγχρονίζει το φίλτρο «Κλάδος/Πακέτο» της ΑΠΔ με την Καταμέτρηση.
+        Επιστρέφει True αν χρειάζεται st.rerun() (η ΑΠΔ τρέχει πριν την Καταμέτρηση στο ίδιο rerun)."""
+        apd_columns = [
+            col
+            for col in df.columns
+            if col
+            not in [
+                "Φορέας",
+                "Κωδικός Κλάδων / Πακέτων Κάλυψης",
+                "Περιγραφή",
+                "Κωδικός Τύπου Αποδοχών",
+                "Σελίδα",
+            ]
+        ]
+        apd_df = df[apd_columns] if apd_columns else df.copy()
+        if "Σελίδα" in apd_df.columns:
+            apd_df = apd_df.drop("Σελίδα", axis=1)
+        apd_df = exclude_unused_packages(apd_df)
+        if "Κλάδος/Πακέτο Κάλυψης" not in apd_df.columns:
+            return False
+        apd_codes = set(apd_df["Κλάδος/Πακέτο Κάλυψης"].dropna().astype(str).str.strip().unique())
+        dm = description_map or {}
+        out: list[str] = []
+        if not sel_labels:
+            out = []
+        else:
+            for lbl in sel_labels:
+                code = klados_map_cnt.get(lbl, lbl)
+                c = str(code).strip()
+                if c not in apd_codes:
+                    continue
+                if c in dm and dm[c]:
+                    opt = f"{c} - {dm[c]}"
+                else:
+                    opt = c
+                if opt not in out:
+                    out.append(opt)
+        cur = list(st.session_state.get("apd_filter_klados") or [])
+        if _klados_apd_sel_equal(out, cur):
+            st.session_state.pop("_pending_apd_klados_sync", None)
+            return False
+        st.session_state["_pending_apd_klados_sync"] = out
+        return True
     
     # Professional Header (Compact)
     header_client_name = st.session_state.get('print_client_name', '').strip()
@@ -4868,15 +5453,18 @@ def show_results_page(df, filename):
     
     
     
-    # CSS για μεγαλύτερους τίτλους tabs
+    # CSS σελίδας αποτελεσμάτων: tabs ήδη από global· εδώ μόνο overrides που χρειάζονται εδώ
     st.markdown("""
     <style>
+    /* Tabs: ίδιο προφίλ με global (σκούρο κείμενο, έντονα βάρη) */
     .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
-        font-size: 1.2rem !important;
-        font-weight: 600 !important;
+        font-size: 0.95rem !important;
+        font-weight: 700 !important;
+        color: #1e293b !important;
     }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 2rem !important;
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] [data-testid="stMarkdownContainer"] p {
+        color: #4c1d95 !important;
+        font-weight: 800 !important;
     }
     /* Λευκό φόντο για πεδία φίλτρων */
     .stSelectbox [data-baseweb="select"] > div,
@@ -5001,14 +5589,16 @@ def show_results_page(df, filename):
     # Προ-υπολογισμός ειδοποιήσεων για Tabs
     tab_titles = {
         "summary": "Σύνοψη",
-        "ai_summary": "Σύνοψη AI Beta",
+        "ai_summary": "Σύνοψη AI",
+        "timeline": "Χρονολόγιο",
         "totals": "Σύνολα",
         "count": "Καταμέτρηση",
         "gaps": "Κενά",
-        "apd": "Ανάλυση ΑΠΔ",
+        "apd": "ΑΠΔ/Πλαφόν",
         "parallel": "Παράλληλη",
-        "parallel_2017": "Παράλληλη Απασχόληση 2017+",
+        "parallel_2017": "Παράλληλη '17+",
         "multi": "Πολλαπλή",
+        "apozimiosi": "Αποζημίωση",
         "more": "Περισσότερα",
     }
 
@@ -5084,7 +5674,7 @@ def show_results_page(df, filename):
             valid_months_2017 = compute_parallel_months_2017(df)
             if valid_months_2017:
                 has_parallel_2017 = True
-                tab_titles["parallel_2017"] = "❗ Παράλληλη 2017+"
+                tab_titles["parallel_2017"] = "❗ Παράλληλη '17+"
         except:
             pass
 
@@ -5095,13 +5685,39 @@ def show_results_page(df, filename):
     except Exception:
         st.session_state['show_complex_file_warning'] = False
 
-    # Δημιουργία tabs
-    tab_summary, tab_ai_summary, tab_totals, tab_count, tab_gaps, tab_apd, tab_parallel, tab_parallel_2017, tab_multi, tab_more = st.tabs(list(tab_titles.values()))
+    # Δημιουργία tabs (προαιρετικό tab Συντάξιμες Αποδοχές μετά την Καταμέτρηση αν έχουν επιλεγεί πακέτα).
+    # Χρησιμοποιούμε το κλειδί widget cnt_filter_klados (όχι count_klados_selected): το st.tabs() εκτελείται
+    # πριν από το with tab_count, οπότε το count_klados_selected ενημερώνεται ένα rerun αργότερα και το tab δεν εμφανιζόταν.
+    _show_pension_tab = bool(st.session_state.get("cnt_filter_klados"))
+    if _show_pension_tab:
+        tab_titles["pension"] = "Συντάξιμες"
+    tab_keys_ordered = ["summary", "ai_summary", "timeline", "totals", "count"]
+    if _show_pension_tab:
+        tab_keys_ordered.append("pension")
+    tab_keys_ordered += ["gaps", "apd", "parallel", "parallel_2017", "multi", "apozimiosi", "more"]
+    # Συγχρονισμός ΑΠΔ «Κλάδος/Πακέτο» από Καταμέτρηση: εφαρμογή πριν τα widgets των tabs (η Καταμέτρηση τρέχει μετά την ΑΠΔ)
+    if "_pending_apd_klados_sync" in st.session_state:
+        st.session_state["apd_filter_klados"] = st.session_state.pop("_pending_apd_klados_sync")
+    tabs_widgets = st.tabs([tab_titles[k] for k in tab_keys_ordered])
+    tab_by_key = dict(zip(tab_keys_ordered, tabs_widgets))
+    tab_summary = tab_by_key["summary"]
+    tab_ai_summary = tab_by_key["ai_summary"]
+    tab_timeline = tab_by_key["timeline"]
+    tab_totals = tab_by_key["totals"]
+    tab_count = tab_by_key["count"]
+    tab_pension = tab_by_key.get("pension")
+    tab_gaps = tab_by_key["gaps"]
+    tab_apd = tab_by_key["apd"]
+    tab_parallel = tab_by_key["parallel"]
+    tab_parallel_2017 = tab_by_key["parallel_2017"]
+    tab_multi = tab_by_key["multi"]
+    tab_apozimiosi = tab_by_key["apozimiosi"]
+    tab_more = tab_by_key["more"]
 
     with tab_more:
         if st.session_state.get('show_complex_file_warning'):
             st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
-        sub_tab_main, sub_tab_apozimiosi, sub_tab_annex = st.tabs(["Κύρια Δεδομένα", "Αποζημίωση", "Παράρτημα"])
+        sub_tab_main, sub_tab_annex = st.tabs(["Κύρια Δεδομένα", "Παράρτημα"])
         with sub_tab_main:
             # Κύρια δεδομένα (χωρίς τις στήλες από τελευταίες σελίδες)
             main_columns = [col for col in df.columns if col not in ['Φορέας', 'Κωδικός Κλάδων / Πακέτων Κάλυψης', 'Περιγραφή', 'Κωδικός Τύπου Αποδοχών']]
@@ -5320,7 +5936,7 @@ def show_results_page(df, filename):
 
             if run_ai_main:
                 selected = AI_MODEL_OPTIONS.get(ai_model_choice, AI_MODEL_OPTIONS[ai_model_labels[0]])
-                with st.spinner(f"Παραγωγή σύνοψης ({ai_model_choice})..."):
+                with nullcontext():
                     audit_ai_df = generate_audit_report(df)
                     summary_ai_df = build_summary_grouped_display(df, df) if 'Κλάδος/Πακέτο Κάλυψης' in df.columns else pd.DataFrame()
                     ai_count_df = exclude_unused_packages(df.copy())
@@ -5423,7 +6039,7 @@ def show_results_page(df, filename):
 
                 selected_chat = AI_MODEL_OPTIONS.get(ai_model_choice, AI_MODEL_OPTIONS[ai_model_labels[0]])
                 with st.chat_message("assistant"):
-                    with st.spinner("Σκέφτομαι..."):
+                    with nullcontext():
                         answer = ai_chat_response(
                             user_message=chat_input,
                             chat_history=st.session_state["ai_chat_history"][:-1],
@@ -5600,6 +6216,8 @@ def show_results_page(df, filename):
                             cond_tsmede = (K.isin(['ΚΣ', 'KS'])) & (T.str.contains('ΤΣΜΕΔΕ|TSMEDE', na=False))
                             cond_oga = (K.isin(['K', 'Κ'])) & (T.str.contains('ΟΓΑ|OGA', na=False))
                             cond_tsay = (K.isin(['ME', 'ΜΕ'])) & (T.str.contains('ΤΣΑΥ|TSAY', na=False))
+                            cond_etaa_tan = (K.isin(['K', 'Κ'])) & (T.str.contains('ΕΤΑΑ-ΤΑΝ|ETAA-TAN', na=False))
+                            cond_etaa_kead = (K.isin(['K', 'Κ'])) & (T.str.contains('ΕΤΑΑ-ΚΕΑΔ|ETAA-KEAD', na=False))
                             month_cols_int = [c for c in days_df.columns if isinstance(c, int)] or list(range(1, 13))
                             def _count_unpaid(days_row, contrib_row):
                                 n = 0
@@ -5621,10 +6239,12 @@ def show_results_page(df, filename):
                             f_tsmede = _sum_unpaid(cond_tsmede, "ΤΣΜΕΔΕ (ΚΣ)")
                             f_oga = _sum_unpaid(cond_oga, "ΟΓΑ (Κ)")
                             f_tsay = _sum_unpaid(cond_tsay, "ΤΣΑΥ (ΜΕ)")
-                            all_f = [x for x in [f_oaee, f_tsmede, f_oga, f_tsay] if x]
+                            f_etaa_tan = _sum_unpaid(cond_etaa_tan, "ΕΤΑΑ-ΤΑΝ (Κ)")
+                            f_etaa_kead = _sum_unpaid(cond_etaa_kead, "ΕΤΑΑ-ΚΕΑΔ (Κ)")
+                            all_f = [x for x in [f_oaee, f_tsmede, f_oga, f_tsay, f_etaa_tan, f_etaa_kead] if x]
                             if all_f:
                                 details_msg = ", ".join(all_f) + " με ημέρες αλλά χωρίς εισφορές."
-                                any_cond = cond_oaee | cond_tsmede | cond_oga | cond_tsay
+                                any_cond = cond_oaee | cond_tsmede | cond_oga | cond_tsay | cond_etaa_tan | cond_etaa_kead
                                 sub_d = days_df.loc[any_cond].reset_index(drop=True)
                                 sub_c = contrib_df.loc[any_cond].reset_index(drop=True)
                                 unpaid_pairs = []
@@ -6037,6 +6657,26 @@ def show_results_page(df, filename):
             
             register_view("Διαγνωστικός_Έλεγχος", audit_df)
             st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+
+    with tab_timeline:
+        if st.session_state.get('show_complex_file_warning'):
+            st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
+        st.markdown("### Ιστορικό Ασφάλισης")
+        st.caption(
+            "Δύο χρονολόγια όπως στο εξαγόμενο HTML: **ανά Ταμείο / τύπο ασφάλισης** και "
+            "**ανά πακέτο κάλυψης** — εστίαση, κάθετες γραμμές αναφοράς (1993, 2002, 2017, 2020), κενά και διαστήματα χωρίς ημέρες."
+        )
+        try:
+            from html_viewer_builder import build_timeline_html_for_streamlit
+
+            _tl_html = build_timeline_html_for_streamlit(df)
+            if _tl_html:
+                components.html(_tl_html, height=1100, scrolling=True)
+                register_view("Ιστορικό (χρονολόγια)", df)
+            else:
+                st.info("Δεν υπάρχουν επαρκή δεδομένα (στήλες **Από** / **Έως** με έγκυρες ημερομηνίες) για χρονολόγιο.")
+        except Exception as _e_tl:
+            st.warning(f"Δεν ήταν δυνατή η εμφάνιση των χρονολογίων: {_e_tl}")
 
     with tab_totals:
         if st.session_state.get('show_complex_file_warning'):
@@ -6827,10 +7467,10 @@ def show_results_page(df, filename):
                             klados_options_with_desc.append(code)
                             klados_code_map[code] = code
                     
+                    # Όχι default= — το st.session_state["apd_filter_klados"] ορίζεται και από συγχρονισμό Καταμέτρησης
                     selected_klados = st.multiselect(
                         "Κλάδος/Πακέτο:",
                         options=klados_options_with_desc,
-                        default=[],
                         key="apd_filter_klados",
                         placeholder=""
                     )
@@ -7629,6 +8269,7 @@ def show_results_page(df, filename):
                         if sel_cnt_employer:
                             count_df = count_df[count_df['Α-Μ εργοδότη'].astype(str).isin(sel_cnt_employer)]
                 
+                sel_cnt_klados = []
                 with col4:
                     # Φίλτρο Κλάδου/Πακέτου
                     if 'Κλάδος/Πακέτο Κάλυψης' in count_df.columns:
@@ -7654,6 +8295,8 @@ def show_results_page(df, filename):
                         if sel_cnt_klados:
                             sel_codes = [klados_map.get(o, o) for o in sel_cnt_klados]
                             count_df = count_df[count_df['Κλάδος/Πακέτο Κάλυψης'].isin(sel_codes)]
+                        if _sync_cnt_klados_to_apd(sel_cnt_klados, klados_map):
+                            st.rerun()
                 
                 with col5:
                     # Φίλτρο Τύπου Αποδοχών
@@ -7689,6 +8332,9 @@ def show_results_page(df, filename):
                             count_df = count_df[count_df['_dt'] <= td]
                         except: st.error("Λάθος μορφή ημερομηνίας 'Έως'")
             
+            st.session_state['count_klados_selected'] = bool(sel_cnt_klados)
+            st.session_state['count_work_df'] = count_df.copy()
+
             show_count_totals_only = st.toggle(
                 "Μόνο γραμμές συνόλου ανά έτος",
                 value=False,
@@ -7697,7 +8343,7 @@ def show_results_page(df, filename):
 
             counting_rows = []
             
-            with st.spinner("Υπολογισμός κατανομής ημερών..."):
+            with nullcontext():
                 def _get_num(val):
                     try:
                         return clean_numeric_value(val) or 0
@@ -7844,6 +8490,40 @@ def show_results_page(df, filename):
 
             if counting_rows:
                 c_df = pd.DataFrame(counting_rows)
+                cnt_show_monthly_kind_totals = bool(sel_cnt_klados)
+
+                def _count_tab_insurance_kind(typos) -> str | None:
+                    s = str(typos).strip().upper()
+                    if 'ΜΙΣΘΩΤΗ' in s and 'ΜΗ ΜΙΣΘΩΤΗ' not in s and not s.startswith('ΜΗ '):
+                        return 'ΜΙΣΘΩΤΗ'
+                    if ('ΜΗ' in s and 'ΜΙΣΘΩΤΗ' in s) or ('NON' in s and 'SAL' in s):
+                        return 'ΜΗ ΜΙΣΘΩΤΗ'
+                    return None
+
+                def _count_tab_monthly_cap_days(tameio_val) -> float:
+                    t = str(tameio_val).upper()
+                    if 'ΙΚΑ' in t or 'IKA' in t:
+                        return 31.0
+                    return 25.0
+
+                def compute_kind_monthly_capped_totals(c_df_src: pd.DataFrame, year: int, kind_code: str | None) -> dict[int, float]:
+                    """Μηνιαίες ημέρες με πλαφόν ανά ταμείο (ΙΚΑ: 31, λοιπά: 25), μετά άθροιση ανά μήνα."""
+                    sub = c_df_src[c_df_src['ΕΤΟΣ'] == year].copy()
+                    if sub.empty:
+                        return {m: 0.0 for m in range(1, 13)}
+                    sub['_k'] = sub['ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ'].apply(_count_tab_insurance_kind)
+                    if kind_code is not None:
+                        sub = sub[sub['_k'] == kind_code]
+                    if sub.empty:
+                        return {m: 0.0 for m in range(1, 13)}
+                    g = sub.groupby(['ΤΑΜΕΙΟ', 'Μήνας_Num'], as_index=False)['Ημέρες'].sum()
+                    g['_cap'] = g['ΤΑΜΕΙΟ'].apply(_count_tab_monthly_cap_days)
+                    g['_capped'] = g.apply(
+                        lambda r: min(float(r['Ημέρες']), float(r['_cap'])),
+                        axis=1,
+                    )
+                    by_m = g.groupby('Μήνας_Num')['_capped'].sum()
+                    return {m: float(by_m.get(m, 0.0) or 0.0) for m in range(1, 13)}
                 
                 # Calculate annual totals for Days, Gross, Contrib
                 annual_totals = c_df.groupby(['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'])[['Ημέρες', 'Μικτές_Part', 'Εισφορές_Part']].sum().reset_index()
@@ -7981,16 +8661,28 @@ def show_results_page(df, filename):
                     mask_cnt_df = mask_cnt_df.sort_values(sort_keys, na_position='first').reset_index(drop=True)
                     contrib_cnt_df = contrib_cnt_df.sort_values(sort_keys, na_position='first').reset_index(drop=True)
 
-                # Pre-calculate yearly totals for gross/contributions (unformatted values)
-                year_totals = {}
-                if 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ' in display_cnt_df.columns or 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ' in display_cnt_df.columns:
-                    sum_cols = [col for col in ['ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ'] if col in display_cnt_df.columns]
-                    if sum_cols:
-                        year_totals = (
-                            display_cnt_df.groupby('ΕΤΟΣ')[sum_cols]
-                            .sum()
-                            .to_dict('index')
-                        )
+                # Pre-calculate yearly totals για μικτές/εισφορές (unformatted)
+                # — ανά έτος και τύπο ασφάλισης (ΜΙΣΘΩΤΗ / ΜΗ ΜΙΣΘΩΤΗ)· κλασικό σύνολο όταν δεν χωρίζει
+                sum_cols = [col for col in ['ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ'] if col in display_cnt_df.columns]
+                year_totals_legacy = {}
+                year_kind_totals = {}
+                year_kinds_present = {}
+
+                if sum_cols:
+                    excl_filler = display_cnt_df[display_cnt_df['ΤΑΜΕΙΟ'].astype(str) != 'ΚΕΝΟ ΔΙΑΣΤΗΜΑ'].copy()
+                    _leg = excl_filler.groupby('ΕΤΟΣ')[sum_cols].sum().to_dict('index')
+                    year_totals_legacy = {int(k): v for k, v in _leg.items()}
+                    excl_filler['_kind'] = excl_filler['ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ'].apply(_count_tab_insurance_kind)
+                    kind_rows = excl_filler[excl_filler['_kind'].notna()]
+                    if not kind_rows.empty:
+                        gk = kind_rows.groupby(['ΕΤΟΣ', '_kind'])[sum_cols].sum()
+                        for (yr, knd), ser in gk.iterrows():
+                            year_kind_totals[(int(yr), knd)] = ser.to_dict()
+                        for yr in kind_rows['ΕΤΟΣ'].dropna().unique():
+                            y_int = int(yr)
+                            year_kinds_present[y_int] = set(
+                                kind_rows[kind_rows['ΕΤΟΣ'] == yr]['_kind'].dropna().unique().tolist()
+                            )
                 
                 # Format numbers
                 def format_cell_days(val):
@@ -8029,9 +8721,10 @@ def show_results_page(df, filename):
                     formatted_df['ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ'] = formatted_df['ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ'].apply(format_percent_cell)
                 
                 # Helper for mask rows (used for totals/empty rows)
-                def make_mask_row(is_total=False):
+                def make_mask_row(is_total=False, monthly_total=False):
                     mask = {m: False for m in month_cols}
                     mask['__is_total__'] = is_total
+                    mask['__monthly_total__'] = bool(monthly_total)
                     return mask
 
                 # Hide repeating values
@@ -8047,31 +8740,133 @@ def show_results_page(df, filename):
                 # Columns structure
                 base_cols = ['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ']
                 all_cols = base_cols + ['ΣΥΝΟΛΟ'] + month_cols + ['ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ']
-                
+
+                def _fill_count_total_amounts(total_row, totals_vals):
+                    if not totals_vals:
+                        return
+                    gross_total = totals_vals.get('ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 0)
+                    contrib_total = totals_vals.get('ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 0)
+                    if 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ' in total_row:
+                        total_row['ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ'] = format_amount_cell(gross_total)
+                    if 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ' in total_row:
+                        total_row['ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ'] = format_amount_cell(contrib_total)
+                    if 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ' in total_row:
+                        total_row['ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ'] = ''
+
+                emitted_kind_totals = set()
+                loipa_done_years = set()
+
+                def append_one_kind_total_line(py, k_code, k_label):
+                    if (py, k_code) in emitted_kind_totals:
+                        return
+                    if k_code not in year_kinds_present.get(py, set()):
+                        return
+                    tv = year_kind_totals.get((py, k_code), {}) or {}
+                    total_row = {c: '' for c in all_cols}
+                    total_row['ΕΤΟΣ'] = ''
+                    monthly_tf = False
+                    if cnt_show_monthly_kind_totals:
+                        md = compute_kind_monthly_capped_totals(c_df, py, k_code)
+                        sm = sum(md.values())
+                        total_row['ΠΕΡΙΓΡΑΦΗ'] = f"ΣΥΝΟΛΟ {py} — {k_label}"
+                        total_row['ΣΥΝΟΛΟ'] = format_cell_days(sm)
+                        for i, mc in enumerate(month_cols):
+                            total_row[mc] = format_cell_days(md[i + 1])
+                        monthly_tf = True
+                    else:
+                        total_row['ΠΕΡΙΓΡΑΦΗ'] = f"ΣΥΝΟΛΟ {py} — {k_label}"
+                    _fill_count_total_amounts(total_row, tv)
+                    processed_rows.append(total_row)
+                    processed_mask_rows.append(make_mask_row(is_total=True, monthly_total=monthly_tf))
+                    emitted_kind_totals.add((py, k_code))
+
+                def append_loipa_line_for_year(py):
+                    if py in loipa_done_years:
+                        return
+                    loipa_done_years.add(py)
+                    kinds_here = year_kinds_present.get(py, set())
+                    if not kinds_here:
+                        return
+                    legacy = year_totals_legacy.get(py, {}) or {}
+                    sum_g_split = 0.0
+                    sum_c_split = 0.0
+                    for k_code in ('ΜΙΣΘΩΤΗ', 'ΜΗ ΜΙΣΘΩΤΗ'):
+                        if k_code not in kinds_here:
+                            continue
+                        tv = year_kind_totals.get((py, k_code), {}) or {}
+                        sum_g_split += float(tv.get('ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 0) or 0)
+                        sum_c_split += float(tv.get('ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 0) or 0)
+                    leg_g = float(legacy.get('ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 0) or 0)
+                    leg_c = float(legacy.get('ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 0) or 0)
+                    rem_g = leg_g - sum_g_split
+                    rem_c = leg_c - sum_c_split
+                    if abs(rem_g) > 1e-4 or abs(rem_c) > 1e-4:
+                        total_row = {c: '' for c in all_cols}
+                        total_row['ΕΤΟΣ'] = ''
+                        total_row['ΠΕΡΙΓΡΑΦΗ'] = f"ΣΥΝΟΛΟ {py} — Λοιπά"
+                        _fill_count_total_amounts(
+                            total_row,
+                            {'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ': rem_g, 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ': rem_c},
+                        )
+                        processed_rows.append(total_row)
+                        processed_mask_rows.append(make_mask_row(is_total=True))
+
+                def flush_count_year_end(prev_yr):
+                    """Τέλος έτους: όσα σύνολα τύπου δεν εμφανίστηκαν ήδη + Λοιπά."""
+                    try:
+                        py = int(prev_yr)
+                    except (TypeError, ValueError):
+                        return
+                    kinds_here = year_kinds_present.get(py, set())
+                    legacy = year_totals_legacy.get(py, {}) or {}
+                    if not kinds_here:
+                        total_row = {c: '' for c in all_cols}
+                        total_row['ΕΤΟΣ'] = ''
+                        monthly_tf = False
+                        if cnt_show_monthly_kind_totals:
+                            md = compute_kind_monthly_capped_totals(c_df, py, None)
+                            sm = sum(md.values())
+                            total_row['ΠΕΡΙΓΡΑΦΗ'] = f"ΣΥΝΟΛΟ {py}"
+                            total_row['ΣΥΝΟΛΟ'] = format_cell_days(sm)
+                            for i, mc in enumerate(month_cols):
+                                total_row[mc] = format_cell_days(md[i + 1])
+                            monthly_tf = True
+                        else:
+                            total_row['ΠΕΡΙΓΡΑΦΗ'] = f"ΣΥΝΟΛΟ {py}"
+                        _fill_count_total_amounts(total_row, legacy)
+                        processed_rows.append(total_row)
+                        processed_mask_rows.append(make_mask_row(is_total=True, monthly_total=monthly_tf))
+                        return
+                    for k_code, k_label in [('ΜΙΣΘΩΤΗ', 'Μισθωτή'), ('ΜΗ ΜΙΣΘΩΤΗ', 'Μη μισθωτή')]:
+                        if k_code in kinds_here:
+                            append_one_kind_total_line(py, k_code, k_label)
+                    append_loipa_line_for_year(py)
+
+                last_block_insurance_kind = None
+
                 for idx, row in formatted_df.iterrows():
                     curr_year = row['ΕΤΟΣ']
                     curr_tameio = row['ΤΑΜΕΙΟ']
                     curr_insurance_type = row['ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ']
                     curr_employer = row['ΕΡΓΟΔΟΤΗΣ']
-                    
-                    # Check if year changed (and not the first row) -> Insert totals + empty row
+
+                    try:
+                        curr_raw = display_cnt_df.loc[idx]
+                    except (KeyError, TypeError):
+                        curr_raw = {}
+                    is_cnt_filler = str(curr_raw.get('ΤΑΜΕΙΟ', '')).strip() == 'ΚΕΝΟ ΔΙΑΣΤΗΜΑ'
+                    row_kind = None if is_cnt_filler else _count_tab_insurance_kind(curr_raw.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', ''))
+
+                    try:
+                        cy_int = int(curr_year)
+                        py_int = int(prev_year) if prev_year is not None else None
+                    except (TypeError, ValueError):
+                        cy_int, py_int = None, None
+
+                    # Check if year changed (and not the first row) -> κλείσιμο έτους + κενή γραμμή
                     if prev_year is not None and curr_year != prev_year:
-                        total_row = {c: '' for c in all_cols}
-                        total_row['ΕΤΟΣ'] = ''
-                        if last_month_col:
-                            total_row[last_month_col] = f"ΣΥΝΟΛΟ {prev_year}"
-                        totals_vals = year_totals.get(prev_year, {})
-                        if totals_vals:
-                            gross_total = totals_vals.get('ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 0)
-                            contrib_total = totals_vals.get('ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 0)
-                            if 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ' in total_row:
-                                total_row['ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ'] = format_amount_cell(gross_total)
-                            if 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ' in total_row:
-                                total_row['ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ'] = format_amount_cell(contrib_total)
-                            if 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ' in total_row:
-                                total_row['ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ'] = ''
-                        processed_rows.append(total_row)
-                        processed_mask_rows.append(make_mask_row(is_total=True))
+                        flush_count_year_end(prev_year)
+                        last_block_insurance_kind = None
 
                         empty_row = {c: '' for c in all_cols}
                         processed_rows.append(empty_row)
@@ -8080,6 +8875,18 @@ def show_results_page(df, filename):
                         prev_tameio = None 
                         prev_insurance_type = None
                         prev_employer = None
+
+                    # Ίδιο έτος: σύνολο τύπου αμέσως μετά το μπλοκ (πριν εμφανιστεί ο άλλος τύπος)
+                    if (
+                        py_int is not None
+                        and cy_int is not None
+                        and cy_int == py_int
+                        and last_block_insurance_kind in ('ΜΙΣΘΩΤΗ', 'ΜΗ ΜΙΣΘΩΤΗ')
+                        and row_kind in ('ΜΙΣΘΩΤΗ', 'ΜΗ ΜΙΣΘΩΤΗ')
+                        and row_kind != last_block_insurance_kind
+                    ):
+                        _prev_lbl = 'Μισθωτή' if last_block_insurance_kind == 'ΜΙΣΘΩΤΗ' else 'Μη μισθωτή'
+                        append_one_kind_total_line(cy_int, last_block_insurance_kind, _prev_lbl)
 
                     display_row = row.to_dict()
                     
@@ -8104,6 +8911,7 @@ def show_results_page(df, filename):
                     # Get mask row
                     mask_row = mask_cnt_df.loc[idx].to_dict()
                     mask_row['__is_total__'] = False
+                    mask_row['__monthly_total__'] = False
                     processed_mask_rows.append(mask_row)
 
                     # Αν πρόκειται για κωδικό κλάδου/πακέτου ΚΣ, Κ, ΜΕ, ΠΚΣ, προσθέτουμε γραμμή εισφορών ανά μήνα
@@ -8162,6 +8970,7 @@ def show_results_page(df, filename):
                                 # Μάσκα χωρίς highlights
                                 empty_mask = {m: False for m in month_cols}
                                 empty_mask['__is_total__'] = False
+                                empty_mask['__monthly_total__'] = False
                                 processed_mask_rows.append(empty_mask)
                     except Exception:
                         pass
@@ -8170,25 +8979,13 @@ def show_results_page(df, filename):
                     prev_tameio = curr_tameio
                     prev_insurance_type = curr_insurance_type
                     prev_employer = curr_employer
+
+                    if row_kind in ('ΜΙΣΘΩΤΗ', 'ΜΗ ΜΙΣΘΩΤΗ'):
+                        last_block_insurance_kind = row_kind
                 
                 # Append totals & empty row for last year
                 if prev_year is not None:
-                    total_row = {c: '' for c in all_cols}
-                    total_row['ΕΤΟΣ'] = ''
-                    if last_month_col:
-                        total_row[last_month_col] = f"ΣΥΝΟΛΟ {prev_year}"
-                    totals_vals = year_totals.get(prev_year, {})
-                    if totals_vals:
-                        gross_total = totals_vals.get('ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 0)
-                        contrib_total = totals_vals.get('ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 0)
-                        if 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ' in total_row:
-                            total_row['ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ'] = format_amount_cell(gross_total)
-                        if 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ' in total_row:
-                            total_row['ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ'] = format_amount_cell(contrib_total)
-                        if 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ' in total_row:
-                            total_row['ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ'] = ''
-                    processed_rows.append(total_row)
-                    processed_mask_rows.append(make_mask_row(is_total=True))
+                    flush_count_year_end(prev_year)
 
                     processed_rows.append({c: '' for c in all_cols})
                     processed_mask_rows.append(make_mask_row())
@@ -8213,19 +9010,33 @@ def show_results_page(df, filename):
                 
                 active_mask_rows = masks_df.to_dict('records') if not masks_df.empty else []
                 
-                # Styling
+                # Συνολικές γραμμές: πολύ ελαφρύ γαλάζιο μόνο από Περιγραφή και δεξιά
+                _cnt_total_row_bg = '#fafdfe'
+                try:
+                    _idr = all_cols.index('ΠΕΡΙΓΡΑΦΗ')
+                    _cnt_desc_right_cols = set(all_cols[_idr:])
+                except ValueError:
+                    _cnt_desc_right_cols = set(all_cols)
+
                 def highlight_aggs(row):
                     if row.name < len(active_mask_rows):
                         mask_row = active_mask_rows[row.name]
                         is_total = mask_row.get('__is_total__', False)
-                        total_highlight_cols = [col for col in [last_month_col, 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ'] if col]
+                        is_monthly_total = mask_row.get('__monthly_total__', False)
+                        if is_total and is_monthly_total:
+                            total_bold_cols = (
+                                ['ΠΕΡΙΓΡΑΦΗ', 'ΣΥΝΟΛΟ'] + month_cols
+                                + [c for c in ['ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ'] if c]
+                            )
+                        else:
+                            total_bold_cols = [col for col in ['ΠΕΡΙΓΡΑΦΗ', 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ'] if col]
                         styles = []
                         for col in row.index:
                             style = ''
                             if is_total:
-                                if col in total_highlight_cols:
-                                    style += 'background-color: #cfe2f3; color: #000000; font-weight: bold; '
-                                elif col in ['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΣΥΝΟΛΟ']:
+                                if col in _cnt_desc_right_cols:
+                                    style += f'background-color: {_cnt_total_row_bg}; color: #000000; '
+                                if col in total_bold_cols or col in ['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΣΥΝΟΛΟ']:
                                     style += 'font-weight: bold; '
                             else:
                                 if col in ['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΣΥΝΟΛΟ', 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ']:
@@ -8266,19 +9077,29 @@ def show_results_page(df, filename):
                 register_view("Καταμέτρηση", final_display_df)
                 
                 # Στυλ για εκτύπωση (ίδιοι χρωματισμοί με την οθόνη)
-                total_highlight_cols = [col for col in [last_month_col, 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ'] if col]
                 print_style_rows = []
                 for ridx, r in final_display_df.iterrows():
                     mask_row = active_mask_rows[ridx] if ridx < len(active_mask_rows) else {}
                     is_total = mask_row.get('__is_total__', False)
+                    is_monthly_total = mask_row.get('__monthly_total__', False)
+                    if is_total and is_monthly_total:
+                        total_bold_cols = (
+                            ['ΠΕΡΙΓΡΑΦΗ', 'ΣΥΝΟΛΟ'] + month_cols
+                            + [c for c in ['ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ'] if c]
+                        )
+                    else:
+                        total_bold_cols = [col for col in ['ΠΕΡΙΓΡΑΦΗ', 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ'] if col]
                     row_styles = {}
                     for col in final_display_df.columns:
                         style = ''
-                        if col in ['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΣΥΝΟΛΟ', 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ']:
+                        if is_total:
+                            if col in _cnt_desc_right_cols:
+                                style += 'background-color:#fafdfe;color:#000;'
+                            if col in total_bold_cols or col in ['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΣΥΝΟΛΟ']:
+                                style += 'font-weight:700;'
+                        elif col in ['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΣΥΝΟΛΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ']:
                             style += 'font-weight:700;'
-                        if is_total and col in total_highlight_cols:
-                            style += 'background-color:#cfe2f3;color:#000;'
-                        elif col in month_cols and mask_row.get(col, False):
+                        if (not is_total) and col in month_cols and mask_row.get(col, False):
                             style += 'background-color:#fff9c4;color:#000;'
                         if col == 'ΠΕΡΙΓΡΑΦΗ':
                             style += 'white-space:nowrap;'
@@ -8300,8 +9121,301 @@ def show_results_page(df, filename):
                 st.warning("Δεν βρέθηκαν δεδομένα για καταμέτρηση.")
         else:
             st.warning("Λείπουν οι απαραίτητες στήλες (Από, Έως, Ημέρες) για την καταμέτρηση.")
+            st.session_state['count_klados_selected'] = False
+            st.session_state['count_work_df'] = count_df.copy()
+            # Αποφυγή παλιάς επιλογής πακέτων στο session όταν δεν τρέχει το φίλτρο — αλλιώς το tab «Συντάξιμες Αποδοχές» έμενε ορατό λάθος.
+            if "cnt_filter_klados" in st.session_state:
+                st.session_state["cnt_filter_klados"] = []
+
+    if tab_pension is not None:
+        with tab_pension:
+            if st.session_state.get('show_complex_file_warning'):
+                st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
+            st.markdown("### Συντάξιμες Αποδοχές")
+            cw = st.session_state.get('count_work_df')
+            if cw is None or cw.empty:
+                st.warning("Δεν υπάρχουν δεδομένα. Χρησιμοποιήστε πρώτα την Καταμέτρηση με επιλεγμένα πακέτα.")
+            elif not bool(st.session_state.get("cnt_filter_klados")):
+                st.warning("Επιλέξτε πακέτα κάλυψης στην καρτέλα **Καταμέτρηση** για να γεμίσει ο πίνακας.")
+            else:
+                _req_syn = ['Από', 'Έως', 'Ημέρες']
+                if not all(c in cw.columns for c in _req_syn):
+                    st.error("Λείπουν στήλες Από / Έως / Ημέρες.")
+                else:
+                    try:
+                        _dmap_syn = description_map
+                    except NameError:
+                        _dmap_syn = {}
+                    _c_syn = build_count_c_dataframe(cw, _dmap_syn)
+                    syn_df = build_syntaksi_annual_table(_c_syn)
+                    if syn_df.empty:
+                        st.warning("Δεν βρέθηκαν στοιχεία για συνολικά ανά έτος.")
+                    else:
+                        dtk_doc = _load_dtk_table_json()
+                        if dtk_doc is None:
+                            st.caption("Δεν βρέθηκε ή δεν διαβάστηκε το **dtk_table.json** στη ρίζα του project — η στήλη ΔΤΚ θα είναι κενή.")
+
+                        # Θέση για σύνολα (πακέτα + metrics) πάνω από τα φίλτρα — γεμίζει μετά τον υπολογισμό syn_f
+                        _syn_header_ph = st.empty()
+
+                        fy_col, ty_col, dtk_col, ex_pos_col, ex_days_col, ex_year_col, koin_col = st.columns(7)
+                        with fy_col:
+                            y_from_in = st.text_input(
+                                "Από (έτος):",
+                                value="2002",
+                                key="syntaksi_year_from",
+                            )
+                        with ty_col:
+                            _y_def_to = str(datetime.date.today().year)
+                            y_to_in = st.text_input(
+                                "Έως (έτος):",
+                                value=_y_def_to,
+                                key="syntaksi_year_to",
+                            )
+                        with dtk_col:
+                            _dtk_data = (dtk_doc or {}).get("data") or {}
+                            _ref_opts = sorted({int(k) for k in _dtk_data.keys() if str(k).isdigit()})
+                            _ref_strs = [str(x) for x in _ref_opts] if _ref_opts else ["2026"]
+                            _idx_2026 = _ref_strs.index("2026") if "2026" in _ref_strs else max(0, len(_ref_strs) - 1)
+                            dtk_ref_sel = st.selectbox(
+                                "Έτος αναφοράς ΔΤΚ:",
+                                options=_ref_strs,
+                                index=_idx_2026,
+                                key="syntaksi_dtk_ref_year",
+                            )
+                        with ex_pos_col:
+                            st.text_input(
+                                "Ποσό εξαγοράς:",
+                                value="",
+                                key="syntaksi_exagora_poso",
+                                placeholder="π.χ. 15.000,00 €",
+                            )
+                        with ex_days_col:
+                            st.text_input(
+                                "Ημέρες εξαγοράς:",
+                                value="",
+                                key="syntaksi_exagora_imres",
+                                placeholder="π.χ. 300",
+                            )
+                        with ex_year_col:
+                            _ex_etos_opts = [str(y) for y in range(2002, 2027)]
+                            _ex_etos_idx = _ex_etos_opts.index("2026")
+                            st.selectbox(
+                                "Έτος εξαγοράς:",
+                                options=_ex_etos_opts,
+                                index=_ex_etos_idx,
+                                key="syntaksi_exagora_etos",
+                            )
+                        with koin_col:
+                            st.selectbox(
+                                "Κοινωνικοί Πόροι:",
+                                options=list(KOINWNIKOI_TIPO_OPTIONS),
+                                index=0,
+                                key="syntaksi_koinwnikoi_tipo",
+                            )
+
+                        def _parse_syn_year(s, fallback: int):
+                            t = str(s or "").strip()
+                            if not t:
+                                return fallback
+                            try:
+                                return int(t)
+                            except ValueError:
+                                return None
+
+                        _yf = _parse_syn_year(y_from_in, 2002)
+                        _yt = _parse_syn_year(y_to_in, datetime.date.today().year)
+                        if _yf is None or _yt is None:
+                            st.error("Δώστε έγκυρα ακέραια έτη στα φίλτρα **Από** / **Έως**.")
+                        else:
+                            _lo, _hi = min(_yf, _yt), max(_yf, _yt)
+                            syn_f = syn_df[(syn_df['Έτος'] >= _lo) & (syn_df['Έτος'] <= _hi)].copy()
+                            syn_f['ΔΤΚ'] = syn_f['Έτος'].apply(
+                                lambda ey: _dtk_coeff_lookup(dtk_doc, dtk_ref_sel, int(ey))
+                            )
+                            _koin_tipo = str(st.session_state.get("syntaksi_koinwnikoi_tipo", "ΟΧΙ") or "ΟΧΙ")
+                            syn_f['Κοινωνικοί Πόροι'] = _compute_koinwnikoi_poroi_column(syn_f, _koin_tipo)
+                            _contrib_n = pd.to_numeric(syn_f['Συνολικές εισφορές'], errors='coerce').fillna(0.0)
+                            _kp_n = pd.to_numeric(syn_f['Κοινωνικοί Πόροι'], errors='coerce').fillna(0.0)
+                            syn_f['Τεκμαρτές αποδοχές'] = (_contrib_n + _kp_n) * 5.0
+                            _gross_n = pd.to_numeric(syn_f['Συνολικές μικτές αποδοχές'], errors='coerce').fillna(0.0)
+                            syn_f['Συνολικές αποδοχές'] = _gross_n + syn_f['Τεκμαρτές αποδοχές']
+                            _g = pd.to_numeric(syn_f['Συνολικές αποδοχές'], errors='coerce')
+                            _d = pd.to_numeric(syn_f['ΔΤΚ'], errors='coerce')
+                            syn_f['Τελικές Συντ. Αποδοχές'] = _g * _d
+                            syn_f = syn_f[[c for c in SYN_TAXI_COLUMN_ORDER if c in syn_f.columns]]
+
+                            _syn_pro_json_core = syn_f.copy()
+                            _n_rows_before = len(syn_f)
+                            syn_f = _append_exagora_footer_rows(
+                                syn_f,
+                                dtk_doc,
+                                dtk_ref_sel,
+                                st.session_state.get("syntaksi_exagora_poso", ""),
+                                st.session_state.get("syntaksi_exagora_imres", ""),
+                                st.session_state.get("syntaksi_exagora_etos", "2026"),
+                            )
+                            syn_f = _append_syntaksi_grand_total_row(syn_f)
+
+                            if _n_rows_before == 0:
+                                st.info(
+                                    "Δεν υπάρχουν γραμμές στο εύρος ετών που επιλέξατε — "
+                                    "εμφανίζονται η κενή γραμμή και η **ΕΞΑΓΟΡΑ**."
+                                )
+
+                            with _syn_header_ph.container():
+                                _sm_m, _sm_t, _sm_s = _syntaksi_summary_metrics_from_syn_f(syn_f)
+                                _syn_top_row = st.columns([1.35, 1, 1, 1])
+                                with _syn_top_row[0]:
+                                    _syn_pk_list = st.session_state.get("cnt_filter_klados") or []
+                                    if _syn_pk_list:
+                                        _syn_pk_txt = "\n".join(f"- {str(x)}" for x in _syn_pk_list)
+                                        st.info(f"**Επιλεγμένα πακέτα κάλυψης**\n{_syn_pk_txt}")
+                                    else:
+                                        st.info("**Επιλεγμένα πακέτα κάλυψης:** —")
+                                with _syn_top_row[1]:
+                                    _mv = (
+                                        format_number_greek(_sm_m, decimals=1)
+                                        if _sm_m is not None
+                                        else "•"
+                                    )
+                                    st.metric("Μήνες", _mv)
+                                with _syn_top_row[2]:
+                                    _tv = (
+                                        format_currency(_sm_t)
+                                        if _sm_t is not None and float(_sm_t) != 0
+                                        else ("0 €" if _sm_t is not None and float(_sm_t) == 0 else "•")
+                                    )
+                                    st.metric("Συντάξιμες αποδοχές", _tv)
+                                with _syn_top_row[3]:
+                                    _sv = (
+                                        format_currency(_sm_s)
+                                        if _sm_s is not None and float(_sm_s) != 0
+                                        else ("0 €" if _sm_s is not None and float(_sm_s) == 0 else "•")
+                                    )
+                                    st.metric("Συντάξιμος μισθός", _sv)
+
+                            disp_syn = syn_f.copy()
+
+                            def _syntaksi_fmt_days_cell(x):
+                                if pd.isna(x) or x == '':
+                                    return ''
+                                try:
+                                    if float(x) == 0:
+                                        return ''
+                                except (TypeError, ValueError):
+                                    pass
+                                return format_number_greek(x, decimals=0)
+
+                            def _syntaksi_fmt_dtk_cell(x):
+                                if x is None or (isinstance(x, float) and pd.isna(x)):
+                                    return ''
+                                try:
+                                    if float(x) == 0:
+                                        return ''
+                                except (TypeError, ValueError):
+                                    return ''
+                                return format_number_greek(float(x), decimals=5)
+
+                            def _syntaksi_fmt_etos_cell(x):
+                                if pd.isna(x) or x == '' or x is None:
+                                    return ''
+                                if isinstance(x, str):
+                                    return x.strip()
+                                try:
+                                    v = float(x)
+                                    if v == int(v):
+                                        return str(int(v))
+                                    return str(int(round(v)))
+                                except (TypeError, ValueError):
+                                    return str(x)
+
+                            if 'Έτος' in disp_syn.columns:
+                                disp_syn['Έτος'] = disp_syn['Έτος'].apply(_syntaksi_fmt_etos_cell)
+
+                            for _c in ['Σύνολο ημερών (μισθωτή)', 'Σύνολο ημερών (μη μισθωτή)']:
+                                if _c in disp_syn.columns:
+                                    disp_syn[_c] = disp_syn[_c].apply(_syntaksi_fmt_days_cell)
+                            for _c in [
+                                'Συνολικές μικτές αποδοχές',
+                                'Συνολικές εισφορές',
+                                'Κοινωνικοί Πόροι',
+                                'Τεκμαρτές αποδοχές',
+                                'Συνολικές αποδοχές',
+                                'Τελικές Συντ. Αποδοχές',
+                            ]:
+                                if _c in disp_syn.columns:
+                                    disp_syn[_c] = disp_syn[_c].apply(
+                                        lambda x: format_currency(x) if pd.notna(x) and x != '' else ''
+                                    )
+                            if 'ΔΤΚ' in disp_syn.columns:
+                                disp_syn['ΔΤΚ'] = disp_syn['ΔΤΚ'].apply(_syntaksi_fmt_dtk_cell)
+
+                            _SYN_TOTAL_BG = '#fafdfe'
+
+                            def _syn_table_row_styles(row):
+                                etos = str(row.get('Έτος', '')).strip()
+                                is_grand = etos == 'ΣΥΝΟΛΟ'
+                                styles = []
+                                for col in row.index:
+                                    if is_grand:
+                                        styles.append(
+                                            f'background-color: {_SYN_TOTAL_BG}; color: #000000; font-weight: bold;'
+                                        )
+                                    elif col == 'Έτος':
+                                        styles.append('font-weight: bold; text-align: left;')
+                                    else:
+                                        styles.append('')
+                                return styles
+
+                            _syn_disp_show = disp_syn
+                            try:
+                                _syn_disp_show = disp_syn.style.apply(_syn_table_row_styles, axis=1)
+                            except Exception:
+                                _syn_disp_show = disp_syn
+
+                            st.dataframe(_syn_disp_show, use_container_width=True, hide_index=True)
+
+                            _syn_print_styles = []
+                            for _, _r in disp_syn.iterrows():
+                                if str(_r.get('Έτος', '')).strip() == 'ΣΥΝΟΛΟ':
+                                    _syn_print_styles.append(
+                                        {c: 'background-color:#fafdfe;color:#000;font-weight:700;' for c in disp_syn.columns}
+                                    )
+                                else:
+                                    _syn_print_styles.append({})
+
+                            register_view("Συντάξιμες Αποδοχές", syn_f)
+                            _json_syntaksi_pro = build_syntaksi_pro_json_str(
+                                _syn_pro_json_core,
+                                dtk_doc,
+                                dtk_ref_sel,
+                                st.session_state.get("syntaksi_exagora_poso", ""),
+                                st.session_state.get("syntaksi_exagora_imres", ""),
+                                st.session_state.get("syntaksi_exagora_etos", "2026"),
+                            )
+                            render_print_button(
+                                "print_syntaksi_apodoxes",
+                                "Συντάξιμες Αποδοχές",
+                                disp_syn,
+                                description=(
+                                    "Σύνολα ανά έτος (φίλτρο Από–Έως): ημέρες μισθωτή/μη μισθωτή, μικτές μισθωτή, "
+                                    "εισφορές μη μισθωτή, κοινωνικοί πόροι (προαιρετικά: πίνακας/25×ημ.μη μισθωτή 2002–2016), "
+                                    "τεκμαρτές ((εισφορές+κοινωνικοί πόροι)×5), συνολικές αποδοχές, "
+                                    "ΔΤΚ (dtk_table.json), τελικές συνταξιμές (συνολικές αποδοχές×ΔΤΚ), "
+                                    "κενή γραμμή, ΕΞΑΓΟΡΑ, γραμμή ΣΥΝΟΛΟ (αθροίσματα στηλών)."
+                                ),
+                                yearly=False,
+                                year_column='Έτος',
+                                style_rows=_syn_print_styles,
+                                download_data=_json_syntaksi_pro,
+                                download_file_name="efka_syntaksi_pro.json",
+                                download_label="JSON για Syntaksi Pro 3",
+                                download_key="download_syntaksi_pro_json",
+                                download_mime="application/json",
+                            )
     
-    with sub_tab_apozimiosi:
+    with tab_apozimiosi:
         st.markdown("### Αποζημίωση (μισθωτή ασφάλιση)")
         st.caption(f"Εξαιρούνται: {excluded_packages_label}")
 
@@ -8318,6 +9432,9 @@ def show_results_page(df, filename):
         apoz_df = apoz_df[apoz_df['Τύπος Ασφάλισης'].apply(is_misthoti)]
 
         if not apoz_df.empty and all(col in apoz_df.columns for col in required_cols_apoz):
+            metrics_slot_apoz = st.empty()
+            st.markdown("Επιλέξτε πακέτα κάλυψης για να εμφανιστούν τα αθροίσματα")
+            sel_apoz_klados = []
             # Φίλτρα όπως στην Καταμέτρηση (χωρίς Τύπο Ασφάλισης)
             with st.container():
                 col1, col2, col3, col4, col5, col6, col7 = st.columns([1.1, 1.0, 1.2, 1.3, 1.1, 0.9, 0.9])
@@ -8365,6 +9482,13 @@ def show_results_page(df, filename):
                     from_date_apoz = st.text_input("Από (dd/mm/yyyy):", value="", placeholder="01/01/2000", key="apoz_filter_from")
                 with col6:
                     to_date_apoz = st.text_input("Έως (dd/mm/yyyy):", value="", placeholder="31/12/2020", key="apoz_filter_to")
+                with col7:
+                    sel_apoz_epik = st.selectbox(
+                        "Δικαιούται επικουρική",
+                        ["ΝΑΙ", "ΟΧΙ"],
+                        index=0,
+                        key="apoz_filter_epikour",
+                    )
                 if from_date_apoz or to_date_apoz:
                     apoz_df = apoz_df.copy()
                     apoz_df['_dt'] = pd.to_datetime(apoz_df['Από'], format='%d/%m/%Y', errors='coerce')
@@ -8383,118 +9507,130 @@ def show_results_page(df, filename):
                     if '_dt' in apoz_df.columns:
                         apoz_df = apoz_df.drop(columns=['_dt'])
 
+            if sel_apoz_epik == "ΟΧΙ" and 'Κλάδος/Πακέτο Κάλυψης' in apoz_df.columns:
+                def _apoz_klados_has_epik_token(val) -> bool:
+                    code_upper = str(val).upper()
+                    tokens = re.split(r'[^A-ZΑ-Ω0-9]+', code_upper)
+                    return 'ΕΠΙΚ' in tokens
+
+                apoz_df = apoz_df[~apoz_df['Κλάδος/Πακέτο Κάλυψης'].apply(_apoz_klados_has_epik_token)]
+
             # === Υπολογισμένα αποτελέσματα (τελευταίος εργοδότης, ημέρες, μισθός) ===
-            _has_klados_filter = bool(sel_apoz_klados) if 'sel_apoz_klados' in dir() else False
-            st.markdown("Επιλέξτε πακέτα κάλυψης για να εμφανιστούν τα αθροίσματα")
-            try:
-                if _has_klados_filter:
-                    _apoz_calc = apoz_df.copy()
-                    _apoz_calc['_Έως_dt'] = pd.to_datetime(_apoz_calc['Έως'], format='%d/%m/%Y', errors='coerce')
-                    _apoz_calc['_Από_dt'] = pd.to_datetime(_apoz_calc['Από'], format='%d/%m/%Y', errors='coerce')
-                    _apoz_calc = _apoz_calc.dropna(subset=['_Έως_dt', '_Από_dt'])
-                else:
-                    _apoz_calc = pd.DataFrame()
+            _has_klados_filter = bool(sel_apoz_klados)
 
-                if not _apoz_calc.empty and 'Α-Μ εργοδότη' in _apoz_calc.columns:
-                    last_row = _apoz_calc.loc[_apoz_calc['_Έως_dt'].idxmax()]
-                    last_employer_code = str(last_row.get('Α-Μ εργοδότη', '')).strip()
+            def _render_apoz_metrics_block():
+                try:
+                    if _has_klados_filter:
+                        _apoz_calc = apoz_df.copy()
+                        _apoz_calc['_Έως_dt'] = pd.to_datetime(_apoz_calc['Έως'], format='%d/%m/%Y', errors='coerce')
+                        _apoz_calc['_Από_dt'] = pd.to_datetime(_apoz_calc['Από'], format='%d/%m/%Y', errors='coerce')
+                        _apoz_calc = _apoz_calc.dropna(subset=['_Έως_dt', '_Από_dt'])
+                    else:
+                        _apoz_calc = pd.DataFrame()
 
-                    emp_df = _apoz_calc[_apoz_calc['Α-Μ εργοδότη'].astype(str).str.strip() == last_employer_code]
-                    total_days_last = 0.0
-                    total_days_last_pre = 0.0
-                    cutoff = pd.Timestamp('2012-11-12')
-                    for _, er in emp_df.iterrows():
-                        d_val = 0.0
-                        if 'Ημέρες' in er and pd.notna(er['Ημέρες']) and str(er['Ημέρες']).strip() != '':
-                            dv = clean_numeric_value(er['Ημέρες'])
-                            if dv is not None:
-                                d_val += dv
-                        if 'Έτη' in er and pd.notna(er['Έτη']):
-                            yv = clean_numeric_value(er['Έτη'])
-                            if yv is not None:
-                                d_val += yv * 300
-                        if 'Μήνες' in er and pd.notna(er['Μήνες']):
-                            mv = clean_numeric_value(er['Μήνες'])
-                            if mv is not None:
-                                d_val += mv * 25
-                        raw_g = str(er.get('Μικτές αποδοχές', ''))
-                        raw_c = str(er.get('Συνολικές εισφορές', ''))
-                        gv = clean_numeric_value(raw_g, exclude_drx=True) or 0.0
-                        cv = clean_numeric_value(raw_c, exclude_drx=True) or 0.0
-                        sgn = get_negative_amount_sign(gv, cv)
-                        if sgn == -1:
-                            d_val = -abs(d_val)
-                        total_days_last += d_val
-                        if er['_Έως_dt'] <= cutoff:
-                            total_days_last_pre += d_val
-                        elif er['_Από_dt'] < cutoff:
-                            span_days = (er['_Έως_dt'] - er['_Από_dt']).days + 1
-                            pre_days = (cutoff - er['_Από_dt']).days + 1
-                            if span_days > 0:
-                                total_days_last_pre += d_val * (pre_days / span_days)
+                    if not _apoz_calc.empty and 'Α-Μ εργοδότη' in _apoz_calc.columns:
+                        last_row = _apoz_calc.loc[_apoz_calc['_Έως_dt'].idxmax()]
+                        last_employer_code = str(last_row.get('Α-Μ εργοδότη', '')).strip()
 
-                    years_last = total_days_last / 300.0
-                    years_last_pre = total_days_last_pre / 300.0
+                        emp_df = _apoz_calc[_apoz_calc['Α-Μ εργοδότη'].astype(str).str.strip() == last_employer_code]
+                        total_days_last = 0.0
+                        total_days_last_pre = 0.0
+                        cutoff = pd.Timestamp('2012-11-12')
+                        for _, er in emp_df.iterrows():
+                            d_val = 0.0
+                            if 'Ημέρες' in er and pd.notna(er['Ημέρες']) and str(er['Ημέρες']).strip() != '':
+                                dv = clean_numeric_value(er['Ημέρες'])
+                                if dv is not None:
+                                    d_val += dv
+                            if 'Έτη' in er and pd.notna(er['Έτη']):
+                                yv = clean_numeric_value(er['Έτη'])
+                                if yv is not None:
+                                    d_val += yv * 300
+                            if 'Μήνες' in er and pd.notna(er['Μήνες']):
+                                mv = clean_numeric_value(er['Μήνες'])
+                                if mv is not None:
+                                    d_val += mv * 25
+                            raw_g = str(er.get('Μικτές αποδοχές', ''))
+                            raw_c = str(er.get('Συνολικές εισφορές', ''))
+                            gv = clean_numeric_value(raw_g, exclude_drx=True) or 0.0
+                            cv = clean_numeric_value(raw_c, exclude_drx=True) or 0.0
+                            sgn = get_negative_amount_sign(gv, cv)
+                            if sgn == -1:
+                                d_val = -abs(d_val)
+                            total_days_last += d_val
+                            if er['_Έως_dt'] <= cutoff:
+                                total_days_last_pre += d_val
+                            elif er['_Από_dt'] < cutoff:
+                                span_days = (er['_Έως_dt'] - er['_Από_dt']).days + 1
+                                pre_days = (cutoff - er['_Από_dt']).days + 1
+                                if span_days > 0:
+                                    total_days_last_pre += d_val * (pre_days / span_days)
 
-                    # Τελευταίος μισθός: πιο πρόσφατη μικτή αποδοχή κωδ. 01 από df
-                    last_salary = None
-                    try:
-                        apd_source = df.copy()
-                        e_type_col = next((c for c in apd_source.columns if 'Τύπος Αποδοχών' in c), None)
-                        if e_type_col:
-                            apd_01 = apd_source[apd_source[e_type_col].astype(str).str.strip().isin(['01', '1'])]
-                            if 'Τύπος Ασφάλισης' in apd_01.columns:
-                                apd_01 = apd_01[apd_01['Τύπος Ασφάλισης'].apply(is_misthoti)]
-                            apd_01 = apd_01.copy()
-                            apd_01['_Έως_dt2'] = pd.to_datetime(apd_01['Έως'], format='%d/%m/%Y', errors='coerce')
-                            apd_01 = apd_01.dropna(subset=['_Έως_dt2'])
-                            if not apd_01.empty:
-                                latest = apd_01.loc[apd_01['_Έως_dt2'].idxmax()]
-                                raw_sal = str(latest.get('Μικτές αποδοχές', ''))
-                                last_salary = clean_numeric_value(raw_sal, exclude_drx=True)
-                    except Exception:
-                        pass
+                        years_last = total_days_last / 300.0
+                        years_last_pre = total_days_last_pre / 300.0
 
-                    st.markdown("---")
-                    m1, m2, m3, m4, m5, m6 = st.columns(6)
-                    with m1:
-                        st.metric("Τελευταίος εργοδότης", last_employer_code)
-                    with m2:
-                        st.metric("Ημέρες τελ. εργοδότη", format_number_greek(total_days_last, decimals=0))
-                    with m3:
-                        st.metric("Έτη τελ. εργοδότη", format_number_greek(years_last, decimals=2))
-                    with m4:
-                        st.metric("Ημέρες έως 12/11/2012", format_number_greek(total_days_last_pre, decimals=0))
-                    with m5:
-                        st.metric("Έτη έως 12/11/2012", format_number_greek(years_last_pre, decimals=2))
-                    with m6:
-                        if last_salary is not None and last_salary > 0:
-                            st.metric("Τελευταίος μισθός", format_currency(last_salary))
-                        else:
+                        # Τελευταίος μισθός: πιο πρόσφατη μικτή αποδοχή κωδ. 01 από df
+                        last_salary = None
+                        try:
+                            apd_source = df.copy()
+                            e_type_col = next((c for c in apd_source.columns if 'Τύπος Αποδοχών' in c), None)
+                            if e_type_col:
+                                apd_01 = apd_source[apd_source[e_type_col].astype(str).str.strip().isin(['01', '1'])]
+                                if 'Τύπος Ασφάλισης' in apd_01.columns:
+                                    apd_01 = apd_01[apd_01['Τύπος Ασφάλισης'].apply(is_misthoti)]
+                                apd_01 = apd_01.copy()
+                                apd_01['_Έως_dt2'] = pd.to_datetime(apd_01['Έως'], format='%d/%m/%Y', errors='coerce')
+                                apd_01 = apd_01.dropna(subset=['_Έως_dt2'])
+                                if not apd_01.empty:
+                                    latest = apd_01.loc[apd_01['_Έως_dt2'].idxmax()]
+                                    raw_sal = str(latest.get('Μικτές αποδοχές', ''))
+                                    last_salary = clean_numeric_value(raw_sal, exclude_drx=True)
+                        except Exception:
+                            pass
+
+                        st.markdown("---")
+                        m1, m2, m3, m4, m5, m6 = st.columns(6)
+                        with m1:
+                            st.metric("Τελευταίος εργοδότης", last_employer_code)
+                        with m2:
+                            st.metric("Ημέρες τελ. εργοδότη", format_number_greek(total_days_last, decimals=0))
+                        with m3:
+                            st.metric("Έτη τελ. εργοδότη", format_number_greek(years_last, decimals=2))
+                        with m4:
+                            st.metric("Ημέρες έως 12/11/2012", format_number_greek(total_days_last_pre, decimals=0))
+                        with m5:
+                            st.metric("Έτη έως 12/11/2012", format_number_greek(years_last_pre, decimals=2))
+                        with m6:
+                            if last_salary is not None and last_salary > 0:
+                                st.metric("Τελευταίος μισθός", format_currency(last_salary))
+                            else:
+                                st.metric("Τελευταίος μισθός", "–")
+                        st.markdown("---")
+                    else:
+                        st.markdown("---")
+                        m1, m2, m3, m4, m5, m6 = st.columns(6)
+                        with m1:
+                            st.metric("Τελευταίος εργοδότης", "–")
+                        with m2:
+                            st.metric("Ημέρες τελ. εργοδότη", "–")
+                        with m3:
+                            st.metric("Έτη τελ. εργοδότη", "–")
+                        with m4:
+                            st.metric("Ημέρες έως 12/11/2012", "–")
+                        with m5:
+                            st.metric("Έτη έως 12/11/2012", "–")
+                        with m6:
                             st.metric("Τελευταίος μισθός", "–")
-                    st.markdown("---")
-                else:
-                    st.markdown("---")
-                    m1, m2, m3, m4, m5, m6 = st.columns(6)
-                    with m1:
-                        st.metric("Τελευταίος εργοδότης", "–")
-                    with m2:
-                        st.metric("Ημέρες τελ. εργοδότη", "–")
-                    with m3:
-                        st.metric("Έτη τελ. εργοδότη", "–")
-                    with m4:
-                        st.metric("Ημέρες έως 12/11/2012", "–")
-                    with m5:
-                        st.metric("Έτη έως 12/11/2012", "–")
-                    with m6:
-                        st.metric("Τελευταίος μισθός", "–")
+                        pass
+                        st.markdown("---")
+                except Exception:
                     pass
-                    st.markdown("---")
-            except Exception:
-                pass
+
+            with metrics_slot_apoz.container():
+                _render_apoz_metrics_block()
 
             apoz_rows = []
-            with st.spinner("Υπολογισμός ημερών αποζημίωσης..."):
+            with nullcontext():
                 for idx, row in apoz_df.iterrows():
                     try:
                         if pd.isna(row['Από']) or pd.isna(row['Έως']):
@@ -8695,7 +9831,7 @@ def show_results_page(df, filename):
         if all(col in parallel_df.columns for col in required_cols):
             parallel_rows = []
             
-            with st.spinner("Υπολογισμός παράλληλης ασφάλισης..."):
+            with nullcontext():
                 for idx, row in parallel_df.iterrows():
                     try:
                         if pd.isna(row['Από']) or pd.isna(row['Έως']):
@@ -9176,7 +10312,7 @@ def show_results_page(df, filename):
         if all(col in parallel_df.columns for col in required_cols):
             parallel_rows = []
 
-            with st.spinner("Υπολογισμός παράλληλης απασχόλησης 2017+..."):
+            with nullcontext():
                 for _, row in parallel_df.iterrows():
                     try:
                         if pd.isna(row['Από']) or pd.isna(row['Έως']):
@@ -9455,7 +10591,7 @@ def show_results_page(df, filename):
         if all(col in multi_df.columns for col in required_cols):
             multi_rows = []
             
-            with st.spinner("Υπολογισμός πολλαπλής απασχόλησης..."):
+            with nullcontext():
                 for idx, row in multi_df.iterrows():
                     try:
                         if pd.isna(row['Από']) or pd.isna(row['Έως']):
@@ -10060,6 +11196,11 @@ def show_results_page(df, filename):
 
 def main():
     """Κύρια συνάρτηση της εφαρμογής (Κυρία)."""
+    _main_inner()
+
+
+def _main_inner():
+    """Σώμα εφαρμογής (overlay: try/finally στο if __name__)."""
 
     # Αρχική κατάσταση - ανέβασμα αρχείου
     if 'file_uploaded' not in st.session_state:
@@ -10228,7 +11369,7 @@ def main():
                 client_name = st.session_state.get('client_name', '')
                 _app_title = "ATLAS"
                 _subtitle = "Ασφαλιστικό Βιογραφικό"
-                with st.spinner("Δημιουργία αναφοράς HTML..."):
+                with st.spinner("Παραγωγή της HTML αναφοράς — παρακαλώ περιμένετε…"):
                     viewer_html, _ = generate_full_html_report(
                         df, client_name=client_name,
                         app_title=_app_title, app_subtitle=_subtitle,
