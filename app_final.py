@@ -4609,6 +4609,42 @@ def build_count_c_dataframe(count_df: pd.DataFrame, description_map: dict[str, s
     return pd.DataFrame(counting_rows)
 
 
+def _pivot_bool_month_columns(pivoted: pd.DataFrame) -> None:
+    """Μετά pivot(Is_Aggregate).fillna(False): ρητό bool στις στήλες μήνα — FutureWarning + συνέπεια τύπων."""
+    for _c in list(pivoted.columns):
+        if isinstance(_c, int):
+            pivoted[_c] = pivoted[_c].astype(bool)
+
+
+def _count_display_df_arrow_safe(df: pd.DataFrame) -> pd.DataFrame:
+    """Καταμέτρηση: η ΕΤΟΣ έχει int + '' για UI — PyArrow/Streamlit χρειάζεται ομοιόμορφο dtype."""
+    if df is None or df.empty or "ΕΤΟΣ" not in df.columns:
+        return df
+    out = df.copy()
+
+    def _etos_cell(v):
+        if v is None:
+            return ""
+        if isinstance(v, str) and not str(v).strip():
+            return ""
+        try:
+            if pd.isna(v):
+                return ""
+        except (TypeError, ValueError):
+            pass
+        try:
+            return str(int(v))
+        except (TypeError, ValueError):
+            return str(v).strip() if v is not None else ""
+
+    out["ΕΤΟΣ"] = out["ΕΤΟΣ"].map(_etos_cell)
+    try:
+        out["ΕΤΟΣ"] = out["ΕΤΟΣ"].astype("string")
+    except Exception:
+        out["ΕΤΟΣ"] = out["ΕΤΟΣ"].astype(str)
+    return out
+
+
 def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] | None = None, show_count_totals_only: bool = False):
     required_cols = ['Από', 'Έως', 'Ημέρες']
     if not all(col in count_df.columns for col in required_cols):
@@ -4631,6 +4667,7 @@ def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] |
 
     final_val = pivot_df.pivot(index=['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'], columns='Μήνας_Num', values='Ημέρες').fillna(0)
     final_agg = agg_df.pivot(index=['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'], columns='Μήνας_Num', values='Is_Aggregate').fillna(False)
+    _pivot_bool_month_columns(final_agg)
     final_contrib = contrib_df.pivot(index=['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'], columns='Μήνας_Num', values='Εισφορές_Part').fillna(0)
 
     final_val = final_val.reset_index()
@@ -4937,6 +4974,8 @@ def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] |
     else:
         final_display_df = final_display_df.reset_index(drop=True)
         masks_df = masks_df.reset_index(drop=True)
+
+    final_display_df = _count_display_df_arrow_safe(final_display_df)
 
     active_mask_rows = masks_df.to_dict('records') if not masks_df.empty else []
 
@@ -8549,6 +8588,7 @@ def show_results_page(df, filename):
                 # Create Pivot Tables
                 final_val = pivot_df.pivot(index=['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'], columns='Μήνας_Num', values='Ημέρες').fillna(0)
                 final_agg = agg_df.pivot(index=['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'], columns='Μήνας_Num', values='Is_Aggregate').fillna(False)
+                _pivot_bool_month_columns(final_agg)
                 final_contrib = contrib_df.pivot(index=['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'], columns='Μήνας_Num', values='Εισφορές_Part').fillna(0)
                 
                 # Join with annual totals
@@ -9016,6 +9056,8 @@ def show_results_page(df, filename):
                 else:
                     final_display_df = final_display_df.reset_index(drop=True)
                     masks_df = masks_df.reset_index(drop=True)
+                
+                final_display_df = _count_display_df_arrow_safe(final_display_df)
                 
                 active_mask_rows = masks_df.to_dict('records') if not masks_df.empty else []
                 
@@ -10085,6 +10127,7 @@ def show_results_page(df, filename):
                     
                     final_val_p = pivot_df_p.pivot(index=['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'], columns='Μήνας_Num', values='Ημέρες').fillna(0)
                     final_agg_p = agg_df_p.pivot(index=['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'], columns='Μήνας_Num', values='Is_Aggregate').fillna(False)
+                    _pivot_bool_month_columns(final_agg_p)
                     
                     final_val_p = final_val_p.reset_index()
                     final_val_p = final_val_p.merge(annual_totals_p, on=['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'], how='left')
@@ -10749,6 +10792,7 @@ def show_results_page(df, filename):
                     
                     final_val_m = pivot_df_m.pivot(index=['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'], columns='Μήνας_Num', values='Ημέρες').fillna(0)
                     final_agg_m = agg_df_m.pivot(index=['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'], columns='Μήνας_Num', values='Is_Aggregate').fillna(False)
+                    _pivot_bool_month_columns(final_agg_m)
                     
                     final_val_m = final_val_m.reset_index()
                     final_val_m = final_val_m.merge(annual_totals_m, on=['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'], how='left')
