@@ -5747,6 +5747,9 @@ def show_results_page(df, filename):
     # Συγχρονισμός ΑΠΔ «Κλάδος/Πακέτο» από Καταμέτρηση: εφαρμογή πριν τα widgets των tabs (η Καταμέτρηση τρέχει μετά την ΑΠΔ)
     if "_pending_apd_klados_sync" in st.session_state:
         st.session_state["apd_filter_klados"] = st.session_state.pop("_pending_apd_klados_sync")
+        st.session_state["_apd_sync_just_applied"] = True
+    else:
+        st.session_state.pop("_apd_sync_just_applied", None)
     tabs_widgets = st.tabs([tab_titles[k] for k in tab_keys_ordered])
     tab_by_key = dict(zip(tab_keys_ordered, tabs_widgets))
     tab_summary = tab_by_key["summary"]
@@ -8344,7 +8347,7 @@ def show_results_page(df, filename):
                         if sel_cnt_klados:
                             sel_codes = [klados_map.get(o, o) for o in sel_cnt_klados]
                             count_df = count_df[count_df['Κλάδος/Πακέτο Κάλυψης'].isin(sel_codes)]
-                        if _sync_cnt_klados_to_apd(sel_cnt_klados, klados_map):
+                        if not st.session_state.get("_apd_sync_just_applied") and _sync_cnt_klados_to_apd(sel_cnt_klados, klados_map):
                             st.rerun()
                 
                 with col5:
