@@ -988,13 +988,13 @@ def render_print_button(
                 data=download_data,
                 file_name=download_file_name,
                 mime=download_mime,
-                use_container_width=False,
+                width="content",
                 key=download_key or f"{button_key}_download",
                 type="primary",
             )
 
     with col_print:
-        if st.button("Εκτύπωση", key=button_key, use_container_width=True):
+        if st.button("Εκτύπωση", key=button_key, width="stretch"):
             # Μοναδικό nonce ώστε το component να επανα-τοποθετείται και να εκτελείται κάθε φορά
             nonce_key = f"_print_nonce_{button_key}"
             nonce = st.session_state.get(nonce_key, 0) + 1
@@ -5257,7 +5257,7 @@ def render_totals_tab(
             "**Υπέρβαση ορίου ημερών ανά μήνα** (εφαρμόστηκε πλαφόν: ΙΚΑ 31 ημ./μήνα, ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ και υπόλοιπα 25 ημ./μήνα· για ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ το μήνυμα μόνο όταν >30 ημ./μήνα):\n\n" + "\n\n".join(lines)
         )
 
-    st.dataframe(display_summary, use_container_width=True)
+    st.dataframe(display_summary, width="stretch")
     if register_view_fn is not None:
         register_view_fn("Συνολα - Ομαδοποίηση", display_summary)
     render_print_button(
@@ -5434,7 +5434,7 @@ def _main_inner():
                 "Δείτε το σχετικό [βίντεο οδηγίες](https://www.loom.com/share/9b9fe5f9300f42a7a1cfd1315f629145)."
             )
             
-            if st.button("Άνοιγμα / Προβολή", type="primary", use_container_width=True, key="open_html_btn"):
+            if st.button("Άνοιγμα / Προβολή", type="primary", width="stretch", key="open_html_btn"):
                 st.session_state['open_html_report'] = True
             
             if st.session_state.get('open_html_report'):
@@ -5488,7 +5488,7 @@ var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
                         "**Πριν την προβολή:** Αν δεν εμφανίζεται η ανάλυση ή η HTML αναφορά, ελέγξτε αν ο browser αποκλείει **αναδυόμενα παράθυρα** (pop-ups). "
                         "Δείτε το σχετικό [βίντεο οδηγίες](https://www.loom.com/share/9b9fe5f9300f42a7a1cfd1315f629145)."
                     )
-                    if st.button("Άνοιγμα / Προβολή", type="primary", use_container_width=True, key="open_html_btn"):
+                    if st.button("Άνοιγμα / Προβολή", type="primary", width="stretch", key="open_html_btn"):
                         st.session_state['open_html_report'] = True
                 
                 # Εμφάνιση summary
@@ -5500,7 +5500,7 @@ var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
                 # Reset button
                 col1, col2, col3 = st.columns([1, 1, 1])
                 with col2:
-                    if st.button("Δοκιμάστε Ξανά", use_container_width=True):
+                    if st.button("Δοκιμάστε Ξανά", width="stretch"):
                         # Reset session state
                         for key in ['file_uploaded', 'processing_done', 'uploaded_file', 'extracted_data', 'filename']:
                             if key in st.session_state:

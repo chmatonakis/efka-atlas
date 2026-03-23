@@ -987,13 +987,13 @@ def render_print_button(
                 data=download_data,
                 file_name=download_file_name,
                 mime=download_mime,
-                use_container_width=False,
+                width="content",
                 key=download_key or f"{button_key}_download",
                 type="primary",
             )
 
     with col_print:
-        if st.button("Εκτύπωση", key=button_key, use_container_width=True):
+        if st.button("Εκτύπωση", key=button_key, width="stretch"):
             # Μοναδικό nonce ώστε το component να επανα-τοποθετείται και να εκτελείται κάθε φορά
             nonce_key = f"_print_nonce_{button_key}"
             nonce = st.session_state.get(nonce_key, 0) + 1
@@ -5256,7 +5256,7 @@ def render_totals_tab(
             "**Υπέρβαση ορίου ημερών ανά μήνα** (εφαρμόστηκε πλαφόν: ΙΚΑ 31 ημ./μήνα, ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ και υπόλοιπα 25 ημ./μήνα· για ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ το μήνυμα μόνο όταν >30 ημ./μήνα):\n\n" + "\n\n".join(lines)
         )
 
-    st.dataframe(display_summary, use_container_width=True)
+    st.dataframe(display_summary, width="stretch")
     if register_view_fn is not None:
         register_view_fn("Συνολα - Ομαδοποίηση", display_summary)
     render_print_button(
@@ -5750,7 +5750,7 @@ def show_results_page(df, filename):
             # Κουμπί για άνοιγμα popup φίλτρων
             col1, col2, col3 = st.columns([1, 2, 1])
             with col2:
-                if st.button("Άνοιγμα Φίλτρων", type="secondary", use_container_width=True):
+                if st.button("Άνοιγμα Φίλτρων", type="secondary", width="stretch"):
                     st.session_state['show_filters'] = not st.session_state.get('show_filters', False)
         
             # Popup φίλτρων
@@ -5914,7 +5914,7 @@ def show_results_page(df, filename):
             st.markdown("### Κύρια Δεδομένα e-EFKA (Με χρονολογική σειρά)")
             st.dataframe(
                 display_df,
-                use_container_width=True
+                width="stretch"
             )
             register_view("Κύρια Δεδομένα", display_df)
             # Κουμπί εκτύπωσης για Κύρια Δεδομένα
@@ -5933,7 +5933,7 @@ def show_results_page(df, filename):
             with ai_row1:
                 st.info("Παράγεται δομημένη σύνοψη φακέλου με βάση τη Σύνοψη, τις καρτέλες και τους βασικούς ελέγχους. Επιπλέον, μπορείτε να κάνετε συγκεκριμένες ερωτήσεις για τα στοιχεία του φακέλου.")
             with ai_row2:
-                run_ai_main = st.button("Παραγωγή AI Σύνοψης", type="primary", use_container_width=True, key="main_ai_generate")
+                run_ai_main = st.button("Παραγωγή AI Σύνοψης", type="primary", width="stretch", key="main_ai_generate")
             with ai_row3:
                 ai_model_labels = list(AI_MODEL_OPTIONS.keys())
                 ai_model_choice = st.selectbox(
@@ -6073,7 +6073,7 @@ def show_results_page(df, filename):
 
                 if not extra_df.empty:
                     st.markdown("### Παράρτημα (Τελευταίες Σελίδες)")
-                    st.dataframe(extra_df, use_container_width=True)
+                    st.dataframe(extra_df, width="stretch")
                     register_view("Παράρτημα", extra_df)
                     render_print_button(
                         "print_extra",
@@ -7036,14 +7036,14 @@ def show_results_page(df, filename):
                         styled = display_final.style.apply(_highlight_totals, axis=1).apply(_bold_year_column, axis=1)
                         st.dataframe(
                             styled,
-                            use_container_width=True,
+                            width="stretch",
                             key="yearly_table"
                         )
                     except Exception:
                         # Fallback χωρίς χρωματισμό για να διατηρηθούν search/download/expand & scroll
                         st.dataframe(
                             display_final,
-                            use_container_width=True
+                            width="stretch"
                         )
                     render_print_button(
                         "print_yearly",
@@ -7282,12 +7282,12 @@ def show_results_page(df, filename):
                         .set_table_styles(table_styles)
                     )
                     
-                    st.dataframe(styled_days, use_container_width=True)
+                    st.dataframe(styled_days, width="stretch")
                 except Exception:
                     # Fallback χωρίς ειδική μορφοποίηση
                     st.dataframe(
                         display_final_days.style.set_properties(**{'text-align': 'left'}),
-                        use_container_width=True
+                        width="stretch"
                     )
 
                 # Κουμπί εκτύπωσης (με κενά για μηδενικές τιμές)
@@ -7349,7 +7349,7 @@ def show_results_page(df, filename):
                 # Εμφάνιση πίνακα
                 st.dataframe(
                     display_gaps,
-                    use_container_width=True
+                    width="stretch"
                 )
                 register_view("Κενά Διαστήματα", display_gaps)
                 
@@ -7378,7 +7378,7 @@ def show_results_page(df, filename):
                 )
                 st.dataframe(
                     zero_display_df,
-                    use_container_width=True
+                    width="stretch"
                 )
                 register_view("Διαστήματα χωρίς ημέρες", zero_display_df)
                 render_print_button(
@@ -8194,7 +8194,7 @@ def show_results_page(df, filename):
         st.markdown("### Ανάλυση ΑΠΔ (Με χρονολογική σειρά)")
         st.dataframe(
             styled_df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True
         )
         # Κουμπί εκτύπωσης για Ανάλυση ΑΠΔ
@@ -9078,7 +9078,7 @@ def show_results_page(df, filename):
 
                 st.dataframe(
                     styled_cnt,
-                    use_container_width=True,
+                    width="stretch",
                     column_config=col_config,
                     hide_index=True,
                     key="counting_table"
@@ -9383,7 +9383,7 @@ def show_results_page(df, filename):
                             except Exception:
                                 _syn_disp_show = disp_syn
 
-                            st.dataframe(_syn_disp_show, use_container_width=True, hide_index=True)
+                            st.dataframe(_syn_disp_show, width="stretch", hide_index=True)
 
                             _syn_print_styles = []
                             for _, _r in disp_syn.iterrows():
@@ -9806,7 +9806,7 @@ def show_results_page(df, filename):
                     return ['font-weight: 700' if col in bold_cols_apoz else '' for col in apoz_display_df.columns]
                 st.dataframe(
                     apoz_display_df.style.apply(apoz_style_fn, axis=1),
-                    use_container_width=True,
+                    width="stretch",
                     column_config={
                         "ΕΤΟΣ": st.column_config.TextColumn("Έτος"),
                         "ΕΡΓΟΔΟΤΗΣ": st.column_config.TextColumn("Εργοδότης"),
@@ -10273,7 +10273,7 @@ def show_results_page(df, filename):
                     # Display
                     st.dataframe(
                         styler,
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                         column_config={
                             "Έτος": st.column_config.Column(width="small"),
@@ -10572,7 +10572,7 @@ def show_results_page(df, filename):
                         return styles
 
                     styler = display_df_show.style.apply(style_parallel_2017, axis=1)
-                    st.dataframe(styler, use_container_width=True, hide_index=True)
+                    st.dataframe(styler, width="stretch", hide_index=True)
                     st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
                     register_view("Παράλληλη_Απασχόληση_2017+", display_df_show)
                     render_print_button(
@@ -10911,7 +10911,7 @@ def show_results_page(df, filename):
                     st.markdown('<div class="multi-table">', unsafe_allow_html=True)
                     st.dataframe(
                         styler,
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                          column_config={
                             "Έτος": st.column_config.Column(width="small"),
@@ -11004,7 +11004,7 @@ def show_results_page(df, filename):
                 data=main_output.getvalue(),
                 file_name=main_filename,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
+                width="stretch"
             )
         
         with col2:
@@ -11140,7 +11140,7 @@ def show_results_page(df, filename):
                 data=all_output.getvalue(),
                 file_name=all_filename,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
+                width="stretch"
             )
 
         with col3:
@@ -11175,7 +11175,7 @@ def show_results_page(df, filename):
                     data=view_buffer.getvalue() if 'view_buffer' in locals() else b'',
                     file_name=view_filename if 'view_filename' in locals() else 'view.xlsx',
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
+                    width="stretch",
                     disabled='view_buffer' not in locals()
             )
         
@@ -11366,11 +11366,11 @@ def _main_inner():
             
             col1, col2, col3 = st.columns([1, 1, 1])
             with col1:
-                if st.button("Προβολή Αποτελεσμάτων", type="primary", use_container_width=True, key="show_results_btn"):
+                if st.button("Προβολή Αποτελεσμάτων", type="primary", width="stretch", key="show_results_btn"):
                     st.session_state['show_results'] = True
                     st.rerun()
             with col2:
-                if st.button("Γρήγορη Προβολή - HTML", type="secondary", use_container_width=True, key="open_html_btn"):
+                if st.button("Γρήγορη Προβολή - HTML", type="secondary", width="stretch", key="open_html_btn"):
                     st.session_state['open_html_report'] = True
             
             if st.session_state.get('open_html_report'):
@@ -11425,11 +11425,11 @@ var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
                     )
                     col1, col2, col3 = st.columns([1, 1, 1])
                     with col1:
-                        if st.button("Προβολή Αποτελεσμάτων", type="primary", use_container_width=True, key="show_results_btn"):
+                        if st.button("Προβολή Αποτελεσμάτων", type="primary", width="stretch", key="show_results_btn"):
                             st.session_state['show_results'] = True
                             st.rerun()
                     with col2:
-                        if st.button("Γρήγορη Προβολή - HTML", type="secondary", use_container_width=True, key="open_html_btn"):
+                        if st.button("Γρήγορη Προβολή - HTML", type="secondary", width="stretch", key="open_html_btn"):
                             st.session_state['open_html_report'] = True
                 
                 # Εμφάνιση summary
@@ -11441,7 +11441,7 @@ var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
                 # Reset button
                 col1, col2, col3 = st.columns([1, 1, 1])
                 with col2:
-                    if st.button("Δοκιμάστε Ξανά", use_container_width=True):
+                    if st.button("Δοκιμάστε Ξανά", width="stretch"):
                         # Reset session state
                         for key in ['file_uploaded', 'processing_done', 'uploaded_file', 'extracted_data', 'show_results', 'filename']:
                             if key in st.session_state:
