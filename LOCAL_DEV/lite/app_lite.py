@@ -12,6 +12,7 @@ import streamlit.components.v1 as components
 import base64
 import urllib.parse
 import pandas as pd
+pd.set_option('future.no_silent_downcasting', True)
 import io
 import tempfile
 import os

@@ -11,6 +11,7 @@ import streamlit.components.v1 as components
 import base64
 import urllib.parse
 import pandas as pd
+pd.set_option('future.no_silent_downcasting', True)
 import io
 import tempfile
 import os
@@ -11195,7 +11196,7 @@ def show_results_page(df, filename):
                     st.markdown('<div style="font-size:0.9rem; color:#4b5563; padding-top:0.45rem;">Επιλέξτε μεμονωμένο πίνακα:</div>', unsafe_allow_html=True)
                 with dropdown_col:
                     selected_view = st.selectbox(
-                        "",
+                        "Επιλέξτε πίνακα",
                         options=view_options,
                         key="view_export_selection",
                         label_visibility="collapsed"
