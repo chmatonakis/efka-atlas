@@ -591,9 +591,14 @@ def build_print_table_html(
     headers_html = ''.join(f"<th>{h}</th>" for h in dataframe.columns)
     rows_html = []
     for ridx, row in dataframe.iterrows():
-        is_total = any(str(v).strip().startswith('Σύνολο') for v in row.values)
-        tr_class = ' class="total-row"' if is_total else ''
         row_styles = style_rows[ridx] if style_rows and ridx < len(style_rows) else {}
+        is_total = any(str(v).strip().startswith('Σύνολο') for v in row.values)
+        if not is_total and row_styles:
+            is_total = any(
+                ('cfe2f3' in str(s).lower() or 'e8f4fc' in str(s).lower() or 'f5fafc' in str(s).lower())
+                for s in row_styles.values() if s
+            )
+        tr_class = ' class="total-row"' if is_total else ''
         tds_list = []
         for cidx, v in enumerate(row.values):
             col_name = dataframe.columns[cidx]
@@ -4991,7 +4996,7 @@ def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] |
             if col in ['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΣΥΝΟΛΟ', 'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ']:
                 style += 'font-weight:700;'
             if is_total and col in total_highlight_cols:
-                style += 'background-color:#cfe2f3;color:#000;'
+                style += 'background-color:#f5fafc;color:#000;'
             elif col in month_cols and mask_row.get(col, False):
                 style += 'background-color:#fff9c4;color:#000;'
             if col == 'ΠΕΡΙΓΡΑΦΗ':
@@ -8386,7 +8391,7 @@ def show_results_page(df, filename):
             
             st.session_state['count_klados_selected'] = bool(sel_cnt_klados)
             st.session_state['count_work_df'] = count_df.copy()
-
+            
             show_count_totals_only = st.toggle(
                 "Μόνο γραμμές συνόλου ανά έτος",
                 value=False,
@@ -8736,7 +8741,7 @@ def show_results_page(df, filename):
                             year_kinds_present[y_int] = set(
                                 kind_rows[kind_rows['ΕΤΟΣ'] == yr]['_kind'].dropna().unique().tolist()
                             )
-                
+
                 # Format numbers
                 def format_cell_days(val):
                     if val == 0: return ""
@@ -8793,7 +8798,7 @@ def show_results_page(df, filename):
                 # Columns structure
                 base_cols = ['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ']
                 all_cols = base_cols + ['ΣΥΝΟΛΟ'] + month_cols + ['ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ', 'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ', 'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ']
-
+                
                 def _fill_count_total_amounts(total_row, totals_vals):
                     if not totals_vals:
                         return
