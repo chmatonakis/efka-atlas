@@ -1,4 +1,5 @@
-streamlit
+# Ευθυγράμμιση με τρέχουσα stable έκδοση (PyPI)· τοπικά: pip install -U -r requirements.txt
+streamlit>=1.50.0
 pandas
 # Ρητές εκδόσεις ώστε το Streamlit Cloud να εγκαθιστά σταθερά την αλυσίδα PDF
 pdfminer.six>=20221105
