@@ -59,34 +59,44 @@ def main() -> None:
     )
 
     # Μετά την επεξεργασία: μόνο ένα κουμπί (δύο σημεία, διαφορετική εσοχή)
-    old_a = """            col1, col2, col3 = st.columns([1, 1, 1])
+    # Streamlit: width="stretch" (νεότερο) ή use_container_width=True (παλιότερο)
+    def _btn_kw(width_stretch: bool) -> str:
+        return 'width="stretch"' if width_stretch else "use_container_width=True"
+
+    for stretch in (True, False):
+        kw = _btn_kw(stretch)
+        old_a = f"""            col1, col2, col3 = st.columns([1, 1, 1])
             with col1:
-                if st.button("Προβολή Αποτελεσμάτων", type="primary", width="stretch", key="show_results_btn"):
+                if st.button("Προβολή Αποτελεσμάτων", type="primary", {kw}, key="show_results_btn"):
                     st.session_state['show_results'] = True
                     st.rerun()
             with col2:
-                if st.button("Γρήγορη Προβολή - HTML", type="secondary", width="stretch", key="open_html_btn"):
+                if st.button("Γρήγορη Προβολή - HTML", type="secondary", {kw}, key="open_html_btn"):
                     st.session_state['open_html_report'] = True
 """
-    old_b = """                    col1, col2, col3 = st.columns([1, 1, 1])
+        old_b = f"""                    col1, col2, col3 = st.columns([1, 1, 1])
                     with col1:
-                        if st.button("Προβολή Αποτελεσμάτων", type="primary", width="stretch", key="show_results_btn"):
+                        if st.button("Προβολή Αποτελεσμάτων", type="primary", {kw}, key="show_results_btn"):
                             st.session_state['show_results'] = True
                             st.rerun()
                     with col2:
-                        if st.button("Γρήγορη Προβολή - HTML", type="secondary", width="stretch", key="open_html_btn"):
+                        if st.button("Γρήγορη Προβολή - HTML", type="secondary", {kw}, key="open_html_btn"):
                             st.session_state['open_html_report'] = True
 """
-    new_a = """            if st.button("Άνοιγμα / Προβολή", type="primary", width="stretch", key="open_html_btn"):
+        new_a = """            if st.button("Άνοιγμα / Προβολή", type="primary", width="stretch", key="open_html_btn"):
                 st.session_state['open_html_report'] = True
 """
-    new_b = """                    if st.button("Άνοιγμα / Προβολή", type="primary", width="stretch", key="open_html_btn"):
+        new_b = """                    if st.button("Άνοιγμα / Προβολή", type="primary", width="stretch", key="open_html_btn"):
                         st.session_state['open_html_report'] = True
 """
-    if old_a not in body or old_b not in body:
-        raise SystemExit("Δεν βρέθηκαν τα μπλοκ κουμπιών (αναμενόμενα 2 εκδοχές εσοχής)")
-    body = body.replace(old_a, new_a, 1)
-    body = body.replace(old_b, new_b, 1)
+        if old_a in body and old_b in body:
+            body = body.replace(old_a, new_a, 1)
+            body = body.replace(old_b, new_b, 1)
+            break
+    else:
+        raise SystemExit(
+            "Δεν βρέθηκαν τα μπλοκ κουμπιών (αναμενόμενα 2 εκδοχές εσοχής, stretch ή use_container_width)"
+        )
 
     body = body.replace(
         '                _app_title = "ATLAS"\n                _subtitle = "Ασφαλιστικό Βιογραφικό"',
