@@ -26,6 +26,7 @@ from app_final import (
     build_print_table_html,
     build_yearly_print_html,
     build_count_report,
+    build_count_c_dataframe,
     build_description_map,
     build_parallel_print_df,
     build_parallel_2017_print_df,
@@ -41,6 +42,8 @@ from app_final import (
     should_show_complex_file_warning,
     clean_numeric_value,
     apply_negative_time_sign,
+    insurance_kind_classify_count,
+    format_number_greek,
     APODOXES_DESCRIPTIONS,
 )
 
@@ -779,6 +782,35 @@ def _build_paketo_timeline_rows_html(records, desc_map):
     return "".join(parts)
 
 
+def _format_totals_exceeded_block(n_count: int, body_inner_html: str, visible: bool) -> str:
+    """Μία γραμμή ειδοποίησης + κουμπί· το πλήρες κείμενο στο modal (HTML Σύνολα)."""
+    vis = '' if visible else ' style="display:none"'
+    intro_p = (
+        '<p class="totals-exceeded-modal-intro">Πλαφόν: ΙΚΑ 31 ημ./μήνα, ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ και υπόλοιπα '
+        '25 ημ./μήνα· μήνυμα για ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ μόνο όταν &gt;30.</p>'
+    )
+    full_body = (intro_p + body_inner_html) if body_inner_html else ''
+    return (
+        f'<div id="totals-exceeded-wrap" class="totals-exceeded-wrap"{vis} role="region" '
+        f'aria-label="Υπέρβαση πλαφόν ημερών">'
+        f'<div class="totals-exceeded-compact">'
+        f'<span class="totals-exceeded-compact-text"><strong>Υπέρβαση ορίου ημερών ανά μήνα</strong> — '
+        f'<span id="totals-exceeded-count">{n_count}</span> μήνες.</span>'
+        f'<button type="button" class="totals-exceeded-modal-btn" id="totals-exceeded-open-btn" '
+        f'aria-haspopup="dialog" aria-controls="totals-exceeded-modal-overlay">Προβολή λεπτομερειών</button>'
+        f'</div></div>'
+        f'<div id="totals-exceeded-modal-overlay" class="totals-exceeded-modal-overlay" aria-hidden="true">'
+        f'<div class="totals-exceeded-modal-panel" role="dialog" aria-modal="true" '
+        f'aria-labelledby="totals-exceeded-modal-title">'
+        f'<div class="totals-exceeded-modal-head">'
+        f'<h3 id="totals-exceeded-modal-title">Υπέρβαση ορίου ημερών ανά μήνα</h3>'
+        f'<button type="button" class="totals-exceeded-modal-close" aria-label="Κλείσιμο">&times;</button>'
+        f'</div>'
+        f'<div id="totals-exceeded-modal-body" class="totals-exceeded-modal-body">{full_body}</div>'
+        f'</div></div>'
+    )
+
+
 def build_totals_with_filters(display_summary, raw_df=None, desc_map=None,
                                warning_types=None):
     """Ενότητα Σύνολα με JS φίλτρα (Πακέτο, Ταμείο, Τύπος ασφάλισης, Από-Έως)."""
@@ -878,6 +910,7 @@ def build_totals_with_filters(display_summary, raw_df=None, desc_map=None,
 
     required_cols = {'Από', 'Έως'}
     exceeded_lines_html = ""
+    n_exceeded_server = 0
     _server_cap_error = ""
     if raw_df is not None and not raw_df.empty and required_cols.issubset(set(raw_df.columns)):
         try:
@@ -913,20 +946,16 @@ def build_totals_with_filters(display_summary, raw_df=None, desc_map=None,
                         parts.append(f"Τύπος: {typos}")
                     parts.append(f"Μήνας <strong>{m_str} {y}</strong>: {days_val} ημέρες (όριο {lim}, υπέρβαση +{over})")
                     lines.append(" | ".join(parts))
+                n_exceeded_server = len(lines)
                 exceeded_lines_html = "<br><br>".join(lines)
         except Exception as exc:
             _server_cap_error = str(exc)
     if exceeded_lines_html:
-        exceeded_warning_div = (
-            '<div id="totals-exceeded-warning" class="totals-exceeded-warning" role="alert">'
-            '<strong>Υπέρβαση ορίου ημερών ανά μήνα</strong> (πλαφόν: ΙΚΑ 31 ημ./μήνα, '
-            'ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ και υπόλοιπα 25 ημ./μήνα· μήνυμα για ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ μόνο όταν &gt;30):<br><br>'
-            + exceeded_lines_html + '</div>'
+        exceeded_warning_div = _format_totals_exceeded_block(
+            n_exceeded_server, exceeded_lines_html, True
         )
     else:
-        exceeded_warning_div = (
-            '<div id="totals-exceeded-warning" class="totals-exceeded-warning" style="display:none" role="alert"></div>'
-        )
+        exceeded_warning_div = _format_totals_exceeded_block(0, "", False)
     filters_bar = (
         f'<div class="totals-filters">{paketo_filters}{tameio_filters}{typos_filters}{apodochon_filters}{date_filters}</div>'
     )
@@ -1008,7 +1037,15 @@ def build_totals_with_filters(display_summary, raw_df=None, desc_map=None,
         if 'ΒΑΡΕ' in d.upper():
             varea_codes.add(str(code).strip())
     varea_js = json.dumps(list(varea_codes)).replace("</script>", "<\\/script>")
-    calcs_panel = _build_date_key_calcs_panel()
+    last_insurance_year = None
+    if raw_df is not None and not raw_df.empty and "Έως" in raw_df.columns:
+        try:
+            _eos_ser = pd.to_datetime(raw_df["Έως"], format="%d/%m/%Y", errors="coerce")
+            if _eos_ser.notna().any():
+                last_insurance_year = int(_eos_ser.dt.year.max())
+        except Exception:
+            last_insurance_year = None
+    calcs_panel = _build_date_key_calcs_panel(last_insurance_year=last_insurance_year)
     js = _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
                                   has_desc_col=has_desc_col,
                                   has_typos_col=has_typos_col,
@@ -1024,24 +1061,44 @@ def build_totals_with_filters(display_summary, raw_df=None, desc_map=None,
     )
 
 
-def _build_date_key_calcs_panel():
+def _build_date_key_calcs_panel(last_insurance_year=None):
+    """Ίδια διατύπωση με την Κυρία για το (4): «Τελευταία 5 έτη από τελευταίο (έτος)»."""
+    y4 = "—"
+    if last_insurance_year is not None:
+        try:
+            y4 = str(int(last_insurance_year))
+        except (TypeError, ValueError):
+            y4 = "—"
     items = [
         ("1", "Ημέρες από 1/1/2002 έως σήμερα"),
         ("2", "Μήνες από 1/1/2002 έως σήμερα (ημέρες / 25)"),
         ("3", "Συνολικές ημέρες τα τελευταία 5 ημερολογιακά έτη από σήμερα"),
-        ("4", "Συνολικές ημέρες τα τελευταία 5 ημερολογιακά έτη από το τελευταίο έτος"),
         ("5", "Ημέρες έως 31/12/2014"),
         ("6", "Βαρέα τα τελευταία 17 έτη από σήμερα (6205 ημέρες)"),
         ("7a", "Ημέρες έως 31/12/2010"),
         ("7b", "Ημέρες έως 31/12/2011"),
         ("7c", "Ημέρες έως 31/12/2012"),
     ]
-    grid = "".join(
-        f'<div class="date-key-item"><span class="date-key-num">{num}</span>'
-        f'<div><div class="date-key-label">{label}</div>'
-        f'<div class="date-key-value critical-result" id="calc-{num}">—</div></div></div>'
-        for num, label in items
+    parts = []
+    for num, label in items[:3]:
+        parts.append(
+            f'<div class="date-key-item"><span class="date-key-num">{html_mod.escape(num)}</span>'
+            f'<div><div class="date-key-label">{html_mod.escape(label)}</div>'
+            f'<div class="date-key-value critical-result" id="calc-{num}">—</div></div></div>'
+        )
+    parts.append(
+        '<div class="date-key-item"><span class="date-key-num">4</span>'
+        '<div><div class="date-key-label">Τελευταία 5 έτη από τελευταίο ('
+        f'<span id="calc-4-year">{html_mod.escape(y4)}</span>)</div>'
+        '<div class="date-key-value critical-result" id="calc-4">—</div></div></div>'
     )
+    for num, label in items[3:]:
+        parts.append(
+            f'<div class="date-key-item"><span class="date-key-num">{html_mod.escape(num)}</span>'
+            f'<div><div class="date-key-label">{html_mod.escape(label)}</div>'
+            f'<div class="date-key-value critical-result" id="calc-{num}">—</div></div></div>'
+        )
+    grid = "".join(parts)
     return (
         '<div id="date-key-calcs" class="date-key-panel">'
         '<h3 class="date-key-title">Σημαντικά διαστήματα</h3>'
@@ -1114,14 +1171,17 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
     return{h:Math.round(total),exceeded:exc,monthCapped:monthCapped};
   }
 
-  function computeDkFromMonths(monthCapped,varea){
+  function computeDkFromMonths(monthCapped,varea,globalMaxYForDk4){
+    /* globalMaxYForDk4: ίδιο με compute_summary_capped_dk (max έτος σε όλες τις εγγραφές).
+       Χωρίς αυτό, κάθε cap-group έπαιρνε δικό του maxY → λάθος dk4 (π.χ. +παράθυρο 1996–2000 για παλιό πακέτο). */
     var today=new Date(),cy=today.getFullYear();
     var d2002=new Date(2002,0,1),dFive=new Date(cy-4,0,1),d2014=new Date(2014,11,31);
     var d2010=new Date(2010,11,31),d2011=new Date(2011,11,31),d2012=new Date(2012,11,31);
     var BAREA=6205,winEnd=new Date(),winStart=new Date(winEnd.getTime()-BAREA*86400000);
-    var maxY=0;
-    for(var k in monthCapped){var pp=k.split('-');if(+pp[0]>maxY)maxY=+pp[0];}
-    var fiveLast=maxY>=4?new Date(maxY-4,0,1):null,lastEnd=maxY>=4?new Date(maxY,11,31):null;
+    var maxYLocal=0;
+    for(var k in monthCapped){var pp=k.split('-');if(+pp[0]>maxYLocal)maxYLocal=+pp[0];}
+    var maxYForDk4=(globalMaxYForDk4!=null&&globalMaxYForDk4>0)?globalMaxYForDk4:maxYLocal;
+    var fiveLast=maxYForDk4>=4?new Date(maxYForDk4-4,0,1):null,lastEnd=maxYForDk4>=4?new Date(maxYForDk4,11,31):null;
     var dk1=0,dk3=0,dk4=0,dk5=0,dk6=0,dk7a=0,dk7b=0,dk7c=0;
     for(var k in monthCapped){
       var v=monthCapped[k],pp=k.split('-'),y=+pp[0],m=+pp[1];
@@ -1158,7 +1218,7 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
     var aV=(document.getElementById('filter-apo')||{value:''}).value.trim();
     var eV=(document.getElementById('filter-eos')||{value:''}).value.trim();
     var aD=aV?pd(aV):null,eD=eV?pd(eV):null;
-    var totalH=0,allExc=[];
+    var totalH=0,allExc=[],dk4LabelYear=0;
 
     if(Array.isArray(RR)&&RR.length>0){
       /* Φιλτράρισμα raw records */
@@ -1171,6 +1231,12 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
         if(aD&&rE<aD)return false;if(eD&&rA>eD)return false;
         return true;
       });
+
+      var globalMaxY=0;
+      filt.forEach(function(r){
+        var e=pd(r.eos);if(e){var yy=e.getFullYear();if(yy>globalMaxY)globalMaxY=yy;}
+      });
+      dk4LabelYear=globalMaxY;
 
       /* Βήμα 1: Cap ανά (p, t, ty) — χωρίς et */
       var capGroups={};
@@ -1186,7 +1252,7 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
         capMap[ck]=res.h;
         var pkg=(ck.split('|')[0]||'').trim();
         var isVarea=Array.isArray(VAREA)&&VAREA.indexOf(pkg)!==-1;
-        dkMapFromCap[ck]=computeDkFromMonths(res.monthCapped||{},isVarea);
+        dkMapFromCap[ck]=computeDkFromMonths(res.monthCapped||{},isVarea,globalMaxY);
         res.exceeded.forEach(function(e){
           var pp=ck.split('|');
           allExc.push({p:pp[0],t:pp[1],ty:pp[2]||'',y:e.y,m:e.m,days:e.days,limit:e.limit});
@@ -1246,10 +1312,14 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
         tbody.innerHTML=nR.join('');
       }
 
-      /* Βήμα 6: Μήνυμα υπέρβασης */
-      var exEl=document.getElementById('totals-exceeded-warning');
-      if(exEl){
+      /* Βήμα 6: Υπέρβαση πλαφόν — μία γραμμή + πλήρες κείμενο σε modal */
+      var wrap=document.getElementById('totals-exceeded-wrap');
+      var bodyEl=document.getElementById('totals-exceeded-modal-body');
+      var cntEl=document.getElementById('totals-exceeded-count');
+      if(wrap&&bodyEl){
         if(allExc.length>0){
+          wrap.style.display='';
+          if(cntEl)cntEl.textContent=String(allExc.length);
           var exL=allExc.map(function(e){
             var ms=MN[e.m]||e.m,ov=(e.days-e.limit).toFixed(1);
             var pp=['\\u03A0\\u03B1\\u03BA\\u03AD\\u03C4\\u03BF '+e.p];
@@ -1258,9 +1328,12 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
             pp.push('\\u039C\\u03AE\\u03BD\\u03B1\\u03C2 '+ms+' '+e.y+': '+Math.round(e.days)+' \\u03B7\\u03BC\\u03AD\\u03C1\\u03B5\\u03C2 (\\u03CC\\u03C1\\u03B9\\u03BF '+e.limit+', \\u03C5\\u03C0\\u03AD\\u03C1\\u03B2\\u03B1\\u03C3\\u03B7 +'+ov+')');
             return esc(pp.join(' | '));
           });
-          exEl.innerHTML='<strong>\\u03A5\\u03C0\\u03AD\\u03C1\\u03B2\\u03B1\\u03C3\\u03B7 \\u03BF\\u03C1\\u03AF\\u03BF\\u03C5 \\u03B7\\u03BC\\u03B5\\u03C1\\u03CE\\u03BD \\u03B1\\u03BD\\u03AC \\u03BC\\u03AE\\u03BD\\u03B1</strong> (\\u03C0\\u03BB\\u03B1\\u03C6\\u03CC\\u03BD: \\u0399\\u039A\\u0391 31 \\u03B7\\u03BC./\\u03BC\\u03AE\\u03BD\\u03B1, \\u0395\\u03A4\\u0391\\u0391-\\u03A4\\u0391\\u039D/\\u039A\\u0395\\u0391\\u0394 \\u03BA\\u03B1\\u03B9 \\u03C5\\u03C0\\u03CC\\u03BB\\u03BF\\u03B9\\u03C0\\u03B1 25 \\u03B7\\u03BC./\\u03BC\\u03AE\\u03BD\\u03B1\\u00B7 \\u03BC\\u03AE\\u03BD\\u03C5\\u03BC\\u03B1 \\u03B3\\u03B9\\u03B1 \\u0395\\u03A4\\u0391\\u0391-\\u03A4\\u0391\\u039D/\\u039A\\u0395\\u0391\\u0394 \\u03BC\\u03CC\\u03BD\\u03BF \\u03CC\\u03C4\\u03B1\\u03BD &gt;30):<br><br>'+exL.join('<br>');
-          exEl.style.display='block';
-        }else{exEl.innerHTML='';exEl.style.display='none';}
+          var intro='<p class="totals-exceeded-modal-intro">\\u03A0\\u03BB\\u03B1\\u03C6\\u03CC\\u03BD: \\u0399\\u039A\\u0391 31 \\u03B7\\u03BC./\\u03BC\\u03AE\\u03BD\\u03B1, \\u0395\\u03A4\\u0391\\u0391-\\u03A4\\u0391\\u039D/\\u039A\\u0395\\u0391\\u0394 \\u03BA\\u03B1\\u03B9 \\u03C5\\u03C0\\u03CC\\u03BB\\u03BF\\u03B9\\u03C0\\u03B1 25 \\u03B7\\u03BC./\\u03BC\\u03AE\\u03BD\\u03B1\\u00B7 \\u03BC\\u03AE\\u03BD\\u03C5\\u03BC\\u03B1 \\u03B3\\u03B9\\u03B1 \\u0395\\u03A4\\u0391\\u0391-\\u03A4\\u0391\\u039D/\\u039A\\u0395\\u0391\\u0394 \\u03BC\\u03CC\\u03BD\\u03BF \\u03CC\\u03C4\\u03B1\\u03BD &gt;30.</p>';
+          bodyEl.innerHTML=intro+exL.join('<br>');
+        }else{
+          wrap.style.display='none';
+          bodyEl.innerHTML='';
+        }
       }
     }else{
       /* Fallback: φιλτράρισμα pre-rendered γραμμών */
@@ -1276,7 +1349,11 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
         var rA=pd(aS.trim()),rE=pd(eS.trim());
         if(aD&&(!rE||rE<aD))ok=false;if(eD&&(!rA||rA>eD))ok=false;
         tr.style.display=ok?'':'none';
-        if(ok)totalH+=parseInt(tr.getAttribute('data-hmeres')||'0',10);
+        if(ok){
+          totalH+=parseInt(tr.getAttribute('data-hmeres')||'0',10);
+          var rE2=pd(eS.trim());
+          if(rE2){var yy2=rE2.getFullYear();if(yy2>dk4LabelYear)dk4LabelYear=yy2;}
+        }
       });
     }
 
@@ -1301,6 +1378,8 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
     var el2=document.getElementById('calc-2');if(el2)el2.textContent=hasSel&&dkS.dk1>0?fd(dkS.dk1/25):'\\u2014';
     sdc('calc-3',dkS.dk3);sdc('calc-4',dkS.dk4);sdc('calc-5',dkS.dk5);sdc('calc-6',dkS.dk6);
     sdc('calc-7a',dkS.dk7a);sdc('calc-7b',dkS.dk7b);sdc('calc-7c',dkS.dk7c);
+    var elY4=document.getElementById('calc-4-year');
+    if(elY4)elY4.textContent=(hasSel&&dk4LabelYear>0)?String(dk4LabelYear):'\\u2014';
   }
 
   /* Bind events */
@@ -1315,10 +1394,78 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
     sec.querySelectorAll('.totals-filters .filter-dropdown-panel').forEach(function(p){p.addEventListener('click',function(e){e.stopPropagation();});});
     var resetBtn=document.createElement('button');resetBtn.type='button';resetBtn.className='filter-reset-btn';resetBtn.textContent='\u21bb';resetBtn.title='Επαναφορά φίλτρων';resetBtn.setAttribute('aria-label','Επαναφορά φίλτρων');resetBtn.addEventListener('click',function(){sec.querySelectorAll('.totals-filters input[type="checkbox"]').forEach(function(cb){cb.checked=false;});var apo=document.getElementById('filter-apo');var eos=document.getElementById('filter-eos');if(apo)apo.value='';if(eos)eos.value='';sec.querySelectorAll('.totals-filters .filter-dropdown.open').forEach(function(dd){dd.classList.remove('open');});apply();});sec.querySelector('.totals-filters').appendChild(resetBtn);
   }
+  (function(){
+    var ov=document.getElementById('totals-exceeded-modal-overlay');
+    var ob=document.getElementById('totals-exceeded-open-btn');
+    if(!ov||!ob)return;
+    var cb=ov.querySelector('.totals-exceeded-modal-close');
+    function opn(){ov.classList.add('is-open');ov.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';}
+    function cls(){ov.classList.remove('is-open');ov.setAttribute('aria-hidden','true');document.body.style.overflow='';}
+    ob.addEventListener('click',function(e){e.preventDefault();opn();});
+    if(cb)cb.addEventListener('click',cls);
+    ov.addEventListener('click',function(e){if(e.target===ov)cls();});
+    document.addEventListener('keydown',function(e){if(e.key==='Escape'&&ov.classList.contains('is-open'))cls();});
+  })();
   apply();
   window._atlasRR=RR;window._atlasDM=DM;window._atlasPd=pd;
 })();
 """)
+
+
+def _compute_count_kind_summary_from_c_df(c_df: pd.DataFrame, year_days: float = 300.0) -> tuple[float, float, float, float]:
+    """Άθροισμα ημερών μισθωτή / μη μισθωτή (πλαφόν ανά μήνα, ίδια λογική με Κυρία) και ισοδύναμα έτη."""
+    if c_df is None or getattr(c_df, "empty", True):
+        return 0.0, 0.0, 0.0, 0.0
+
+    def _cap_days(tameio_val):
+        t = str(tameio_val).upper()
+        return 31.0 if ("ΙΚΑ" in t or "IKA" in t) else 25.0
+
+    def _year_kind_days(year: int, kind_code: str | None) -> float:
+        sub = c_df[c_df["ΕΤΟΣ"] == year].copy()
+        if sub.empty:
+            return 0.0
+        sub["_k"] = sub["ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ"].apply(insurance_kind_classify_count)
+        if kind_code is not None:
+            sub = sub[sub["_k"] == kind_code]
+        if sub.empty:
+            return 0.0
+        g = sub.groupby(["ΤΑΜΕΙΟ", "Μήνας_Num"], as_index=False)["Ημέρες"].sum()
+        g["_cap"] = g["ΤΑΜΕΙΟ"].apply(_cap_days)
+        g["_capped"] = g.apply(
+            lambda r: min(float(r["Ημέρες"]), float(r["_cap"])),
+            axis=1,
+        )
+        return float(g.groupby("Μήνας_Num")["_capped"].sum().sum())
+
+    try:
+        years = sorted({int(y) for y in c_df["ΕΤΟΣ"].dropna().unique()})
+    except Exception:
+        years = []
+    sm = sum(_year_kind_days(y, "ΜΙΣΘΩΤΗ") for y in years)
+    snm = sum(_year_kind_days(y, "ΜΗ ΜΙΣΘΩΤΗ") for y in years)
+    sall = sm + snm
+    syears = (sall / year_days) if year_days else 0.0
+    return sm, snm, sall, syears
+
+
+def _count_kind_metrics_by_klados_map(
+    count_df: pd.DataFrame, desc_map: dict, year_days: float = 300.0
+) -> dict[str, list[float]]:
+    """Ένα entry ανά κωδικό ΚΛΑΔΟΣ/ΠΑΚΕΤΟ: [μισθωτή, μη μισθωτή, άθροισμα, έτη] για δυναμικά σύνολα στο HTML."""
+    c_df = build_count_c_dataframe(count_df, desc_map)
+    if c_df is None or getattr(c_df, "empty", True):
+        return {}
+    col = "ΚΛΑΔΟΣ/ΠΑΚΕΤΟ"
+    if col not in c_df.columns:
+        return {}
+    out: dict[str, list[float]] = {}
+    for code in c_df[col].dropna().unique():
+        code_s = str(code).strip()
+        sub = c_df[c_df[col].astype(str).str.strip() == code_s]
+        sm, snm, sall, sy = _compute_count_kind_summary_from_c_df(sub, year_days=year_days)
+        out[code_s] = [float(sm), float(snm), float(sall), float(sy)]
+    return out
 
 
 def _count_dropdown(name, options, data_attr, with_desc=False, desc_map=None):
@@ -1350,7 +1497,8 @@ def _count_dropdown(name, options, data_attr, with_desc=False, desc_map=None):
 
 
 def build_count_with_filters(count_display_df, print_style_rows, count_df,
-                             description_map=None, disclaimer_html=None):
+                             description_map=None, disclaimer_html=None,
+                             warning_types=None):
     """Ενότητα Καταμέτρηση με client-side φίλτρα και δυναμικά σύνολα ανά έτος.
     Αν δοθεί disclaimer_html, η δομή είναι τριών ζωνών: σταθερό πάνω (κεφαλίδες+φίλτρα),
     ενδιάμεσο με πίνακα (κύληση εδώ), σταθερό κάτω (disclaimer).
@@ -1417,14 +1565,81 @@ def build_count_with_filters(count_display_df, print_style_rows, count_df,
         + "</div>"
     )
 
+    warning_types = warning_types or []
+    if warning_types:
+        _warn_text = ", ".join(warning_types)
+        _count_info_msg = (
+            f"Προσοχή: υπάρχει πιθανή {_warn_text}. "
+            "Το άθροισμα ημερών μπορεί να δώσει λάθος αποτελέσματα."
+        )
+        _count_bar_class = "totals-info-bar totals-info-bar-warning"
+    else:
+        _count_info_msg = ""
+        _count_bar_class = "totals-info-bar"
+
+    # Γραμμές c_df σε JSON: τα metrics στο HTML φιλτράρονται client-side όπως στην Κυρία
+    # (ταμείο, τύπος ασφάλισης, εργοδότης, πακέτο, τύπος αποδοχών, έτος) — όχι μόνο πακέτα.
+    cdf_metrics_payload_html = ""
+    try:
+        _c_df_exp = build_count_c_dataframe(count_df, desc_map)
+        if _c_df_exp is not None and not getattr(_c_df_exp, "empty", True):
+            _rows_compact = []
+            for _, _r in _c_df_exp.iterrows():
+                try:
+                    _rows_compact.append(
+                        {
+                            "y": int(_r["ΕΤΟΣ"]),
+                            "t": str(_r.get("ΤΑΜΕΙΟ", "") or ""),
+                            "k": str(_r.get("ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ", "") or ""),
+                            "e": str(_r.get("ΕΡΓΟΔΟΤΗΣ", "") or ""),
+                            "p": str(_r.get("ΚΛΑΔΟΣ/ΠΑΚΕΤΟ", "") or "").strip(),
+                            "a": str(_r.get("ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ", "") or ""),
+                            "m": int(_r["Μήνας_Num"]),
+                            "d": float(_r["Ημέρες"] or 0),
+                        }
+                    )
+                except Exception:
+                    continue
+            if _rows_compact:
+                _cdf_payload = {"yearDays": 300.0, "rows": _rows_compact}
+                _json_cdf = json.dumps(_cdf_payload, ensure_ascii=False).replace("<", "\\u003c")
+                cdf_metrics_payload_html = (
+                    f'<script type="application/json" id="atlas-count-cdf-metrics-json">{_json_cdf}</script>'
+                )
+    except Exception:
+        cdf_metrics_payload_html = ""
+
+    count_metrics_bar = ""
+    if cdf_metrics_payload_html:
+        count_metrics_bar = (
+            f"{cdf_metrics_payload_html}"
+            f'<div class="{_count_bar_class} count-kind-metrics" id="count-kind-metrics-wrap" style="display:none">'
+            f'<div class="totals-info-msg">{html_mod.escape(_count_info_msg)}</div>'
+            '<div class="totals-summary">'
+            '<div class="totals-summary-item">'
+            '<span class="totals-summary-label">Σύνολο ημερών (μισθωτή)</span>'
+            '<span class="totals-summary-value critical-result" id="cnt-metric-misthoti"></span></div>'
+            '<div class="totals-summary-item">'
+            '<span class="totals-summary-label">Σύνολο ημερών (μη μισθωτή)</span>'
+            '<span class="totals-summary-value critical-result" id="cnt-metric-nmisthoti"></span></div>'
+            '<div class="totals-summary-item">'
+            '<span class="totals-summary-label">Άθροισμα ημερών</span>'
+            '<span class="totals-summary-value critical-result" id="cnt-metric-sum"></span></div>'
+            '<div class="totals-summary-item">'
+            '<span class="totals-summary-label">Συνολικά έτη</span>'
+            '<span class="totals-summary-value critical-result" id="cnt-metric-years"></span></div>'
+            "</div></div>"
+        )
+
     js = _build_count_filter_js()
 
     top_block = (
         '<div class="count-layout-top">'
         '<h2>Πίνακας Καταμέτρησης</h2>'
         '<p class="print-description">Αναλυτική καταμέτρηση ημερών ασφάλισης ανά μήνα.</p>'
+        f'{count_metrics_bar}'
         f'{filter_bar}'
-        '</div>'
+        "</div>"
     )
     middle_block = (
         '<div id="count-tables-wrapper" class="count-layout-middle">'
@@ -1694,6 +1909,84 @@ def _build_count_filter_js():
 
       reflowCollapsedFundLabels(cm,rows,totOnly);
     });
+
+    (function updateCountKindMetrics(){
+      var wrap=document.getElementById('count-kind-metrics-wrap');
+      if(!wrap)return;
+      var je=document.getElementById('atlas-count-cdf-metrics-json');
+      var payload={rows:[],yearDays:300};
+      try{payload=JSON.parse((je&&je.textContent)||'{}');}catch(e){}
+      var allRows=payload.rows||[];
+      var yd=parseFloat(payload.yearDays)||300;
+      var kl=f.klados||[];
+      if(kl.length===0){wrap.style.display='none';return;}
+      function insKindCls(typos){
+        var s=String(typos||'').trim().toUpperCase().replace(/\s+/g,' ');
+        if(!s)return null;
+        if(/ΜΗ\s*ΜΙΣΘΩΤ/.test(s))return 'ΜΗ ΜΙΣΘΩΤΗ';
+        if(s.indexOf('NON')!==-1&&s.indexOf('SAL')!==-1)return 'ΜΗ ΜΙΣΘΩΤΗ';
+        if(s.indexOf('ΜΙΣΘΩΤΗ')!==-1&&s.indexOf('ΜΗ ΜΙΣΘΩΤΗ')===-1&&s.indexOf('ΜΗ ')!==0)return 'ΜΙΣΘΩΤΗ';
+        return null;
+      }
+      function capForT(t){
+        var u=String(t||'').toUpperCase();
+        return (u.indexOf('ΙΚΑ')!==-1||u.indexOf('IKA')!==-1)?31:25;
+      }
+      function yearKindDays(subRows,year,kindCode){
+        var sub=subRows.filter(function(r){return r.y===year;});
+        if(kindCode){
+          sub=sub.filter(function(r){return insKindCls(r.k)===kindCode;});
+        }
+        if(sub.length===0)return 0;
+        var g={};
+        sub.forEach(function(r){
+          var key=String(r.t||'')+'|'+r.m;
+          g[key]=(g[key]||0)+(+r.d||0);
+        });
+        var byM={};
+        Object.keys(g).forEach(function(key){
+          var parts=key.split('|');
+          var tn=parts[0];
+          var mi=parseInt(parts[1],10);
+          var raw=g[key];
+          var c=raw<capForT(tn)?raw:capForT(tn);
+          byM[mi]=(byM[mi]||0)+c;
+        });
+        var s=0;
+        Object.keys(byM).forEach(function(mi){s+=byM[mi];});
+        return s;
+      }
+      var fr=allRows.filter(function(r){
+        if(r.y<fromY||r.y>toY)return false;
+        if(f.tameio.length&&f.tameio.indexOf(r.t)===-1)return false;
+        if(f.typos.length&&f.typos.indexOf(r.k)===-1)return false;
+        if(f.employer.length&&f.employer.indexOf(r.e)===-1)return false;
+        if(f.klados.length&&f.klados.indexOf(r.p)===-1)return false;
+        if(f.apodoxes.length&&f.apodoxes.indexOf(r.a)===-1)return false;
+        return true;
+      });
+      var yearsSet={};
+      fr.forEach(function(r){yearsSet[r.y]=1;});
+      var years=Object.keys(yearsSet).map(function(x){return parseInt(x,10);}).filter(function(y){return !isNaN(y);}).sort(function(a,b){return a-b;});
+      var sm=0,snm=0;
+      years.forEach(function(y){
+        sm+=yearKindDays(fr,y,'ΜΙΣΘΩΤΗ');
+        snm+=yearKindDays(fr,y,'ΜΗ ΜΙΣΘΩΤΗ');
+      });
+      var sall=sm+snm;
+      var sy=yd?sall/yd:0;
+      function fi(n){return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g,'.');}
+      function fd(n){return n.toFixed(1).replace('.',',');}
+      var e1=document.getElementById('cnt-metric-misthoti');
+      var e2=document.getElementById('cnt-metric-nmisthoti');
+      var e3=document.getElementById('cnt-metric-sum');
+      var e4=document.getElementById('cnt-metric-years');
+      wrap.style.display='';
+      if(e1)e1.textContent=fi(sm);
+      if(e2)e2.textContent=fi(snm);
+      if(e3)e3.textContent=fi(sall);
+      if(e4)e4.textContent=fd(sy);
+    })();
   }
 
   ['cnt-filter-from','cnt-filter-to','cnt-totals-only','cnt-year-sparse'].forEach(function(id){var el=document.getElementById(id);if(el)el.addEventListener('input',apply);if(el)el.addEventListener('change',apply);});
@@ -1763,7 +2056,8 @@ def build_report_tab_entries(df, description_map=None):
     # -- Count --
     if not count_display_df.empty:
         count_html = build_count_with_filters(
-            count_display_df, print_style_rows, count_df, description_map
+            count_display_df, print_style_rows, count_df, description_map,
+            warning_types=warning_types,
         )
         tab_entries.append(("count", "Καταμέτρηση", count_html))
 
@@ -2206,7 +2500,7 @@ def build_frontend_viewer_html(df, client_name="", app_title="ATLAS Lite"):
 
 PRINT_STYLES = """
 @media print { @page { size: A4 landscape; margin: 8mm; } }
-@media print { .totals-filters { display: none !important; } .count-filters { display: none !important; } .totals-info-bar { display: none !important; } .totals-exceeded-warning { display: none !important; } .section-actions { display: none !important; } .complex-file-warning { display: none !important; } .lite-exclusion-note { display: none !important; } .tl-zoom-controls { display: none !important; } #tl-zoom-inner, #tl-paketo-zoom-inner { transform: none !important; } .tl-zoom-wrapper, .tl-paketo-zoom-scroll { overflow-x: hidden !important; } }
+@media print { .totals-filters { display: none !important; } .count-filters { display: none !important; } .totals-info-bar { display: none !important; } .totals-exceeded-wrap, .totals-exceeded-modal-overlay { display: none !important; } .section-actions { display: none !important; } .complex-file-warning { display: none !important; } .lite-exclusion-note { display: none !important; } .tl-zoom-controls { display: none !important; } #tl-zoom-inner, #tl-paketo-zoom-inner { transform: none !important; } .tl-zoom-wrapper, .tl-paketo-zoom-scroll { overflow-x: hidden !important; } }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: "Source Sans 3", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #222; margin: 0; padding: 12px 16px; font-size: 11px; line-height: 1.4; background: #ffffff; }
 .prt-name { text-align: center; font-size: 18px; font-weight: 800; margin-bottom: 2px; }
@@ -2235,7 +2529,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .lite-exclusion-note { text-align: right; font-size: 9px; color: #64748b; font-style: italic; margin-bottom: 4px; }
 .count-filters { display: none !important; }
 .totals-filters { display: none !important; }
-.totals-info-bar { display: none !important; } .totals-exceeded-warning { display: none !important; }
+.totals-info-bar { display: none !important; } .totals-exceeded-wrap, .totals-exceeded-modal-overlay { display: none !important; }
 .print-section .tl-container { position: relative; padding-bottom: 28px; padding-top: 20px; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
 .print-section .tl-row { display: flex; align-items: center; margin-bottom: 4px; min-height: 16px; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
 .print-section .tl-label { width: var(--tl-print-label-w); max-width: var(--tl-print-label-w); font-size: 8px; font-weight: 600; color: #334155; text-align: right; padding-right: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; box-sizing: border-box; }
@@ -2534,7 +2828,8 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .table-fullscreen .count-layout { display: flex !important; flex-direction: column !important; height: 100% !important; }
 .table-fullscreen .count-layout-middle { flex: 1 !important; min-height: 0 !important; overflow: auto !important; }
 .table-fullscreen #count-section { display: flex !important; flex-direction: column !important; height: 100% !important; }
-#count-section h2, #count-section .print-description, #count-section .count-filters { flex-shrink: 0; }
+#count-section h2, #count-section .print-description, #count-section .count-filters, #count-section .count-kind-metrics { flex-shrink: 0; }
+#count-section .count-kind-metrics { margin-top: 12px; }
 #count-tables-wrapper .year-section { margin-bottom: 20px; }
 #count-section.count-year-sparse #count-tables-wrapper .year-section { margin-bottom: 80px; }
 #count-tables-wrapper .year-heading { font-size: 15px; font-weight: 800; padding: 8px 0 6px 0; border-bottom: 2px solid #6366f1; margin-top: 3px; margin-bottom: 11px; }
@@ -2555,7 +2850,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .apodoxes-tooltip.visible { opacity: 1; visibility: visible; transform: translateY(0); }
 .has-apodoxes-tooltip { cursor: help; }
 .cell-description { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
-@media print { .section-actions { display: none !important; } .btn-fs { display: none !important; } .btn-print-tab { display: none !important; } .apodoxes-tooltip { display: none !important; } #tl-paketo-tooltip { display: none !important; } .complex-file-warning { display: none !important; } .totals-info-bar { display: none !important; } .totals-exceeded-warning { display: none !important; } .lite-exclusion-note { display: none !important; } .tl-zoom-controls { display: none !important; } #tl-zoom-inner, #tl-paketo-zoom-inner { transform: none !important; } .tl-zoom-wrapper, .tl-paketo-zoom-scroll { overflow-x: hidden !important; } .personal-form { display: none !important; } .personal-notes { display: none !important; } .synopsis-modal-overlay, .synopsis-expand-btn { display: none !important; } }
+@media print { .section-actions { display: none !important; } .btn-fs { display: none !important; } .btn-print-tab { display: none !important; } .apodoxes-tooltip { display: none !important; } #tl-paketo-tooltip { display: none !important; } .complex-file-warning { display: none !important; } .totals-info-bar { display: none !important; } .totals-exceeded-wrap, .totals-exceeded-modal-overlay { display: none !important; } .lite-exclusion-note { display: none !important; } .tl-zoom-controls { display: none !important; } #tl-zoom-inner, #tl-paketo-zoom-inner { transform: none !important; } .tl-zoom-wrapper, .tl-paketo-zoom-scroll { overflow-x: hidden !important; } .personal-form { display: none !important; } .personal-notes { display: none !important; } .synopsis-modal-overlay, .synopsis-expand-btn { display: none !important; } }
 .year-section { margin-bottom: 20px; }
 .year-heading { font-size: 15px; font-weight: 800; color: #1e293b; padding: 8px 0 4px 0; border-bottom: 2px solid #6366f1; margin-bottom: 6px; }
 .print-disclaimer { font-size: 12px; color: #64748b; margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; line-height: 1.6; }
@@ -2607,7 +2902,114 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .totals-info-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; margin-bottom: 20px; padding: 16px 20px; background: rgba(219, 234, 254, 0.88); border-radius: 8px; border: none; }
 .totals-info-bar-warning { background: rgba(254, 243, 199, 0.88); border: none; }
 .totals-info-bar-warning .totals-info-msg { color: #b45309; }
-.totals-exceeded-warning { margin-bottom: 16px; padding: 14px 18px; background: rgba(254, 243, 199, 0.88); border: none; border-radius: 8px; font-size: 14px; color: #92400e; line-height: 1.5; }
+.totals-exceeded-wrap { margin-bottom: 16px; }
+.totals-exceeded-compact {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 12px 16px;
+  background: rgba(254, 243, 199, 0.88);
+  border-radius: 8px;
+  font-size: 14px;
+  color: #92400e;
+  line-height: 1.45;
+}
+.totals-exceeded-compact-text { flex: 1 1 auto; min-width: 200px; }
+.totals-exceeded-modal-btn {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #78350f;
+  background: #fff;
+  border: 1px solid #d97706;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.totals-exceeded-modal-btn:hover { background: #fffbeb; }
+.totals-exceeded-modal-intro { margin: 0 0 12px 0; font-size: 13px; color: #64748b; }
+.totals-exceeded-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99997;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.25s ease, visibility 0.25s ease;
+}
+.totals-exceeded-modal-overlay.is-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+.totals-exceeded-modal-panel {
+  width: min(720px, 100%);
+  max-height: min(85vh, 880px);
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(148, 163, 184, 0.15);
+  overflow: hidden;
+  transform: scale(0.96) translateY(12px);
+  transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.totals-exceeded-modal-overlay.is-open .totals-exceeded-modal-panel {
+  transform: scale(1) translateY(0);
+}
+.totals-exceeded-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #fffbeb 0%, #fff 100%);
+  flex-shrink: 0;
+}
+.totals-exceeded-modal-head h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  color: #78350f;
+  line-height: 1.3;
+}
+.totals-exceeded-modal-close {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 10px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+.totals-exceeded-modal-close:hover {
+  background: #fde68a;
+  color: #451a03;
+}
+.totals-exceeded-modal-body {
+  padding: 16px 20px 20px;
+  overflow-y: auto;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #475569;
+  -webkit-overflow-scrolling: touch;
+  flex: 1 1 auto;
+  min-height: 0;
+}
 .totals-info-msg { font-size: 16px; font-weight: 600; color: #1e40af; flex: 1; min-width: 200px; }
 .totals-summary { display: flex; gap: 24px; flex-wrap: wrap; }
 .totals-summary-item { display: flex; flex-direction: column; gap: 4px; }
@@ -2691,7 +3093,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .date-key-num { width: 30px; height: 30px; background: #6366f1; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
 .date-key-label { font-size: 13px; color: #475569; line-height: 1.3; }
 .date-key-value { font-size: 20px; font-weight: 800; color: #1e293b; margin-top: 2px; }
-@media print { .totals-filters { display: none !important; } .count-filters { display: none !important; } .totals-info-bar { display: none !important; } .totals-exceeded-warning { display: none !important; } .complex-file-warning { display: none !important; } .lite-exclusion-note { display: none !important; font-size: 9px; margin-bottom: 4px; } .tl-zoom-controls { display: none !important; } #tl-zoom-inner, #tl-paketo-zoom-inner { transform: none !important; } .tl-zoom-wrapper, .tl-paketo-zoom-scroll { overflow-x: hidden !important; } .personal-form { display: none !important; } .personal-notes { display: none !important; } .date-key-panel { break-inside: avoid; } }
+@media print { .totals-filters { display: none !important; } .count-filters { display: none !important; } .totals-info-bar { display: none !important; } .totals-exceeded-wrap, .totals-exceeded-modal-overlay { display: none !important; } .complex-file-warning { display: none !important; } .lite-exclusion-note { display: none !important; font-size: 9px; margin-bottom: 4px; } .tl-zoom-controls { display: none !important; } #tl-zoom-inner, #tl-paketo-zoom-inner { transform: none !important; } .tl-zoom-wrapper, .tl-paketo-zoom-scroll { overflow-x: hidden !important; } .personal-form { display: none !important; } .personal-notes { display: none !important; } .date-key-panel { break-inside: avoid; } }
 .copy-target { cursor: pointer; position: relative; transition: background-color 0.15s; }
 .copy-target:hover { background-color: rgba(99,102,241,0.15) !important; }
 .copy-target:active { background-color: rgba(99,102,241,0.25) !important; }

@@ -87,6 +87,83 @@ def parse_birthdate_and_age(birthdate_str: str) -> tuple[str, int | None]:
     return raw, None
 
 
+def _atlas_render_full_html_report_open_tab(df: pd.DataFrame) -> None:
+    """Παραγωγή πλήρους HTML viewer (html_viewer_builder) και άνοιγμα σε νέα καρτέλα."""
+    from html_viewer_builder import generate_full_html_report
+
+    client_name = st.session_state.get("client_name", "")
+    with st.spinner("Παραγωγή της HTML αναφοράς — παρακαλώ περιμένετε…"):
+        viewer_html, _ = generate_full_html_report(
+            df,
+            client_name=client_name,
+            app_title="ATLAS",
+            app_subtitle="Ασφαλιστικό Βιογραφικό",
+        )
+    js_content = json.dumps(viewer_html).replace("</script>", "<\\/script>")
+    components.html(
+        f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+<script>(function(){{var h={js_content};var b=new Blob([h],{{type:'text/html;charset=utf-8'}});
+var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
+<p style="margin:0;font-size:14px;color:#666;">Άνοιγμα HTML αναφοράς...</p></body></html>""",
+        height=40,
+    )
+
+
+def _atlas_inject_post_process_choice_buttons_style() -> None:
+    """Ίδιο ύψος / δύο γραμμές κειμένου στα κουμπιά επιλογής (μετά την επεξεργασία)."""
+    components.html(
+        r"""
+        <script>
+        (function () {
+          var doc = (window.parent && window.parent.document) ? window.parent.document : document;
+          function isPostProcessChoiceBtn(b) {
+            var flat = (b.innerText || "").replace(/\s+/g, " ").trim();
+            return (flat.indexOf("ATLAS Pro") >= 0 && flat.indexOf("(πλήρες)") >= 0) ||
+              (flat.indexOf("ATLAS Lite") >= 0 && flat.indexOf("(γρήγορο)") >= 0);
+          }
+          function run() {
+            doc.querySelectorAll("button").forEach(function (b) {
+              if (!isPostProcessChoiceBtn(b)) return;
+              var flat = (b.innerText || "").replace(/\s+/g, " ").trim();
+              if (flat.indexOf("ATLAS Pro") >= 0 && flat.indexOf("(πλήρες)") >= 0) {
+                b.textContent = "ATLAS Pro" + "\n" + "(πλήρες)";
+              } else if (flat.indexOf("ATLAS Lite") >= 0 && flat.indexOf("(γρήγορο)") >= 0) {
+                b.textContent = "ATLAS Lite" + "\n" + "(γρήγορο)";
+              }
+              b.style.setProperty("white-space", "pre-line", "important");
+              b.style.setProperty("text-align", "center", "important");
+              b.style.setProperty("display", "flex", "important");
+              b.style.setProperty("align-items", "center", "important");
+              b.style.setProperty("justify-content", "center", "important");
+              b.style.setProperty("min-height", "4.35rem", "important");
+              b.style.setProperty("height", "4.35rem", "important");
+              b.style.setProperty("padding", "0.5rem 1rem", "important");
+              b.style.setProperty("font-size", "1.02rem", "important");
+              b.style.setProperty("line-height", "1.35", "important");
+              b.style.setProperty("box-sizing", "border-box", "important");
+              var col = b.closest('[data-testid="column"]');
+              if (col) {
+                col.style.setProperty("display", "flex", "important");
+                col.style.setProperty("align-items", "stretch", "important");
+                col.style.setProperty("justify-content", "center", "important");
+              }
+              var row = b.closest('[data-testid="stHorizontalBlock"]');
+              if (row) {
+                row.style.setProperty("align-items", "stretch", "important");
+                row.style.setProperty("justify-content", "center", "important");
+              }
+            });
+          }
+          run();
+          setTimeout(run, 80);
+          setTimeout(run, 350);
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+
 # Ρύθμιση σελίδας (Κυρία)
 st.set_page_config(
     page_title="Ασφαλιστικό βιογραφικό ΑΤΛΑΣ",
@@ -4209,11 +4286,17 @@ def get_count_allocation(count_df: pd.DataFrame, description_map: dict[str, str]
 
 
 def insurance_kind_classify_count(typos) -> str | None:
+    """Μισθωτή vs μη μισθωτή για Καταμέτρηση. Πρώτα μη μισθωτή (regex), ώστε να πιάνονται
+    «ΜΗ ΜΙΣΘΩΤΩΝ/ΜΗ ΜΙΣΘΩΤΕΣ», «ΜΗΜΙΣΘΩΤΗ» χωρίς κενό κ.λπ. — όχι μόνο η ακριβής συμβολοσειρά «ΜΗ ΜΙΣΘΩΤΗ»."""
     s = str(typos).strip().upper()
-    if 'ΜΙΣΘΩΤΗ' in s and 'ΜΗ ΜΙΣΘΩΤΗ' not in s and not s.startswith('ΜΗ '):
-        return 'ΜΙΣΘΩΤΗ'
-    if ('ΜΗ' in s and 'ΜΙΣΘΩΤΗ' in s) or ('NON' in s and 'SAL' in s):
-        return 'ΜΗ ΜΙΣΘΩΤΗ'
+    if not s:
+        return None
+    s = re.sub(r"\s+", " ", s)
+    # Μη μισθωτή πριν το κλασικό «ΜΙΣΘΩΤΗ in s» (αλλιώς «ΜΗΜΙΣΘΩΤΗ» ερμηνευόταν λάθος ως μισθωτή)
+    if re.search(r"ΜΗ\s*ΜΙΣΘΩΤ", s) or ("NON" in s and "SAL" in s):
+        return "ΜΗ ΜΙΣΘΩΤΗ"
+    if "ΜΙΣΘΩΤΗ" in s and "ΜΗ ΜΙΣΘΩΤΗ" not in s and not s.startswith("ΜΗ "):
+        return "ΜΙΣΘΩΤΗ"
     return None
 
 
@@ -5179,7 +5262,7 @@ def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] |
 
     if show_count_totals_only:
         try:
-            total_mask = masks_df['__is_total__'].fillna(False)
+            total_mask = masks_df["__is_total__"].eq(True)
             final_display_df = final_display_df[total_mask].reset_index(drop=True)
             masks_df = masks_df[total_mask].reset_index(drop=True)
         except Exception:
@@ -5212,6 +5295,198 @@ def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] |
         print_style_rows.append(row_styles)
 
     return final_display_df, active_mask_rows, last_month_col, month_cols, print_style_rows
+
+
+def _totals_exceeded_cap_instant_modal_html(exceeded_body_html: str, n: int, dom_base: str) -> str:
+    """Κουμπί + modal μόνο με JS (ενημέρωση parent document) — χωρίς Streamlit rerun, όπως το κουμπί εκτύπωσης."""
+    bid = re.sub(r"[^a-zA-Z0-9_]", "_", dom_base)[:72]
+    intro = (
+        "Εφαρμόστηκε πλαφόν: ΙΚΑ 31 ημ./μήνα, ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ και υπόλοιπα 25 ημ./μήνα· "
+        "για ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ το μήνυμα μόνο όταν >30 ημ./μήνα."
+    )
+    intro_e = html.escape(intro)
+    overlay = (
+        f'<div id="atlas_tec_{bid}" class="atlas-tec-overlay" style="position:fixed;inset:0;z-index:999999;'
+        f'background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;padding:16px;">'
+        f'<div style="background:#fff;border-radius:16px;max-width:min(1280px,96vw);max-height:85vh;overflow:auto;'
+        f'box-shadow:0 25px 50px rgba(0,0,0,0.35);padding:18px 22px;font-family:system-ui,sans-serif;" '
+        f'onclick="event.stopPropagation()">'
+        f'<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:10px;">'
+        f'<h3 style="margin:0;font-size:1.05rem;color:#78350f;">Υπέρβαση ορίου ημερών ανά μήνα</h3>'
+        f'<button type="button" class="atlas-tec-x" style="border:none;background:#fef3c7;width:36px;height:36px;'
+        f'border-radius:10px;cursor:pointer;font-size:22px;line-height:1;color:#92400e;">&times;</button></div>'
+        f'<p style="margin:0 0 12px 0;font-size:13px;color:#64748b;">{intro_e}</p>'
+        f'<div style="font-size:14px;line-height:1.55;color:#334155;">{exceeded_body_html}</div>'
+        f"</div></div>"
+    )
+    b64 = base64.standard_b64encode(overlay.encode("utf-8")).decode("ascii")
+    return (
+        f'<div style="display:flex;justify-content:flex-end;align-items:center;min-height:38px;width:100%;">'
+        f'<button type="button" id="tec_btn_{bid}" '
+        f'style="width:100%;padding:0.35rem 0.5rem;border-radius:0.35rem;border:1px solid #d97706;'
+        f'background:#fff;cursor:pointer;font-size:14px;font-weight:600;color:#78350f;">Πλαφόν ({n})</button>'
+        f'<pre id="tec_b64_{bid}" style="display:none;margin:0;">{b64}</pre>'
+        "<script>"
+        "(function(){"
+        f'var bid="{bid}";'
+        'var btn=document.getElementById("tec_btn_"+bid);'
+        'var pre=document.getElementById("tec_b64_"+bid);'
+        "if(!btn||!pre)return;"
+        "function rootDoc(){try{return window.parent.document;}catch(e){return document;}}"
+        "function closeOv(id){var d=rootDoc();var el=d.getElementById(id);if(el)el.remove();}"
+        "btn.onclick=function(e){e.preventDefault();var id=\"atlas_tec_\"+bid;var d=rootDoc();"
+        "if(d.getElementById(id))return;"
+        "var b64=pre.textContent.trim();var bin=atob(b64);var u8=new Uint8Array(bin.length);"
+        "for(var i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i)&255;"
+        "var html=new TextDecoder(\"utf-8\").decode(u8);var wrap=d.createElement(\"div\");wrap.innerHTML=html;"
+        "var node=wrap.firstElementChild;if(!node)return;node.id=id;d.body.appendChild(node);"
+        "var x=node.querySelector(\".atlas-tec-x\");if(x)x.onclick=function(ev){ev.stopPropagation();closeOv(id);};"
+        "node.onclick=function(ev){if(ev.target===node)closeOv(id);};};"
+        "document.addEventListener(\"keydown\",function(e){"
+        "if(e.key!==\"Escape\")return;var d=rootDoc();var id=\"atlas_tec_\"+bid;if(d.getElementById(id))closeOv(id);}"
+        ",true);"
+        "})();"
+        "</script></div>"
+    )
+
+
+def _counting_days_info_icon_html(excluded_packages_label: str, dom_base: str) -> str:
+    """Κουμπί ℹ + modal οδηγιών καταμέτρησης (UTF-8, parent document) — χωρίς Streamlit rerun.
+    Ο τίτλος της καρτέλας αποδίδεται με st.markdown('### …') ώστε να ταιριάζει με τις άλλες καρτέλες."""
+    bid = re.sub(r"[^a-zA-Z0-9_]", "_", dom_base)[:72]
+    t1 = html.escape("Αναλυτική καταμέτρηση ημερών ανά έτος, ταμείο, εργοδότη και μήνα.")
+    t2 = html.escape(
+        "Διαστήματα που καλύπτουν πολλαπλούς μήνες επιμερίζονται και επισημαίνονται με κίτρινο χρώμα."
+    )
+    t3 = html.escape(f"Εξαιρούνται: {excluded_packages_label}")
+    title_e = html.escape("Οδηγίες — Καταμέτρηση ημερών ασφάλισης")
+    blocks = (
+        f'<div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:12px 14px;margin:0 0 10px 0;'
+        f'border-radius:8px;font-size:14px;line-height:1.5;color:#0c4a6e;">{t1}</div>'
+        f'<div style="background:#fef9c3;border-left:4px solid #ca8a04;padding:12px 14px;margin:0 0 10px 0;'
+        f'border-radius:8px;font-size:14px;line-height:1.5;color:#713f12;">{t2}</div>'
+        f'<div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:12px 14px;margin:0;'
+        f'border-radius:8px;font-size:14px;line-height:1.5;color:#0c4a6e;">{t3}</div>'
+    )
+    overlay = (
+        f'<div id="atlas_cntinfo_{bid}" class="atlas-cntinfo-overlay" style="position:fixed;inset:0;z-index:999999;'
+        f'background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;padding:16px;">'
+        f'<div style="background:#fff;border-radius:16px;max-width:min(720px,96vw);max-height:85vh;overflow:auto;'
+        f'box-shadow:0 25px 50px rgba(0,0,0,0.35);padding:18px 22px;font-family:system-ui,sans-serif;" '
+        f'onclick="event.stopPropagation()">'
+        f'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;">'
+        f'<h3 style="margin:0;font-size:1.08rem;color:#0c4a6e;line-height:1.3;">{title_e}</h3>'
+        f'<button type="button" class="atlas-cntinfo-x" style="flex-shrink:0;border:none;background:#e0f2fe;'
+        f'width:36px;height:36px;border-radius:10px;cursor:pointer;font-size:22px;line-height:1;color:#0369a1;">'
+        f"&times;</button></div>"
+        f"<div>{blocks}</div>"
+        f"</div></div>"
+    )
+    b64 = base64.standard_b64encode(overlay.encode("utf-8")).decode("ascii")
+    title_attr = html.escape("Οδηγίες καταμέτρησης", quote=True)
+    return (
+        f'<div style="width:100%;display:flex;align-items:flex-start;justify-content:center;'
+        f'padding-top:6px;min-height:44px;box-sizing:border-box;">'
+        f'<button type="button" id="cntinfo_btn_{bid}" title="{title_attr}" aria-label="{title_attr}" '
+        f'style="flex-shrink:0;width:42px;height:42px;border-radius:50%;border:2px solid #0284c7;'
+        f'background:#f0f9ff;cursor:pointer;font-size:22px;line-height:1;color:#0369a1;padding:0;'
+        f'box-shadow:0 1px 3px rgba(0,0,0,0.12);">\u2139</button>'
+        f'<pre id="cntinfo_b64_{bid}" style="display:none;margin:0;">{b64}</pre>'
+        "<script>"
+        "(function(){"
+        f'var bid="{bid}";'
+        'var btn=document.getElementById("cntinfo_btn_"+bid);'
+        'var pre=document.getElementById("cntinfo_b64_"+bid);'
+        "if(!btn||!pre)return;"
+        "function rootDoc(){try{return window.parent.document;}catch(e){return document;}}"
+        "function closeOv(id){var d=rootDoc();var el=d.getElementById(id);if(el)el.remove();}"
+        "btn.onclick=function(e){e.preventDefault();var id=\"atlas_cntinfo_\"+bid;var d=rootDoc();"
+        "if(d.getElementById(id))return;"
+        "var b64=pre.textContent.trim();var bin=atob(b64);var u8=new Uint8Array(bin.length);"
+        "for(var i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i)&255;"
+        "var html=new TextDecoder(\"utf-8\").decode(u8);var wrap=d.createElement(\"div\");wrap.innerHTML=html;"
+        "var node=wrap.firstElementChild;if(!node)return;node.id=id;d.body.appendChild(node);"
+        "var x=node.querySelector(\".atlas-cntinfo-x\");if(x)x.onclick=function(ev){ev.stopPropagation();closeOv(id);};"
+        "node.onclick=function(ev){if(ev.target===node)closeOv(id);};};"
+        "document.addEventListener(\"keydown\",function(e){"
+        "if(e.key!==\"Escape\")return;var d=rootDoc();var id=\"atlas_cntinfo_\"+bid;if(d.getElementById(id))closeOv(id);}"
+        ",true);"
+        "})();"
+        "</script></div>"
+    )
+
+
+def _atlas_streamlit_info_modal_icon_html(
+    dom_base: str,
+    modal_title: str,
+    sections: list[tuple[str, str]],
+    button_aria: str = "Πληροφορίες",
+) -> str:
+    """Κουμπί ℹ + modal με ενότητες τύπου info (μπλε) ή warning (κίτρινο) — ίδιο μοτίβο με την Καταμέτρηση."""
+    bid = re.sub(r"[^a-zA-Z0-9_]", "_", dom_base)[:72]
+    block_parts: list[str] = []
+    n = len(sections)
+    for i, (kind, text) in enumerate(sections):
+        t = html.escape(text)
+        margin = "0" if i == n - 1 else "0 0 10px 0"
+        if kind == "warning":
+            block_parts.append(
+                f'<div style="background:#fef9c3;border-left:4px solid #ca8a04;padding:12px 14px;margin:{margin};'
+                f'border-radius:8px;font-size:14px;line-height:1.5;color:#713f12;">{t}</div>'
+            )
+        else:
+            block_parts.append(
+                f'<div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:12px 14px;margin:{margin};'
+                f'border-radius:8px;font-size:14px;line-height:1.5;color:#0c4a6e;">{t}</div>'
+            )
+    blocks = "".join(block_parts)
+    title_e = html.escape(modal_title)
+    overlay = (
+        f'<div id="atlas_infomodal_{bid}" class="atlas-infomodal-overlay" style="position:fixed;inset:0;z-index:999999;'
+        f'background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;padding:16px;">'
+        f'<div style="background:#fff;border-radius:16px;max-width:min(720px,96vw);max-height:85vh;overflow:auto;'
+        f'box-shadow:0 25px 50px rgba(0,0,0,0.35);padding:18px 22px;font-family:system-ui,sans-serif;" '
+        f'onclick="event.stopPropagation()">'
+        f'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;">'
+        f'<h3 style="margin:0;font-size:1.08rem;color:#0c4a6e;line-height:1.3;">{title_e}</h3>'
+        f'<button type="button" class="atlas-infomodal-x" style="flex-shrink:0;border:none;background:#e0f2fe;'
+        f'width:36px;height:36px;border-radius:10px;cursor:pointer;font-size:22px;line-height:1;color:#0369a1;">'
+        f"&times;</button></div>"
+        f"<div>{blocks}</div>"
+        f"</div></div>"
+    )
+    b64 = base64.standard_b64encode(overlay.encode("utf-8")).decode("ascii")
+    aria = html.escape(button_aria, quote=True)
+    return (
+        f'<div style="width:100%;display:flex;align-items:flex-start;justify-content:center;'
+        f'padding-top:6px;min-height:44px;box-sizing:border-box;">'
+        f'<button type="button" id="infomodal_btn_{bid}" title="{aria}" aria-label="{aria}" '
+        f'style="flex-shrink:0;width:42px;height:42px;border-radius:50%;border:2px solid #0284c7;'
+        f'background:#f0f9ff;cursor:pointer;font-size:22px;line-height:1;color:#0369a1;padding:0;'
+        f'box-shadow:0 1px 3px rgba(0,0,0,0.12);">\u2139</button>'
+        f'<pre id="infomodal_b64_{bid}" style="display:none;margin:0;">{b64}</pre>'
+        "<script>"
+        "(function(){"
+        f'var bid="{bid}";'
+        'var btn=document.getElementById("infomodal_btn_"+bid);'
+        'var pre=document.getElementById("infomodal_b64_"+bid);'
+        "if(!btn||!pre)return;"
+        "function rootDoc(){try{return window.parent.document;}catch(e){return document;}}"
+        "function closeOv(id){var d=rootDoc();var el=d.getElementById(id);if(el)el.remove();}"
+        "btn.onclick=function(e){e.preventDefault();var id=\"atlas_infomodal_\"+bid;var d=rootDoc();"
+        "if(d.getElementById(id))return;"
+        "var b64=pre.textContent.trim();var bin=atob(b64);var u8=new Uint8Array(bin.length);"
+        "for(var i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i)&255;"
+        "var html=new TextDecoder(\"utf-8\").decode(u8);var wrap=d.createElement(\"div\");wrap.innerHTML=html;"
+        "var node=wrap.firstElementChild;if(!node)return;node.id=id;d.body.appendChild(node);"
+        "var x=node.querySelector(\".atlas-infomodal-x\");if(x)x.onclick=function(ev){ev.stopPropagation();closeOv(id);};"
+        "node.onclick=function(ev){if(ev.target===node)closeOv(id);};};"
+        "document.addEventListener(\"keydown\",function(e){"
+        "if(e.key!==\"Escape\")return;var d=rootDoc();var id=\"atlas_infomodal_\"+bid;if(d.getElementById(id))closeOv(id);}"
+        ",true);"
+        "})();"
+        "</script></div>"
+    )
 
 
 def render_totals_tab(
@@ -5502,7 +5777,61 @@ def render_totals_tab(
         y_val = format_number_greek(total_years_val, decimals=1) if total_years_val is not None else "•"
         st.metric("Συνολικά Έτη", y_val)
 
-    if has_parallel or has_parallel_2017 or has_multi:
+    exceeded_body_html = ""
+    _n_exceeded = 0
+    if exceeded_months is not None and not exceeded_months.empty:
+        month_names = {1: 'Ιαν', 2: 'Φεβ', 3: 'Μαρ', 4: 'Απρ', 5: 'Μαϊ', 6: 'Ιουν', 7: 'Ιουλ', 8: 'Αυγ', 9: 'Σεπ', 10: 'Οκτ', 11: 'Νοε', 12: 'Δεκ'}
+        _ex_html_parts: list[str] = []
+        for _, r in exceeded_months.iterrows():
+            m = int(r.get('Μήνας', 0))
+            y = int(r.get('Έτος', 0))
+            m_str = month_names.get(m, str(m))
+            pkg = r.get('Κλάδος/Πακέτο Κάλυψης', '')
+            tameio = r.get('Ταμείο', '')
+            typos = r.get('Τύπος Ασφάλισης', '')
+            lim = int(r.get('Όριο', 0))
+            over = r.get('Υπέρβαση', 0)
+            pkg_e = html.escape(str(pkg))
+            tameio_e = html.escape(str(tameio).strip()) if str(tameio).strip() else ""
+            typos_e = html.escape(str(typos).strip()) if str(typos).strip() else ""
+            bits = [f"<strong>Πακέτο {pkg_e}</strong>"]
+            if tameio_e:
+                bits.append(f" | Ταμείο: {tameio_e}")
+            if typos_e:
+                bits.append(f" | Τύπος: {typos_e}")
+            bits.append(
+                f" — Μήνας <strong>{html.escape(m_str)} {y}</strong>: "
+                f"{int(r.get('Ημέρες', 0))} ημέρες (όριο {lim}, υπέρβαση +{html.escape(str(over))})"
+            )
+            _ex_html_parts.append('<p style="margin:0.35em 0;">' + "".join(bits) + "</p>")
+        exceeded_body_html = "".join(_ex_html_parts)
+        _n_exceeded = len(_ex_html_parts)
+
+    has_par_warn = bool(has_parallel or has_parallel_2017 or has_multi)
+    has_ex_warn = _n_exceeded > 0
+
+    if has_par_warn and has_ex_warn:
+        _c_par, _c_ex = st.columns([5, 1.35], vertical_alignment="center", gap="small")
+        with _c_par:
+            parts = []
+            if has_parallel:
+                parts.append("Παράλληλη ασφάλιση")
+            if has_parallel_2017:
+                parts.append("Παράλληλη απασχόληση")
+            if has_multi:
+                parts.append("Πολλαπλή απασχόληση")
+            st.warning(
+                f"**Εντοπίστηκε: {' / '.join(parts)}.** Το άθροισμα ημερών ασφάλισης μπορεί να δώσει παραπλανητικό αποτέλεσμα. "
+                "Ελέγξτε τις αντίστοιχες καρτέλες για λεπτομέρειες."
+            )
+        with _c_ex:
+            components.html(
+                _totals_exceeded_cap_instant_modal_html(
+                    exceeded_body_html, _n_exceeded, f"{key_prefix}_exceeded_cap"
+                ),
+                height=44,
+            )
+    elif has_par_warn:
         parts = []
         if has_parallel:
             parts.append("Παράλληλη ασφάλιση")
@@ -5514,23 +5843,20 @@ def render_totals_tab(
             f"**Εντοπίστηκε: {' / '.join(parts)}.** Το άθροισμα ημερών ασφάλισης μπορεί να δώσει παραπλανητικό αποτέλεσμα. "
             "Ελέγξτε τις αντίστοιχες καρτέλες για λεπτομέρειες."
         )
-
-    if exceeded_months is not None and not exceeded_months.empty:
-        month_names = {1: 'Ιαν', 2: 'Φεβ', 3: 'Μαρ', 4: 'Απρ', 5: 'Μαϊ', 6: 'Ιουν', 7: 'Ιουλ', 8: 'Αυγ', 9: 'Σεπ', 10: 'Οκτ', 11: 'Νοε', 12: 'Δεκ'}
-        lines = []
-        for _, r in exceeded_months.iterrows():
-            m = int(r.get('Μήνας', 0))
-            y = int(r.get('Έτος', 0))
-            m_str = month_names.get(m, str(m))
-            pkg = r.get('Κλάδος/Πακέτο Κάλυψης', '')
-            tameio = r.get('Ταμείο', '')
-            typos = r.get('Τύπος Ασφάλισης', '')
-            lim = int(r.get('Όριο', 0))
-            over = r.get('Υπέρβαση', 0)
-            lines.append(f"**Πακέτο {pkg}**" + (f" | Ταμείο: {tameio}" if tameio else "") + (f" | Τύπος: {typos}" if typos else "") + f" — Μήνας **{m_str} {y}**: {int(r.get('Ημέρες', 0))} ημέρες (όριο {lim}, υπέρβαση +{over})")
-        st.warning(
-            "**Υπέρβαση ορίου ημερών ανά μήνα** (εφαρμόστηκε πλαφόν: ΙΚΑ 31 ημ./μήνα, ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ και υπόλοιπα 25 ημ./μήνα· για ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ το μήνυμα μόνο όταν >30 ημ./μήνα):\n\n" + "\n\n".join(lines)
-        )
+    elif has_ex_warn:
+        _c_inf, _c_ex = st.columns([5, 1.35], vertical_alignment="center", gap="small")
+        with _c_inf:
+            st.info(
+                f"**Υπέρβαση ορίου ημερών ανά μήνα** — {_n_exceeded} μήνες. "
+                "Η πλήρης λίστα ανοίγει με το κουμπί δεξιά."
+            )
+        with _c_ex:
+            components.html(
+                _totals_exceeded_cap_instant_modal_html(
+                    exceeded_body_html, _n_exceeded, f"{key_prefix}_exceeded_cap"
+                ),
+                height=44,
+            )
 
     st.dataframe(display_summary, width="stretch")
     if register_view_fn is not None:
@@ -5735,8 +6061,10 @@ def show_results_page(df, filename):
             f"{int(header_age)} ετών</div>"
         )
 
-    st.markdown(
-        f"""<div class="professional-header">
+    _hdr_title, _hdr_lite = st.columns([8, 1], vertical_alignment="center", gap="small")
+    with _hdr_title:
+        st.markdown(
+            f"""<div class="professional-header">
 <div class="header-content">
 <div class="header-left">
 <div class="header-text">
@@ -5746,11 +6074,58 @@ def show_results_page(df, filename):
 {header_center_html}
 </div>
 </div>""",
-        unsafe_allow_html=True
+            unsafe_allow_html=True,
+        )
+    with _hdr_lite:
+        if st.button(
+            "Άνοιγμα ATLAS Lite",
+            type="primary",
+            use_container_width=False,
+            key="atlas_results_float_html_report",
+            help="Πλήρης HTML αναφορά σε νέα καρτέλα (επιτρέψτε pop-ups).",
+        ):
+            st.session_state["open_html_report"] = True
+
+    if st.session_state.get("open_html_report"):
+        _atlas_render_full_html_report_open_tab(df)
+        st.session_state["open_html_report"] = False
+
+    components.html(
+        r"""
+        <script>
+        (function () {
+          var doc = (window.parent && window.parent.document) ? window.parent.document : document;
+          function styleAtlasLiteBtn() {
+            var buttons = doc.querySelectorAll('button');
+            for (var i = 0; i < buttons.length; i++) {
+              var b = buttons[i];
+              var t = (b.innerText || '').replace(/\s+/g, ' ').trim();
+              if (t !== 'Άνοιγμα ATLAS Lite') continue;
+              b.style.setProperty('padding', '0.3rem 0.65rem', 'important');
+              b.style.setProperty('font-size', '0.82rem', 'important');
+              b.style.setProperty('line-height', '1.25', 'important');
+              b.style.setProperty('min-height', '2rem', 'important');
+              b.style.setProperty('width', 'auto', 'important');
+              var col = b.closest('[data-testid="column"]');
+              if (col) {
+                col.style.setProperty('flex', '0 0 auto', 'important');
+                col.style.setProperty('width', 'auto', 'important');
+                col.style.setProperty('min-width', 'unset', 'important');
+              }
+              var vb = b.closest('[data-testid="stVerticalBlockBorderWrapper"]');
+              if (vb) vb.style.setProperty('width', 'auto', 'important');
+              return;
+            }
+          }
+          styleAtlasLiteBtn();
+          setTimeout(styleAtlasLiteBtn, 80);
+          setTimeout(styleAtlasLiteBtn, 350);
+        })();
+        </script>
+        """,
+        height=0,
     )
-    
-    
-    
+
     # CSS σελίδας αποτελεσμάτων: tabs ήδη από global· εδώ μόνο overrides που χρειάζονται εδώ
     st.markdown("""
     <style>
@@ -7142,8 +7517,25 @@ def show_results_page(df, filename):
         if st.session_state.get('show_complex_file_warning'):
             st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
         # Αναφορά Κενών Διαστήματων
-        st.markdown("### Αναφορά Κενών Διαστήματων και διαστημάτων χωρίς ημέρες ασφάλισης")
-        st.info("Σκοπός: Εντοπίζει χρονικά διαστήματα που δεν εμφανίζονται καθόλου στο ΑΤΛΑΣ από την έναρξη της ασφάλισης έως σήμερα.")
+        _gaps_h_col, _gaps_i_col = st.columns([12, 1])
+        with _gaps_h_col:
+            st.markdown("### Αναφορά Κενών Διαστήματων και διαστημάτων χωρίς ημέρες ασφάλισης")
+        with _gaps_i_col:
+            components.html(
+                _atlas_streamlit_info_modal_icon_html(
+                    "gaps_purpose",
+                    "Σκοπός — Κενά διαστήματα",
+                    [
+                        (
+                            "info",
+                            "Σκοπός: Εντοπίζει χρονικά διαστήματα που δεν εμφανίζονται καθόλου στο ΑΤΛΑΣ "
+                            "από την έναρξη της ασφάλισης έως σήμερα.",
+                        )
+                    ],
+                    button_aria="Σκοπός αναφοράς κενών διαστημάτων",
+                ),
+                height=58,
+            )
         
         if 'Από' in df.columns and 'Έως' in df.columns:
             # Εντοπισμός κενών διαστημάτων
@@ -8047,14 +8439,15 @@ def show_results_page(df, filename):
     def _atlas_frag_tab_count():
         if st.session_state.get('show_complex_file_warning'):
             st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
-        st.markdown("### Καταμέτρηση Ημερών Ασφάλισης")
-        info_col, warn_col, exclude_col = st.columns([1.6, 1.9, 1.5])
-        with info_col:
-            st.info("Αναλυτική καταμέτρηση ημερών ανά έτος, ταμείο, εργοδότη και μήνα.")
-        with warn_col:
-            st.warning("Διαστήματα που καλύπτουν πολλαπλούς μήνες επιμερίζονται και επισημαίνονται με κίτρινο χρώμα.")
-        with exclude_col:
-            st.info(f"Εξαιρούνται: {excluded_packages_label}")
+        cnt_metrics_ph = st.empty()
+        _cnt_title_col, _cnt_info_col = st.columns([12, 1])
+        with _cnt_title_col:
+            st.markdown("### Καταμέτρηση Ημερών Ασφάλισης")
+        with _cnt_info_col:
+            components.html(
+                _counting_days_info_icon_html(excluded_packages_label, "cnt_days_info"),
+                height=58,
+            )
 
         count_df = df.copy()
         count_df = exclude_unused_packages(count_df)
@@ -8124,7 +8517,8 @@ def show_results_page(df, filename):
                             else:
                                 klados_opts.append(code)
                                 klados_map[code] = code
-                        
+                        st.session_state["_cnt_klados_map"] = klados_map
+
                         sel_cnt_klados = st.multiselect(
                             "Κλάδος/Πακέτο:",
                             options=klados_opts,
@@ -8137,6 +8531,8 @@ def show_results_page(df, filename):
                             count_df = count_df[count_df['Κλάδος/Πακέτο Κάλυψης'].isin(sel_codes)]
                         if not st.session_state.get("_apd_sync_just_applied") and _sync_cnt_klados_to_apd(sel_cnt_klados, klados_map):
                             st.rerun()
+                    else:
+                        st.session_state["_cnt_klados_map"] = {}
                 
                 with col5:
                     # Φίλτρο Τύπου Αποδοχών
@@ -8330,15 +8726,8 @@ def show_results_page(df, filename):
 
             if counting_rows:
                 c_df = pd.DataFrame(counting_rows)
-                cnt_show_monthly_kind_totals = bool(sel_cnt_klados)
-
-                def _count_tab_insurance_kind(typos) -> str | None:
-                    s = str(typos).strip().upper()
-                    if 'ΜΙΣΘΩΤΗ' in s and 'ΜΗ ΜΙΣΘΩΤΗ' not in s and not s.startswith('ΜΗ '):
-                        return 'ΜΙΣΘΩΤΗ'
-                    if ('ΜΗ' in s and 'ΜΙΣΘΩΤΗ' in s) or ('NON' in s and 'SAL' in s):
-                        return 'ΜΗ ΜΙΣΘΩΤΗ'
-                    return None
+                _cnt_klados_pick = list(st.session_state.get("cnt_filter_klados") or [])
+                cnt_show_monthly_kind_totals = bool(_cnt_klados_pick)
 
                 def _count_tab_monthly_cap_days(tameio_val) -> float:
                     t = str(tameio_val).upper()
@@ -8351,7 +8740,7 @@ def show_results_page(df, filename):
                     sub = c_df_src[c_df_src['ΕΤΟΣ'] == year].copy()
                     if sub.empty:
                         return {m: 0.0 for m in range(1, 13)}
-                    sub['_k'] = sub['ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ'].apply(_count_tab_insurance_kind)
+                    sub['_k'] = sub['ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ'].apply(insurance_kind_classify_count)
                     if kind_code is not None:
                         sub = sub[sub['_k'] == kind_code]
                     if sub.empty:
@@ -8365,6 +8754,69 @@ def show_results_page(df, filename):
                     by_m = g.groupby('Μήνας_Num')['_capped'].sum()
                     return {m: float(by_m.get(m, 0.0) or 0.0) for m in range(1, 13)}
                 
+                # Σύνολα (πρότυπο καρτέλας Σύνολα): μόνο με επιλεγμένα πακέτα κάλυψης (όχι προεπιλογή «όλα»)
+                _km_cnt = st.session_state.get("_cnt_klados_map") or {}
+                _codes_metrics = [_km_cnt.get(o, o) for o in _cnt_klados_pick] if _cnt_klados_pick else []
+                c_df_metrics = (
+                    c_df[c_df["ΚΛΑΔΟΣ/ΠΑΚΕΤΟ"].astype(str).str.strip().isin([str(x).strip() for x in _codes_metrics])]
+                    if _codes_metrics
+                    else c_df.iloc[0:0]
+                )
+                if _cnt_klados_pick and not c_df_metrics.empty:
+                    try:
+                        _years_cnt_tab = sorted({int(y) for y in c_df_metrics['ΕΤΟΣ'].dropna().unique()})
+                    except Exception:
+                        _years_cnt_tab = []
+                    _sum_misthoti_cnt = 0.0
+                    _sum_nm_cnt = 0.0
+                    for _yc in _years_cnt_tab:
+                        _sum_misthoti_cnt += sum(compute_kind_monthly_capped_totals(c_df_metrics, _yc, 'ΜΙΣΘΩΤΗ').values())
+                        _sum_nm_cnt += sum(compute_kind_monthly_capped_totals(c_df_metrics, _yc, 'ΜΗ ΜΙΣΘΩΤΗ').values())
+                    _sum_days_cnt = _sum_misthoti_cnt + _sum_nm_cnt
+                    _basis_cnt_tab = st.session_state.get('ins_days_basis', 'Μήνας = 25, Έτος = 300')
+                    _year_days_cnt = 360 if str(_basis_cnt_tab).startswith('Μήνας = 30') else 300
+                    _years_equiv_cnt = _sum_days_cnt / _year_days_cnt if _year_days_cnt else 0.0
+                    with cnt_metrics_ph.container():
+                        _cnt_sum_row = st.columns([2, 1, 1, 1, 1])
+                        with _cnt_sum_row[0]:
+                            if has_parallel or has_parallel_2017 or has_multi:
+                                _cnt_warn_parts = []
+                                if has_parallel:
+                                    _cnt_warn_parts.append("Παράλληλη ασφάλιση")
+                                if has_parallel_2017:
+                                    _cnt_warn_parts.append("Παράλληλη απασχόληση")
+                                if has_multi:
+                                    _cnt_warn_parts.append("Πολλαπλή απασχόληση")
+                                st.warning(
+                                    f"**Εντοπίστηκε: {' / '.join(_cnt_warn_parts)}.** "
+                                    "Το άθροισμα ημερών ασφάλισης μπορεί να δώσει παραπλανητικό αποτέλεσμα. "
+                                    "Ελέγξτε τις αντίστοιχες καρτέλες για λεπτομέρειες."
+                                )
+                            else:
+                                st.empty()
+                        with _cnt_sum_row[1]:
+                            st.metric(
+                                "Σύνολο ημερών (μισθωτή)",
+                                format_number_greek(_sum_misthoti_cnt, decimals=0),
+                            )
+                        with _cnt_sum_row[2]:
+                            st.metric(
+                                "Σύνολο ημερών (μη μισθωτή)",
+                                format_number_greek(_sum_nm_cnt, decimals=0),
+                            )
+                        with _cnt_sum_row[3]:
+                            st.metric(
+                                "Άθροισμα ημερών",
+                                format_number_greek(_sum_days_cnt, decimals=0),
+                            )
+                        with _cnt_sum_row[4]:
+                            st.metric(
+                                "Συνολικά έτη",
+                                format_number_greek(_years_equiv_cnt, decimals=1),
+                            )
+                else:
+                    cnt_metrics_ph.empty()
+
                 # Calculate annual totals for Days, Gross, Contrib
                 annual_totals = c_df.groupby(['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'])[['Ημέρες', 'Μικτές_Part', 'Εισφορές_Part']].sum().reset_index()
                 annual_totals.rename(columns={
@@ -8513,7 +8965,7 @@ def show_results_page(df, filename):
                     excl_filler = display_cnt_df[display_cnt_df['ΤΑΜΕΙΟ'].astype(str) != 'ΚΕΝΟ ΔΙΑΣΤΗΜΑ'].copy()
                     _leg = excl_filler.groupby('ΕΤΟΣ')[sum_cols].sum().to_dict('index')
                     year_totals_legacy = {int(k): v for k, v in _leg.items()}
-                    excl_filler['_kind'] = excl_filler['ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ'].apply(_count_tab_insurance_kind)
+                    excl_filler['_kind'] = excl_filler['ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ'].apply(insurance_kind_classify_count)
                     kind_rows = excl_filler[excl_filler['_kind'].notna()]
                     if not kind_rows.empty:
                         gk = kind_rows.groupby(['ΕΤΟΣ', '_kind'])[sum_cols].sum()
@@ -8696,7 +9148,7 @@ def show_results_page(df, filename):
                     except (KeyError, TypeError):
                         curr_raw = {}
                     is_cnt_filler = str(curr_raw.get('ΤΑΜΕΙΟ', '')).strip() == 'ΚΕΝΟ ΔΙΑΣΤΗΜΑ'
-                    row_kind = None if is_cnt_filler else _count_tab_insurance_kind(curr_raw.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', ''))
+                    row_kind = None if is_cnt_filler else insurance_kind_classify_count(curr_raw.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', ''))
 
                     try:
                         cy_int = int(curr_year)
@@ -8840,7 +9292,7 @@ def show_results_page(df, filename):
                 
                 if show_count_totals_only:
                     try:
-                        total_mask = masks_df['__is_total__'].fillna(False)
+                        total_mask = masks_df["__is_total__"].eq(True)
                         final_display_df = final_display_df[total_mask].reset_index(drop=True)
                         masks_df = masks_df[total_mask].reset_index(drop=True)
                     except Exception:
@@ -8955,8 +9407,10 @@ def show_results_page(df, filename):
                 )
                 
             else:
+                cnt_metrics_ph.empty()
                 st.warning("Δεν βρέθηκαν δεδομένα για καταμέτρηση.")
         else:
+            cnt_metrics_ph.empty()
             st.warning("Λείπουν οι απαραίτητες στήλες (Από, Έως, Ημέρες) για την καταμέτρηση.")
             st.session_state['count_klados_selected'] = False
             st.session_state['count_work_df'] = count_df.copy()
@@ -9108,12 +9562,21 @@ def show_results_page(df, filename):
                                 return pd.NA if v is None else v
 
                             if _has_apd:
-                                syn_f['Σύνολο ημερών (μισθωτή)'] = syn_f['Έτος'].apply(lambda e: _apd_lookup(_apd_im, e))
-                                syn_f['Συνολικές μικτές αποδοχές'] = syn_f['Έτος'].apply(lambda e: _apd_lookup(_apd_mk, e))
-                                syn_f['Συντ. αποδοχές'] = syn_f['Έτος'].apply(lambda e: _apd_lookup(_apd_sy, e))
+                                # Πριν 2002: ημέρες μισθωτής από Καταμέτρηση (ήδη στο syn_df)
+                                # Από 2002+: ημέρες μισθωτής, μικτές, Συντ. αποδοχές από ΑΠΔ
+                                _apd_im_vals = syn_f['Έτος'].apply(lambda e: _apd_lookup(_apd_im, e))
+                                _apd_mk_vals = syn_f['Έτος'].apply(lambda e: _apd_lookup(_apd_mk, e))
+                                _apd_sy_vals = syn_f['Έτος'].apply(lambda e: _apd_lookup(_apd_sy, e))
+                                _is_2002_plus = syn_f['Έτος'].apply(lambda e: int(float(e)) >= 2002 if pd.notna(e) else False)
+                                syn_f['Σύνολο ημερών (μισθωτή)'] = syn_f['Σύνολο ημερών (μισθωτή)'].where(~_is_2002_plus, _apd_im_vals)
+                                syn_f['Συνολικές μικτές αποδοχές'] = syn_f['Συνολικές μικτές αποδοχές'].where(~_is_2002_plus, _apd_mk_vals)
+                                syn_f['Συντ. αποδοχές'] = pd.NA
+                                syn_f.loc[_is_2002_plus, 'Συντ. αποδοχές'] = _apd_sy_vals[_is_2002_plus]
                             else:
-                                syn_f['Σύνολο ημερών (μισθωτή)'] = pd.NA
-                                syn_f['Συνολικές μικτές αποδοχές'] = pd.NA
+                                # Χωρίς ΑΠΔ: ημέρες μισθωτής/μικτές πριν 2002 μένουν από Καταμέτρηση, 2002+ κενές
+                                _is_2002_plus = syn_f['Έτος'].apply(lambda e: int(float(e)) >= 2002 if pd.notna(e) else False)
+                                syn_f.loc[_is_2002_plus, 'Σύνολο ημερών (μισθωτή)'] = pd.NA
+                                syn_f.loc[_is_2002_plus, 'Συνολικές μικτές αποδοχές'] = pd.NA
                                 syn_f['Συντ. αποδοχές'] = pd.NA
 
                             syn_f['ΔΤΚ'] = syn_f['Έτος'].apply(
@@ -9265,9 +9728,9 @@ def show_results_page(df, filename):
                                 _syn_disp_show = disp_syn
 
                             st.caption(
-                                "**Σύνολο ημερών (μισθωτή)**, **Συνολικές μικτές**, **Συντ. αποδοχές**: "
-                                "από τα ετήσια **σύνολα ΑΠΔ** (αν έχει τρέξει)· αλλιώς κενά. "
-                                "**Σύνολο ημερών (μη μισθωτή)** / **Εισφορές** από **Καταμέτρηση**. "
+                                "**Πριν 2002**: **ημέρες μισθωτή** & **μικτές** από **Καταμέτρηση**. "
+                                "**Από 2002+**: **ημέρες μισθωτή**, **μικτές**, **Συντ. αποδοχές** από ετήσια **σύνολα ΑΠΔ** (αν έχει τρέξει)· αλλιώς κενά. "
+                                "**Σύνολο ημερών (μη μισθωτή)** / **Εισφορές** πάντα από **Καταμέτρηση**. "
                                 "**Συνολικές αποδοχές** = Συντ. αποδοχές + τεκμαρτές ((εισφορές μη μισθωτή + κοιν. πόροι)×5)."
                             )
                             try:
@@ -9759,7 +10222,29 @@ def show_results_page(df, filename):
     def _atlas_frag_tab_parallel():
         if st.session_state.get('show_complex_file_warning'):
             st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
-        st.markdown("### Παράλληλη Ασφάλιση (ΙΚΑ & ΟΑΕΕ / ΙΚΑ & ΤΣΜΕΔΕ / ΟΑΕΕ & ΤΣΜΕΔΕ / ΟΓΑ & ΙΚΑ/ΟΑΕΕ)")
+        _par_cl_t, _par_cl_i = st.columns([12, 1])
+        with _par_cl_t:
+            st.markdown("### Παράλληλη Ασφάλιση (ΙΚΑ & ΟΑΕΕ / ΙΚΑ & ΤΣΜΕΔΕ / ΟΑΕΕ & ΤΣΜΕΔΕ / ΟΓΑ & ΙΚΑ/ΟΑΕΕ)")
+        with _par_cl_i:
+            components.html(
+                _atlas_streamlit_info_modal_icon_html(
+                    "parallel_classic_info",
+                    "Πληροφορίες — Παράλληλη ασφάλιση",
+                    [
+                        (
+                            "info",
+                            "Εμφάνιση διαστημάτων όπου συνυπάρχουν στον ίδιο μήνα: ΙΚΑ (Τύπος Αποδοχών 01, 16 ή 99) "
+                            "& ΟΑΕΕ (Κλάδος/Πακέτο Κ), ΙΚΑ & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.",
+                        ),
+                        (
+                            "warning",
+                            "Διαστήματα που καλύπτουν πολλαπλούς μήνες επιμερίζονται και επισημαίνονται με κίτρινο χρώμα.",
+                        ),
+                    ],
+                    button_aria="Πληροφορίες παράλληλης ασφάλισης",
+                ),
+                height=58,
+            )
         parallel_df = exclude_unused_packages(df.copy())
         required_cols = ['Από', 'Έως', 'Ημέρες']
         
@@ -9973,19 +10458,12 @@ def show_results_page(df, filename):
                     parallel_days_total += month_parallel
                 parallel_days_total = int(round(parallel_days_total))
 
-                # Μηνύματα ενημέρωσης σε μία γραμμή (όπως στην Καταμέτρηση)
-                info_col1, info_col2, info_col3 = st.columns([3, 3, 2])
-                with info_col1:
-                    st.info("Εμφάνιση διαστημάτων όπου συνυπάρχουν στον ίδιο μήνα: ΙΚΑ (Τύπος Αποδοχών 01, 16 ή 99) & ΟΑΕΕ (Κλάδος/Πακέτο Κ), ΙΚΑ & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.")
-                with info_col2:
-                    met_col1, met_col2 = st.columns(2)
-                    with met_col1:
-                        st.metric("Μήνες Παράλληλης", format_number_greek(len(valid_months), decimals=0))
-                    with met_col2:
-                        st.metric("Ημέρες Παράλληλης", format_number_greek(parallel_days_total, decimals=0))
-                    st.caption("Κριτήρια: ΙΚΑ (αποδοχές 01, 16, ή 99) & ΟΑΕΕ Κ, ΙΚΑ & ΤΣΜΕΔΕ ΚΣ/ΠΚΣ, ΟΑΕΕ Κ & ΤΣΜΕΔΕ ΚΣ/ΠΚΣ, ή ΟΓΑ Κ & ΙΚΑ/ΟΑΕΕ (έως 31/12/2016).")
-                with info_col3:
-                    st.warning("Διαστήματα που καλύπτουν πολλαπλούς μήνες επιμερίζονται και επισημαίνονται με κίτρινο χρώμα.")
+                met_col1, met_col2 = st.columns(2)
+                with met_col1:
+                    st.metric("Μήνες Παράλληλης", format_number_greek(len(valid_months), decimals=0))
+                with met_col2:
+                    st.metric("Ημέρες Παράλληλης", format_number_greek(parallel_days_total, decimals=0))
+                st.caption("Κριτήρια: ΙΚΑ (αποδοχές 01, 16, ή 99) & ΟΑΕΕ Κ, ΙΚΑ & ΤΣΜΕΔΕ ΚΣ/ΠΚΣ, ΟΑΕΕ Κ & ΤΣΜΕΔΕ ΚΣ/ΠΚΣ, ή ΟΓΑ Κ & ΙΚΑ/ΟΑΕΕ (έως 31/12/2016).")
 
                 if valid_months:
                     valid_months_df = pd.DataFrame(valid_months, columns=['ΕΤΟΣ', 'Μήνας_Num'])
@@ -10244,7 +10722,31 @@ def show_results_page(df, filename):
     def _atlas_frag_tab_parallel_2017():
         if st.session_state.get('show_complex_file_warning'):
             st.error("**Προσοχή: Περίπλοκο αρχείο** — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.")
-        st.markdown("### Παράλληλη Απασχόληση 2017+ (ΙΚΑ & ΕΦΚΑ ΜΗ ΜΙΣΘΩΤΗ / ΕΦΚΑ ΜΙΣΘΩΤΗ & ΕΦΚΑ ΜΗ ΜΙΣΘΩΤΗ)")
+        _par17_t, _par17_i = st.columns([12, 1])
+        with _par17_t:
+            st.markdown(
+                "### Παράλληλη Απασχόληση 2017+ (ΙΚΑ & ΕΦΚΑ ΜΗ ΜΙΣΘΩΤΗ / ΕΦΚΑ ΜΙΣΘΩΤΗ & ΕΦΚΑ ΜΗ ΜΙΣΘΩΤΗ)"
+            )
+        with _par17_i:
+            components.html(
+                _atlas_streamlit_info_modal_icon_html(
+                    "parallel_2017_info",
+                    "Πληροφορίες — Παράλληλη απασχόληση 2017+",
+                    [
+                        (
+                            "info",
+                            "Εμφάνιση διαστημάτων από 01/2017 και μετά όπου συνυπάρχουν στον ίδιο μήνα: "
+                            "ΙΚΑ (αποδοχές 01, 16 ή 99) & ΕΦΚΑ μη μισθωτή ή ΕΦΚΑ μισθωτή & ΕΦΚΑ μη μισθωτή.",
+                        ),
+                        (
+                            "warning",
+                            "Διαστήματα που καλύπτουν πολλαπλούς μήνες επιμερίζονται και επισημαίνονται με κίτρινο χρώμα.",
+                        ),
+                    ],
+                    button_aria="Πληροφορίες παράλληλης απασχόλησης 2017+",
+                ),
+                height=58,
+            )
         parallel_df = exclude_unused_packages(df.copy())
         required_cols = ['Από', 'Έως', 'Ημέρες']
 
@@ -10394,18 +10896,15 @@ def show_results_page(df, filename):
                     parallel_days_total += max(cands) if cands else 0
                 parallel_days_total = int(round(parallel_days_total))
 
-                info_col1, info_col2, info_col3 = st.columns([3, 3, 2])
-                with info_col1:
-                    st.info("Εμφάνιση διαστημάτων από 01/2017 και μετά όπου συνυπάρχουν στον ίδιο μήνα: ΙΚΑ (αποδοχές 01, 16 ή 99) & ΕΦΚΑ μη μισθωτή ή ΕΦΚΑ μισθωτή & ΕΦΚΑ μη μισθωτή.")
-                with info_col2:
-                    met_col1, met_col2 = st.columns(2)
-                    with met_col1:
-                        st.metric("Μήνες Παράλληλης 2017+", format_number_greek(len(valid_months), decimals=0))
-                    with met_col2:
-                        st.metric("Ημέρες Παράλληλης 2017+", format_number_greek(parallel_days_total, decimals=0))
-                    st.caption("Κριτήρια: ΙΚΑ (αποδοχές 01, 16, ή 99) + ΕΦΚΑ μη μισθωτή ή ΕΦΚΑ μισθωτή + ΕΦΚΑ μη μισθωτή. Εφαρμόζεται όριο 25 ημερών/μήνα.")
-                with info_col3:
-                    st.warning("Διαστήματα που καλύπτουν πολλαπλούς μήνες επιμερίζονται και επισημαίνονται με κίτρινο χρώμα.")
+                met_col1, met_col2 = st.columns(2)
+                with met_col1:
+                    st.metric("Μήνες Παράλληλης 2017+", format_number_greek(len(valid_months), decimals=0))
+                with met_col2:
+                    st.metric("Ημέρες Παράλληλης 2017+", format_number_greek(parallel_days_total, decimals=0))
+                st.caption(
+                    "Κριτήρια: ΙΚΑ (αποδοχές 01, 16, ή 99) + ΕΦΚΑ μη μισθωτή ή ΕΦΚΑ μισθωτή + ΕΦΚΑ μη μισθωτή. "
+                    "Εφαρμόζεται όριο 25 ημερών/μήνα."
+                )
 
                 if valid_months:
                     valid_months_df = pd.DataFrame(valid_months, columns=['ΕΤΟΣ', 'Μήνας_Num'])
@@ -11312,33 +11811,32 @@ def _main_inner():
                 "Δείτε το σχετικό [βίντεο οδηγίες](https://www.loom.com/share/9b9fe5f9300f42a7a1cfd1315f629145)."
             )
             
-            col1, col2, col3 = st.columns([1, 1, 1])
-            with col1:
-                if st.button("Προβολή Αποτελεσμάτων", type="primary", use_container_width=True, key="show_results_btn"):
-                    st.session_state['show_results'] = True
-                    st.rerun()
-            with col2:
-                if st.button("Γρήγορη Προβολή - HTML", type="secondary", use_container_width=True, key="open_html_btn"):
-                    st.session_state['open_html_report'] = True
-            
+            _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
+            with _pp_mid:
+                _pp_b1, _pp_b2 = st.columns(2, vertical_alignment="center")
+                with _pp_b1:
+                    if st.button(
+                        "ATLAS Pro\n(πλήρες)",
+                        type="primary",
+                        use_container_width=True,
+                        key="show_results_btn",
+                        help="Πλήρης ανάλυση στην εφαρμογή (όλες οι καρτέλες).",
+                    ):
+                        st.session_state['show_results'] = True
+                        st.rerun()
+                with _pp_b2:
+                    if st.button(
+                        "ATLAS Lite\n(γρήγορο)",
+                        type="secondary",
+                        use_container_width=True,
+                        key="open_html_btn",
+                        help="Γρήγορη πλήρης HTML αναφορά σε νέα καρτέλα (pop-ups).",
+                    ):
+                        st.session_state['open_html_report'] = True
+            _atlas_inject_post_process_choice_buttons_style()
+
             if st.session_state.get('open_html_report'):
-                from html_viewer_builder import generate_full_html_report
-                client_name = st.session_state.get('client_name', '')
-                _app_title = "ATLAS"
-                _subtitle = "Ασφαλιστικό Βιογραφικό"
-                with st.spinner("Παραγωγή της HTML αναφοράς — παρακαλώ περιμένετε…"):
-                    viewer_html, _ = generate_full_html_report(
-                        df, client_name=client_name,
-                        app_title=_app_title, app_subtitle=_subtitle,
-                    )
-                js_content = json.dumps(viewer_html).replace("</script>", "<\\/script>")
-                components.html(
-                    f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
-<script>(function(){{var h={js_content};var b=new Blob([h],{{type:'text/html;charset=utf-8'}});
-var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
-<p style="margin:0;font-size:14px;color:#666;">Άνοιγμα HTML αναφοράς...</p></body></html>""",
-                    height=40,
-                )
+                _atlas_render_full_html_report_open_tab(df)
                 st.session_state['open_html_report'] = False
             
             st.success(f"Εξήχθησαν {len(df)} γραμμές δεδομένων από {df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες")
@@ -11371,15 +11869,30 @@ var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
                         "**Πριν την προβολή:** Αν δεν εμφανίζεται η ανάλυση ή η HTML αναφορά, ελέγξτε αν ο browser αποκλείει **αναδυόμενα παράθυρα** (pop-ups). "
                         "Δείτε το σχετικό [βίντεο οδηγίες](https://www.loom.com/share/9b9fe5f9300f42a7a1cfd1315f629145)."
                     )
-                    col1, col2, col3 = st.columns([1, 1, 1])
-                    with col1:
-                        if st.button("Προβολή Αποτελεσμάτων", type="primary", use_container_width=True, key="show_results_btn"):
-                            st.session_state['show_results'] = True
-                            st.rerun()
-                    with col2:
-                        if st.button("Γρήγορη Προβολή - HTML", type="secondary", use_container_width=True, key="open_html_btn"):
-                            st.session_state['open_html_report'] = True
-                
+                    _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
+                    with _pp_mid:
+                        _pp_b1, _pp_b2 = st.columns(2, vertical_alignment="center")
+                        with _pp_b1:
+                            if st.button(
+                                "ATLAS Pro\n(πλήρες)",
+                                type="primary",
+                                use_container_width=True,
+                                key="show_results_btn",
+                                help="Πλήρης ανάλυση στην εφαρμογή (όλες οι καρτέλες).",
+                            ):
+                                st.session_state['show_results'] = True
+                                st.rerun()
+                        with _pp_b2:
+                            if st.button(
+                                "ATLAS Lite\n(γρήγορο)",
+                                type="secondary",
+                                use_container_width=True,
+                                key="open_html_btn",
+                                help="Γρήγορη πλήρης HTML αναφορά σε νέα καρτέλα (pop-ups).",
+                            ):
+                                st.session_state['open_html_report'] = True
+                    _atlas_inject_post_process_choice_buttons_style()
+
                 # Εμφάνιση summary
                 with summary_placeholder.container():
                     st.success(f"Εξήχθησαν {len(df)} γραμμές δεδομένων από {df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες")

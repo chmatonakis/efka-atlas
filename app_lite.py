@@ -88,6 +88,28 @@ def parse_birthdate_and_age(birthdate_str: str) -> tuple[str, int | None]:
     return raw, None
 
 
+def _atlas_render_full_html_report_open_tab(df: pd.DataFrame) -> None:
+    """Παραγωγή πλήρους HTML viewer (html_viewer_builder) και άνοιγμα σε νέα καρτέλα."""
+    from html_viewer_builder import generate_full_html_report
+
+    client_name = st.session_state.get("client_name", "")
+    with st.spinner("Παραγωγή της HTML αναφοράς — παρακαλώ περιμένετε…"):
+        viewer_html, _ = generate_full_html_report(
+            df,
+            client_name=client_name,
+            app_title="ATLAS Lite",
+            app_subtitle="",
+            full_save_suffix="ATLAS_Lite.html",
+        )
+    js_content = json.dumps(viewer_html).replace("</script>", "<\\/script>")
+    components.html(
+        f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+<script>(function(){{var h={js_content};var b=new Blob([h],{{type:'text/html;charset=utf-8'}});
+var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
+<p style="margin:0;font-size:14px;color:#666;">Άνοιγμα HTML αναφοράς...</p></body></html>""",
+        height=40,
+    )
+
 # Ρύθμιση σελίδας (ATLAS Lite)
 st.set_page_config(
     page_title="ATLAS Lite",
@@ -4210,11 +4232,17 @@ def get_count_allocation(count_df: pd.DataFrame, description_map: dict[str, str]
 
 
 def insurance_kind_classify_count(typos) -> str | None:
+    """Μισθωτή vs μη μισθωτή για Καταμέτρηση. Πρώτα μη μισθωτή (regex), ώστε να πιάνονται
+    «ΜΗ ΜΙΣΘΩΤΩΝ/ΜΗ ΜΙΣΘΩΤΕΣ», «ΜΗΜΙΣΘΩΤΗ» χωρίς κενό κ.λπ. — όχι μόνο η ακριβής συμβολοσειρά «ΜΗ ΜΙΣΘΩΤΗ»."""
     s = str(typos).strip().upper()
-    if 'ΜΙΣΘΩΤΗ' in s and 'ΜΗ ΜΙΣΘΩΤΗ' not in s and not s.startswith('ΜΗ '):
-        return 'ΜΙΣΘΩΤΗ'
-    if ('ΜΗ' in s and 'ΜΙΣΘΩΤΗ' in s) or ('NON' in s and 'SAL' in s):
-        return 'ΜΗ ΜΙΣΘΩΤΗ'
+    if not s:
+        return None
+    s = re.sub(r"\s+", " ", s)
+    # Μη μισθωτή πριν το κλασικό «ΜΙΣΘΩΤΗ in s» (αλλιώς «ΜΗΜΙΣΘΩΤΗ» ερμηνευόταν λάθος ως μισθωτή)
+    if re.search(r"ΜΗ\s*ΜΙΣΘΩΤ", s) or ("NON" in s and "SAL" in s):
+        return "ΜΗ ΜΙΣΘΩΤΗ"
+    if "ΜΙΣΘΩΤΗ" in s and "ΜΗ ΜΙΣΘΩΤΗ" not in s and not s.startswith("ΜΗ "):
+        return "ΜΙΣΘΩΤΗ"
     return None
 
 
@@ -5180,7 +5208,7 @@ def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] |
 
     if show_count_totals_only:
         try:
-            total_mask = masks_df['__is_total__'].fillna(False)
+            total_mask = masks_df["__is_total__"].eq(True)
             final_display_df = final_display_df[total_mask].reset_index(drop=True)
             masks_df = masks_df[total_mask].reset_index(drop=True)
         except Exception:
@@ -5213,6 +5241,198 @@ def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] |
         print_style_rows.append(row_styles)
 
     return final_display_df, active_mask_rows, last_month_col, month_cols, print_style_rows
+
+
+def _totals_exceeded_cap_instant_modal_html(exceeded_body_html: str, n: int, dom_base: str) -> str:
+    """Κουμπί + modal μόνο με JS (ενημέρωση parent document) — χωρίς Streamlit rerun, όπως το κουμπί εκτύπωσης."""
+    bid = re.sub(r"[^a-zA-Z0-9_]", "_", dom_base)[:72]
+    intro = (
+        "Εφαρμόστηκε πλαφόν: ΙΚΑ 31 ημ./μήνα, ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ και υπόλοιπα 25 ημ./μήνα· "
+        "για ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ το μήνυμα μόνο όταν >30 ημ./μήνα."
+    )
+    intro_e = html.escape(intro)
+    overlay = (
+        f'<div id="atlas_tec_{bid}" class="atlas-tec-overlay" style="position:fixed;inset:0;z-index:999999;'
+        f'background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;padding:16px;">'
+        f'<div style="background:#fff;border-radius:16px;max-width:min(1280px,96vw);max-height:85vh;overflow:auto;'
+        f'box-shadow:0 25px 50px rgba(0,0,0,0.35);padding:18px 22px;font-family:system-ui,sans-serif;" '
+        f'onclick="event.stopPropagation()">'
+        f'<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:10px;">'
+        f'<h3 style="margin:0;font-size:1.05rem;color:#78350f;">Υπέρβαση ορίου ημερών ανά μήνα</h3>'
+        f'<button type="button" class="atlas-tec-x" style="border:none;background:#fef3c7;width:36px;height:36px;'
+        f'border-radius:10px;cursor:pointer;font-size:22px;line-height:1;color:#92400e;">&times;</button></div>'
+        f'<p style="margin:0 0 12px 0;font-size:13px;color:#64748b;">{intro_e}</p>'
+        f'<div style="font-size:14px;line-height:1.55;color:#334155;">{exceeded_body_html}</div>'
+        f"</div></div>"
+    )
+    b64 = base64.standard_b64encode(overlay.encode("utf-8")).decode("ascii")
+    return (
+        f'<div style="display:flex;justify-content:flex-end;align-items:center;min-height:38px;width:100%;">'
+        f'<button type="button" id="tec_btn_{bid}" '
+        f'style="width:100%;padding:0.35rem 0.5rem;border-radius:0.35rem;border:1px solid #d97706;'
+        f'background:#fff;cursor:pointer;font-size:14px;font-weight:600;color:#78350f;">Πλαφόν ({n})</button>'
+        f'<pre id="tec_b64_{bid}" style="display:none;margin:0;">{b64}</pre>'
+        "<script>"
+        "(function(){"
+        f'var bid="{bid}";'
+        'var btn=document.getElementById("tec_btn_"+bid);'
+        'var pre=document.getElementById("tec_b64_"+bid);'
+        "if(!btn||!pre)return;"
+        "function rootDoc(){try{return window.parent.document;}catch(e){return document;}}"
+        "function closeOv(id){var d=rootDoc();var el=d.getElementById(id);if(el)el.remove();}"
+        "btn.onclick=function(e){e.preventDefault();var id=\"atlas_tec_\"+bid;var d=rootDoc();"
+        "if(d.getElementById(id))return;"
+        "var b64=pre.textContent.trim();var bin=atob(b64);var u8=new Uint8Array(bin.length);"
+        "for(var i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i)&255;"
+        "var html=new TextDecoder(\"utf-8\").decode(u8);var wrap=d.createElement(\"div\");wrap.innerHTML=html;"
+        "var node=wrap.firstElementChild;if(!node)return;node.id=id;d.body.appendChild(node);"
+        "var x=node.querySelector(\".atlas-tec-x\");if(x)x.onclick=function(ev){ev.stopPropagation();closeOv(id);};"
+        "node.onclick=function(ev){if(ev.target===node)closeOv(id);};};"
+        "document.addEventListener(\"keydown\",function(e){"
+        "if(e.key!==\"Escape\")return;var d=rootDoc();var id=\"atlas_tec_\"+bid;if(d.getElementById(id))closeOv(id);}"
+        ",true);"
+        "})();"
+        "</script></div>"
+    )
+
+
+def _counting_days_info_icon_html(excluded_packages_label: str, dom_base: str) -> str:
+    """Κουμπί ℹ + modal οδηγιών καταμέτρησης (UTF-8, parent document) — χωρίς Streamlit rerun.
+    Ο τίτλος της καρτέλας αποδίδεται με st.markdown('### …') ώστε να ταιριάζει με τις άλλες καρτέλες."""
+    bid = re.sub(r"[^a-zA-Z0-9_]", "_", dom_base)[:72]
+    t1 = html.escape("Αναλυτική καταμέτρηση ημερών ανά έτος, ταμείο, εργοδότη και μήνα.")
+    t2 = html.escape(
+        "Διαστήματα που καλύπτουν πολλαπλούς μήνες επιμερίζονται και επισημαίνονται με κίτρινο χρώμα."
+    )
+    t3 = html.escape(f"Εξαιρούνται: {excluded_packages_label}")
+    title_e = html.escape("Οδηγίες — Καταμέτρηση ημερών ασφάλισης")
+    blocks = (
+        f'<div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:12px 14px;margin:0 0 10px 0;'
+        f'border-radius:8px;font-size:14px;line-height:1.5;color:#0c4a6e;">{t1}</div>'
+        f'<div style="background:#fef9c3;border-left:4px solid #ca8a04;padding:12px 14px;margin:0 0 10px 0;'
+        f'border-radius:8px;font-size:14px;line-height:1.5;color:#713f12;">{t2}</div>'
+        f'<div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:12px 14px;margin:0;'
+        f'border-radius:8px;font-size:14px;line-height:1.5;color:#0c4a6e;">{t3}</div>'
+    )
+    overlay = (
+        f'<div id="atlas_cntinfo_{bid}" class="atlas-cntinfo-overlay" style="position:fixed;inset:0;z-index:999999;'
+        f'background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;padding:16px;">'
+        f'<div style="background:#fff;border-radius:16px;max-width:min(720px,96vw);max-height:85vh;overflow:auto;'
+        f'box-shadow:0 25px 50px rgba(0,0,0,0.35);padding:18px 22px;font-family:system-ui,sans-serif;" '
+        f'onclick="event.stopPropagation()">'
+        f'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;">'
+        f'<h3 style="margin:0;font-size:1.08rem;color:#0c4a6e;line-height:1.3;">{title_e}</h3>'
+        f'<button type="button" class="atlas-cntinfo-x" style="flex-shrink:0;border:none;background:#e0f2fe;'
+        f'width:36px;height:36px;border-radius:10px;cursor:pointer;font-size:22px;line-height:1;color:#0369a1;">'
+        f"&times;</button></div>"
+        f"<div>{blocks}</div>"
+        f"</div></div>"
+    )
+    b64 = base64.standard_b64encode(overlay.encode("utf-8")).decode("ascii")
+    title_attr = html.escape("Οδηγίες καταμέτρησης", quote=True)
+    return (
+        f'<div style="width:100%;display:flex;align-items:flex-start;justify-content:center;'
+        f'padding-top:6px;min-height:44px;box-sizing:border-box;">'
+        f'<button type="button" id="cntinfo_btn_{bid}" title="{title_attr}" aria-label="{title_attr}" '
+        f'style="flex-shrink:0;width:42px;height:42px;border-radius:50%;border:2px solid #0284c7;'
+        f'background:#f0f9ff;cursor:pointer;font-size:22px;line-height:1;color:#0369a1;padding:0;'
+        f'box-shadow:0 1px 3px rgba(0,0,0,0.12);">\u2139</button>'
+        f'<pre id="cntinfo_b64_{bid}" style="display:none;margin:0;">{b64}</pre>'
+        "<script>"
+        "(function(){"
+        f'var bid="{bid}";'
+        'var btn=document.getElementById("cntinfo_btn_"+bid);'
+        'var pre=document.getElementById("cntinfo_b64_"+bid);'
+        "if(!btn||!pre)return;"
+        "function rootDoc(){try{return window.parent.document;}catch(e){return document;}}"
+        "function closeOv(id){var d=rootDoc();var el=d.getElementById(id);if(el)el.remove();}"
+        "btn.onclick=function(e){e.preventDefault();var id=\"atlas_cntinfo_\"+bid;var d=rootDoc();"
+        "if(d.getElementById(id))return;"
+        "var b64=pre.textContent.trim();var bin=atob(b64);var u8=new Uint8Array(bin.length);"
+        "for(var i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i)&255;"
+        "var html=new TextDecoder(\"utf-8\").decode(u8);var wrap=d.createElement(\"div\");wrap.innerHTML=html;"
+        "var node=wrap.firstElementChild;if(!node)return;node.id=id;d.body.appendChild(node);"
+        "var x=node.querySelector(\".atlas-cntinfo-x\");if(x)x.onclick=function(ev){ev.stopPropagation();closeOv(id);};"
+        "node.onclick=function(ev){if(ev.target===node)closeOv(id);};};"
+        "document.addEventListener(\"keydown\",function(e){"
+        "if(e.key!==\"Escape\")return;var d=rootDoc();var id=\"atlas_cntinfo_\"+bid;if(d.getElementById(id))closeOv(id);}"
+        ",true);"
+        "})();"
+        "</script></div>"
+    )
+
+
+def _atlas_streamlit_info_modal_icon_html(
+    dom_base: str,
+    modal_title: str,
+    sections: list[tuple[str, str]],
+    button_aria: str = "Πληροφορίες",
+) -> str:
+    """Κουμπί ℹ + modal με ενότητες τύπου info (μπλε) ή warning (κίτρινο) — ίδιο μοτίβο με την Καταμέτρηση."""
+    bid = re.sub(r"[^a-zA-Z0-9_]", "_", dom_base)[:72]
+    block_parts: list[str] = []
+    n = len(sections)
+    for i, (kind, text) in enumerate(sections):
+        t = html.escape(text)
+        margin = "0" if i == n - 1 else "0 0 10px 0"
+        if kind == "warning":
+            block_parts.append(
+                f'<div style="background:#fef9c3;border-left:4px solid #ca8a04;padding:12px 14px;margin:{margin};'
+                f'border-radius:8px;font-size:14px;line-height:1.5;color:#713f12;">{t}</div>'
+            )
+        else:
+            block_parts.append(
+                f'<div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:12px 14px;margin:{margin};'
+                f'border-radius:8px;font-size:14px;line-height:1.5;color:#0c4a6e;">{t}</div>'
+            )
+    blocks = "".join(block_parts)
+    title_e = html.escape(modal_title)
+    overlay = (
+        f'<div id="atlas_infomodal_{bid}" class="atlas-infomodal-overlay" style="position:fixed;inset:0;z-index:999999;'
+        f'background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;padding:16px;">'
+        f'<div style="background:#fff;border-radius:16px;max-width:min(720px,96vw);max-height:85vh;overflow:auto;'
+        f'box-shadow:0 25px 50px rgba(0,0,0,0.35);padding:18px 22px;font-family:system-ui,sans-serif;" '
+        f'onclick="event.stopPropagation()">'
+        f'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;">'
+        f'<h3 style="margin:0;font-size:1.08rem;color:#0c4a6e;line-height:1.3;">{title_e}</h3>'
+        f'<button type="button" class="atlas-infomodal-x" style="flex-shrink:0;border:none;background:#e0f2fe;'
+        f'width:36px;height:36px;border-radius:10px;cursor:pointer;font-size:22px;line-height:1;color:#0369a1;">'
+        f"&times;</button></div>"
+        f"<div>{blocks}</div>"
+        f"</div></div>"
+    )
+    b64 = base64.standard_b64encode(overlay.encode("utf-8")).decode("ascii")
+    aria = html.escape(button_aria, quote=True)
+    return (
+        f'<div style="width:100%;display:flex;align-items:flex-start;justify-content:center;'
+        f'padding-top:6px;min-height:44px;box-sizing:border-box;">'
+        f'<button type="button" id="infomodal_btn_{bid}" title="{aria}" aria-label="{aria}" '
+        f'style="flex-shrink:0;width:42px;height:42px;border-radius:50%;border:2px solid #0284c7;'
+        f'background:#f0f9ff;cursor:pointer;font-size:22px;line-height:1;color:#0369a1;padding:0;'
+        f'box-shadow:0 1px 3px rgba(0,0,0,0.12);">\u2139</button>'
+        f'<pre id="infomodal_b64_{bid}" style="display:none;margin:0;">{b64}</pre>'
+        "<script>"
+        "(function(){"
+        f'var bid="{bid}";'
+        'var btn=document.getElementById("infomodal_btn_"+bid);'
+        'var pre=document.getElementById("infomodal_b64_"+bid);'
+        "if(!btn||!pre)return;"
+        "function rootDoc(){try{return window.parent.document;}catch(e){return document;}}"
+        "function closeOv(id){var d=rootDoc();var el=d.getElementById(id);if(el)el.remove();}"
+        "btn.onclick=function(e){e.preventDefault();var id=\"atlas_infomodal_\"+bid;var d=rootDoc();"
+        "if(d.getElementById(id))return;"
+        "var b64=pre.textContent.trim();var bin=atob(b64);var u8=new Uint8Array(bin.length);"
+        "for(var i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i)&255;"
+        "var html=new TextDecoder(\"utf-8\").decode(u8);var wrap=d.createElement(\"div\");wrap.innerHTML=html;"
+        "var node=wrap.firstElementChild;if(!node)return;node.id=id;d.body.appendChild(node);"
+        "var x=node.querySelector(\".atlas-infomodal-x\");if(x)x.onclick=function(ev){ev.stopPropagation();closeOv(id);};"
+        "node.onclick=function(ev){if(ev.target===node)closeOv(id);};};"
+        "document.addEventListener(\"keydown\",function(e){"
+        "if(e.key!==\"Escape\")return;var d=rootDoc();var id=\"atlas_infomodal_\"+bid;if(d.getElementById(id))closeOv(id);}"
+        ",true);"
+        "})();"
+        "</script></div>"
+    )
 
 
 def render_totals_tab(
@@ -5503,7 +5723,61 @@ def render_totals_tab(
         y_val = format_number_greek(total_years_val, decimals=1) if total_years_val is not None else "•"
         st.metric("Συνολικά Έτη", y_val)
 
-    if has_parallel or has_parallel_2017 or has_multi:
+    exceeded_body_html = ""
+    _n_exceeded = 0
+    if exceeded_months is not None and not exceeded_months.empty:
+        month_names = {1: 'Ιαν', 2: 'Φεβ', 3: 'Μαρ', 4: 'Απρ', 5: 'Μαϊ', 6: 'Ιουν', 7: 'Ιουλ', 8: 'Αυγ', 9: 'Σεπ', 10: 'Οκτ', 11: 'Νοε', 12: 'Δεκ'}
+        _ex_html_parts: list[str] = []
+        for _, r in exceeded_months.iterrows():
+            m = int(r.get('Μήνας', 0))
+            y = int(r.get('Έτος', 0))
+            m_str = month_names.get(m, str(m))
+            pkg = r.get('Κλάδος/Πακέτο Κάλυψης', '')
+            tameio = r.get('Ταμείο', '')
+            typos = r.get('Τύπος Ασφάλισης', '')
+            lim = int(r.get('Όριο', 0))
+            over = r.get('Υπέρβαση', 0)
+            pkg_e = html.escape(str(pkg))
+            tameio_e = html.escape(str(tameio).strip()) if str(tameio).strip() else ""
+            typos_e = html.escape(str(typos).strip()) if str(typos).strip() else ""
+            bits = [f"<strong>Πακέτο {pkg_e}</strong>"]
+            if tameio_e:
+                bits.append(f" | Ταμείο: {tameio_e}")
+            if typos_e:
+                bits.append(f" | Τύπος: {typos_e}")
+            bits.append(
+                f" — Μήνας <strong>{html.escape(m_str)} {y}</strong>: "
+                f"{int(r.get('Ημέρες', 0))} ημέρες (όριο {lim}, υπέρβαση +{html.escape(str(over))})"
+            )
+            _ex_html_parts.append('<p style="margin:0.35em 0;">' + "".join(bits) + "</p>")
+        exceeded_body_html = "".join(_ex_html_parts)
+        _n_exceeded = len(_ex_html_parts)
+
+    has_par_warn = bool(has_parallel or has_parallel_2017 or has_multi)
+    has_ex_warn = _n_exceeded > 0
+
+    if has_par_warn and has_ex_warn:
+        _c_par, _c_ex = st.columns([5, 1.35], vertical_alignment="center", gap="small")
+        with _c_par:
+            parts = []
+            if has_parallel:
+                parts.append("Παράλληλη ασφάλιση")
+            if has_parallel_2017:
+                parts.append("Παράλληλη απασχόληση")
+            if has_multi:
+                parts.append("Πολλαπλή απασχόληση")
+            st.warning(
+                f"**Εντοπίστηκε: {' / '.join(parts)}.** Το άθροισμα ημερών ασφάλισης μπορεί να δώσει παραπλανητικό αποτέλεσμα. "
+                "Ελέγξτε τις αντίστοιχες καρτέλες για λεπτομέρειες."
+            )
+        with _c_ex:
+            components.html(
+                _totals_exceeded_cap_instant_modal_html(
+                    exceeded_body_html, _n_exceeded, f"{key_prefix}_exceeded_cap"
+                ),
+                height=44,
+            )
+    elif has_par_warn:
         parts = []
         if has_parallel:
             parts.append("Παράλληλη ασφάλιση")
@@ -5515,23 +5789,20 @@ def render_totals_tab(
             f"**Εντοπίστηκε: {' / '.join(parts)}.** Το άθροισμα ημερών ασφάλισης μπορεί να δώσει παραπλανητικό αποτέλεσμα. "
             "Ελέγξτε τις αντίστοιχες καρτέλες για λεπτομέρειες."
         )
-
-    if exceeded_months is not None and not exceeded_months.empty:
-        month_names = {1: 'Ιαν', 2: 'Φεβ', 3: 'Μαρ', 4: 'Απρ', 5: 'Μαϊ', 6: 'Ιουν', 7: 'Ιουλ', 8: 'Αυγ', 9: 'Σεπ', 10: 'Οκτ', 11: 'Νοε', 12: 'Δεκ'}
-        lines = []
-        for _, r in exceeded_months.iterrows():
-            m = int(r.get('Μήνας', 0))
-            y = int(r.get('Έτος', 0))
-            m_str = month_names.get(m, str(m))
-            pkg = r.get('Κλάδος/Πακέτο Κάλυψης', '')
-            tameio = r.get('Ταμείο', '')
-            typos = r.get('Τύπος Ασφάλισης', '')
-            lim = int(r.get('Όριο', 0))
-            over = r.get('Υπέρβαση', 0)
-            lines.append(f"**Πακέτο {pkg}**" + (f" | Ταμείο: {tameio}" if tameio else "") + (f" | Τύπος: {typos}" if typos else "") + f" — Μήνας **{m_str} {y}**: {int(r.get('Ημέρες', 0))} ημέρες (όριο {lim}, υπέρβαση +{over})")
-        st.warning(
-            "**Υπέρβαση ορίου ημερών ανά μήνα** (εφαρμόστηκε πλαφόν: ΙΚΑ 31 ημ./μήνα, ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ και υπόλοιπα 25 ημ./μήνα· για ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ το μήνυμα μόνο όταν >30 ημ./μήνα):\n\n" + "\n\n".join(lines)
-        )
+    elif has_ex_warn:
+        _c_inf, _c_ex = st.columns([5, 1.35], vertical_alignment="center", gap="small")
+        with _c_inf:
+            st.info(
+                f"**Υπέρβαση ορίου ημερών ανά μήνα** — {_n_exceeded} μήνες. "
+                "Η πλήρης λίστα ανοίγει με το κουμπί δεξιά."
+            )
+        with _c_ex:
+            components.html(
+                _totals_exceeded_cap_instant_modal_html(
+                    exceeded_body_html, _n_exceeded, f"{key_prefix}_exceeded_cap"
+                ),
+                height=44,
+            )
 
     st.dataframe(display_summary, width="stretch")
     if register_view_fn is not None:
@@ -5712,26 +5983,9 @@ def _main_inner():
             
             if st.button("Άνοιγμα / Προβολή", type="primary", width="stretch", key="open_html_btn"):
                 st.session_state['open_html_report'] = True
-            
+
             if st.session_state.get('open_html_report'):
-                from html_viewer_builder import generate_full_html_report
-                client_name = st.session_state.get('client_name', '')
-                _app_title = "ATLAS Lite"
-                _subtitle = ""
-                with st.spinner("Παραγωγή της HTML αναφοράς — παρακαλώ περιμένετε…"):
-                    viewer_html, _ = generate_full_html_report(
-                        df, client_name=client_name,
-                        app_title=_app_title, app_subtitle=_subtitle,
-                        full_save_suffix="ATLAS_Lite.html",
-                    )
-                js_content = json.dumps(viewer_html).replace("</script>", "<\\/script>")
-                components.html(
-                    f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
-<script>(function(){{var h={js_content};var b=new Blob([h],{{type:'text/html;charset=utf-8'}});
-var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
-<p style="margin:0;font-size:14px;color:#666;">Άνοιγμα HTML αναφοράς...</p></body></html>""",
-                    height=40,
-                )
+                _atlas_render_full_html_report_open_tab(df)
                 st.session_state['open_html_report'] = False
             
             st.success(f"Εξήχθησαν {len(df)} γραμμές δεδομένων από {df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες")
@@ -5766,7 +6020,7 @@ var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
                     )
                     if st.button("Άνοιγμα / Προβολή", type="primary", width="stretch", key="open_html_btn"):
                         st.session_state['open_html_report'] = True
-                
+
                 # Εμφάνιση summary
                 with summary_placeholder.container():
                     st.success(f"Εξήχθησαν {len(df)} γραμμές δεδομένων από {df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες")
@@ -5780,7 +6034,7 @@ var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
                         # Reset session state
                         for key in [
                             'file_uploaded', 'processing_done', 'uploaded_file', 'extracted_data',
-                            'show_results', 'filename',
+                            'filename',
                             '_atlas_analytics_sig', '_atlas_cached_gaps', '_atlas_cached_zero_duration',
                             '_atlas_cached_audit', 'ai_chat_context', 'ai_chat_history', 'main_ai_summary_result',
                             'atlas_view_exports', 'atlas_export_main_df', 'atlas_export_extra_columns',
