@@ -26,6 +26,11 @@ import math
 import unicodedata
 from contextlib import nullcontext
 
+# Μεγέθη κειμένου σε HTML modals (components.html → parent document)
+_ATLAS_MODAL_BODY_FS = "17px"
+_ATLAS_MODAL_H3_REM = "1.25rem"
+_ATLAS_MODAL_TEC_INTRO_FS = "15px"
+
 # Ρίζα repo: LOCAL_DEV/kyria ή LOCAL_DEV/lite → ATLAS root για imports (html_viewer_builder κ.λπ.)
 _APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = (
@@ -2762,6 +2767,91 @@ def should_show_complex_file_warning(n_aggregated: int, n_limits_25: int, n_unpa
     return False
 
 
+def build_complex_file_warning_modal_sections(
+    n_aggregated: int, n_limits_25: int, n_unpaid_months: int
+) -> list[tuple[str, str]]:
+    """Μόνο τα κριτήρια που πραγματικά ενεργοποιούν την προειδοποίηση, σε φυσική γλώσσα (ίδιο στυλ blocks με τις οδηγίες)."""
+    sections: list[tuple[str, str]] = []
+    na, nl, nu = n_aggregated, n_limits_25, n_unpaid_months
+
+    # Ίδια ιεράρχηση με should_show_complex_file_warning: πρώτα «απλά» όρια >15, αλλιώς συνδυασμοί.
+    primary = na > 15 or nl > 15
+    if primary:
+        if na > 15:
+            sections.append(
+                (
+                    "warning",
+                    f"Εμφανίζονται πολλά ενοποιημένα διαστήματα στο ιστορικό ({na} περιπτώσεις): "
+                    "δηλαδή γραμμές που καλύπτουν πάνω από έναν ημερολογιακό μήνα για το διάστημα έως το 2001, "
+                    "χωρίς να υπολογίζονται οι συνήθεις «αναμενόμενες» περιπτώσεις ΟΑΕΕ ή ΤΣΜΕΔΕ με 2μηνα ή 6μηνα αντίστοιχα. "
+                    "Τέτοιοι φάκελοι χρειάζονται έλεγχο-επιβεβαίωση με το πρωτότυπο ΑΤΛΑΣ.",
+                )
+            )
+        if nl > 15:
+            sections.append(
+                (
+                    "warning",
+                    f"Εντοπίζονται πολλοί μήνες με το άθροισμα ημερών να ξεπερνά το ανώτατο των 25 ημερών ασφάλισης ανά μήνα "
+                    f"(εκτός ΙΚΑ) – {nl} περιπτώσεις. Η ανακεφαλαίωση-οριστικοποίηση της προϋπηρεσίας χρειάζεται λεπτομερή έλεγχο· "
+                    "συγκρίνετε με το αρχείο ΑΤΛΑΣ.",
+                )
+            )
+    else:
+        over_10_agg = na > 10
+        over_30_unpaid = nu > 30
+        over_10_limits = nl > 10
+        if over_10_agg and over_30_unpaid:
+            sections.append(
+                (
+                    "warning",
+                    f"Ταυτόχρονα υπάρχουν αρκετά ενοποιημένα διαστήματα ({na}) και πολλοί μήνες στην καταμέτρηση "
+                    f"με ημέρες αλλά χωρίς αναφερόμενη εισφορά ({nu}). Αυτός ο συνδυασμός κάνει τον φάκελο πιο περίπλοκο· "
+                    "επαληθεύστε στο πρωτότυπο ΑΤΛΑΣ.",
+                )
+            )
+        if over_10_agg and over_10_limits:
+            sections.append(
+                (
+                    "warning",
+                    f"Ταυτόχρονα εμφανίζονται αρκετά ενοποιημένα διαστήματα ({na}) πριν το 2002 αλλά και αρκετές εφαρμογές "
+                    f"του ανώτατου ορίου 25 ημερών τον μήνα ({nl}). Συγκρίνετε με το ΑΤΛΑΣ.",
+                )
+            )
+        if over_30_unpaid and over_10_limits:
+            sections.append(
+                (
+                    "warning",
+                    f"Συνυπάρχουν πολλοί μήνες με ημέρες αλλά χωρίς εισφορά ({nu}) και αρκετές εφαρμογές του ανώτατου ορίου "
+                    f"25 ημερών ({nl}). Απαιτείται επαλήθευση με το πρωτότυπο ΑΤΛΑΣ.",
+                )
+            )
+
+    if not sections:
+        sections.append(
+            (
+                "warning",
+                "Η εφαρμογή έκρινε τον φάκελο περίπλοκο· ελέγξτε το πρωτότυπο ΑΤΛΑΣ.",
+            )
+        )
+    return sections
+
+
+def _render_complex_file_warning_banner(dom_base: str) -> None:
+    """Προειδοποίηση «Περίπλοκο αρχείο» σε κόκκινο πλαίσιο + «Διαβάστε περισσότερα» → modal (components.html)."""
+    if not st.session_state.get("show_complex_file_warning"):
+        return
+    n_agg = int(st.session_state.get("complex_file_n_agg", 0))
+    n_lim = int(st.session_state.get("complex_file_n_limits_25", 0))
+    n_unpaid = int(st.session_state.get("complex_file_n_unpaid", 0))
+    sections = build_complex_file_warning_modal_sections(n_agg, n_lim, n_unpaid)
+    banner_html = _complex_file_warning_banner_html(
+        dom_base,
+        "Γιατί χαρακτηρίστηκε περίπλοκο το αρχείο",
+        sections,
+    )
+    components.html(banner_html, height=120)
+
+
 def compute_summary_capped_days_by_group(
     summary_df: pd.DataFrame,
     group_keys: list[str],
@@ -5243,6 +5333,27 @@ def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] |
     return final_display_df, active_mask_rows, last_month_col, month_cols, print_style_rows
 
 
+def _atlas_modal_blocks_html(sections: list[tuple[str, str]]) -> str:
+    """Κοινά blocks info/warning για modals (parent document) — ευανάγνωστο μέγεθος."""
+    block_parts: list[str] = []
+    n = len(sections)
+    fs = _ATLAS_MODAL_BODY_FS
+    for i, (kind, text) in enumerate(sections):
+        t = html.escape(text)
+        margin = "0" if i == n - 1 else "0 0 12px 0"
+        if kind == "warning":
+            block_parts.append(
+                f'<div style="background:#fef9c3;border-left:4px solid #ca8a04;padding:14px 16px;margin:{margin};'
+                f'border-radius:8px;font-size:{fs};line-height:1.55;color:#713f12;">{t}</div>'
+            )
+        else:
+            block_parts.append(
+                f'<div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:14px 16px;margin:{margin};'
+                f'border-radius:8px;font-size:{fs};line-height:1.55;color:#0c4a6e;">{t}</div>'
+            )
+    return "".join(block_parts)
+
+
 def _totals_exceeded_cap_instant_modal_html(exceeded_body_html: str, n: int, dom_base: str) -> str:
     """Κουμπί + modal μόνο με JS (ενημέρωση parent document) — χωρίς Streamlit rerun, όπως το κουμπί εκτύπωσης."""
     bid = re.sub(r"[^a-zA-Z0-9_]", "_", dom_base)[:72]
@@ -5255,14 +5366,14 @@ def _totals_exceeded_cap_instant_modal_html(exceeded_body_html: str, n: int, dom
         f'<div id="atlas_tec_{bid}" class="atlas-tec-overlay" style="position:fixed;inset:0;z-index:999999;'
         f'background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;padding:16px;">'
         f'<div style="background:#fff;border-radius:16px;max-width:min(1280px,96vw);max-height:85vh;overflow:auto;'
-        f'box-shadow:0 25px 50px rgba(0,0,0,0.35);padding:18px 22px;font-family:system-ui,sans-serif;" '
+        f'box-shadow:0 25px 50px rgba(0,0,0,0.35);padding:20px 24px;font-family:system-ui,sans-serif;" '
         f'onclick="event.stopPropagation()">'
         f'<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:10px;">'
-        f'<h3 style="margin:0;font-size:1.05rem;color:#78350f;">Υπέρβαση ορίου ημερών ανά μήνα</h3>'
+        f'<h3 style="margin:0;font-size:{_ATLAS_MODAL_H3_REM};color:#78350f;">Υπέρβαση ορίου ημερών ανά μήνα</h3>'
         f'<button type="button" class="atlas-tec-x" style="border:none;background:#fef3c7;width:36px;height:36px;'
         f'border-radius:10px;cursor:pointer;font-size:22px;line-height:1;color:#92400e;">&times;</button></div>'
-        f'<p style="margin:0 0 12px 0;font-size:13px;color:#64748b;">{intro_e}</p>'
-        f'<div style="font-size:14px;line-height:1.55;color:#334155;">{exceeded_body_html}</div>'
+        f'<p style="margin:0 0 12px 0;font-size:{_ATLAS_MODAL_TEC_INTRO_FS};color:#64748b;">{intro_e}</p>'
+        f'<div style="font-size:{_ATLAS_MODAL_BODY_FS};line-height:1.55;color:#334155;">{exceeded_body_html}</div>'
         f"</div></div>"
     )
     b64 = base64.standard_b64encode(overlay.encode("utf-8")).decode("ascii")
@@ -5306,22 +5417,23 @@ def _counting_days_info_icon_html(excluded_packages_label: str, dom_base: str) -
     )
     t3 = html.escape(f"Εξαιρούνται: {excluded_packages_label}")
     title_e = html.escape("Οδηγίες — Καταμέτρηση ημερών ασφάλισης")
+    fs = _ATLAS_MODAL_BODY_FS
     blocks = (
-        f'<div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:12px 14px;margin:0 0 10px 0;'
-        f'border-radius:8px;font-size:14px;line-height:1.5;color:#0c4a6e;">{t1}</div>'
-        f'<div style="background:#fef9c3;border-left:4px solid #ca8a04;padding:12px 14px;margin:0 0 10px 0;'
-        f'border-radius:8px;font-size:14px;line-height:1.5;color:#713f12;">{t2}</div>'
-        f'<div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:12px 14px;margin:0;'
-        f'border-radius:8px;font-size:14px;line-height:1.5;color:#0c4a6e;">{t3}</div>'
+        f'<div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:14px 16px;margin:0 0 12px 0;'
+        f'border-radius:8px;font-size:{fs};line-height:1.55;color:#0c4a6e;">{t1}</div>'
+        f'<div style="background:#fef9c3;border-left:4px solid #ca8a04;padding:14px 16px;margin:0 0 12px 0;'
+        f'border-radius:8px;font-size:{fs};line-height:1.55;color:#713f12;">{t2}</div>'
+        f'<div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:14px 16px;margin:0;'
+        f'border-radius:8px;font-size:{fs};line-height:1.55;color:#0c4a6e;">{t3}</div>'
     )
     overlay = (
         f'<div id="atlas_cntinfo_{bid}" class="atlas-cntinfo-overlay" style="position:fixed;inset:0;z-index:999999;'
         f'background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;padding:16px;">'
         f'<div style="background:#fff;border-radius:16px;max-width:min(720px,96vw);max-height:85vh;overflow:auto;'
-        f'box-shadow:0 25px 50px rgba(0,0,0,0.35);padding:18px 22px;font-family:system-ui,sans-serif;" '
+        f'box-shadow:0 25px 50px rgba(0,0,0,0.35);padding:20px 24px;font-family:system-ui,sans-serif;" '
         f'onclick="event.stopPropagation()">'
         f'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;">'
-        f'<h3 style="margin:0;font-size:1.08rem;color:#0c4a6e;line-height:1.3;">{title_e}</h3>'
+        f'<h3 style="margin:0;font-size:{_ATLAS_MODAL_H3_REM};color:#0c4a6e;line-height:1.35;">{title_e}</h3>'
         f'<button type="button" class="atlas-cntinfo-x" style="flex-shrink:0;border:none;background:#e0f2fe;'
         f'width:36px;height:36px;border-radius:10px;cursor:pointer;font-size:22px;line-height:1;color:#0369a1;">'
         f"&times;</button></div>"
@@ -5331,8 +5443,8 @@ def _counting_days_info_icon_html(excluded_packages_label: str, dom_base: str) -
     b64 = base64.standard_b64encode(overlay.encode("utf-8")).decode("ascii")
     title_attr = html.escape("Οδηγίες καταμέτρησης", quote=True)
     return (
-        f'<div style="width:100%;display:flex;align-items:flex-start;justify-content:center;'
-        f'padding-top:6px;min-height:44px;box-sizing:border-box;">'
+        f'<div style="width:100%;display:flex;align-items:center;justify-content:flex-start;'
+        f'padding-top:0;min-height:44px;box-sizing:border-box;">'
         f'<button type="button" id="cntinfo_btn_{bid}" title="{title_attr}" aria-label="{title_attr}" '
         f'style="flex-shrink:0;width:42px;height:42px;border-radius:50%;border:2px solid #0284c7;'
         f'background:#f0f9ff;cursor:pointer;font-size:22px;line-height:1;color:#0369a1;padding:0;'
@@ -5370,31 +5482,17 @@ def _atlas_streamlit_info_modal_icon_html(
 ) -> str:
     """Κουμπί ℹ + modal με ενότητες τύπου info (μπλε) ή warning (κίτρινο) — ίδιο μοτίβο με την Καταμέτρηση."""
     bid = re.sub(r"[^a-zA-Z0-9_]", "_", dom_base)[:72]
-    block_parts: list[str] = []
-    n = len(sections)
-    for i, (kind, text) in enumerate(sections):
-        t = html.escape(text)
-        margin = "0" if i == n - 1 else "0 0 10px 0"
-        if kind == "warning":
-            block_parts.append(
-                f'<div style="background:#fef9c3;border-left:4px solid #ca8a04;padding:12px 14px;margin:{margin};'
-                f'border-radius:8px;font-size:14px;line-height:1.5;color:#713f12;">{t}</div>'
-            )
-        else:
-            block_parts.append(
-                f'<div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:12px 14px;margin:{margin};'
-                f'border-radius:8px;font-size:14px;line-height:1.5;color:#0c4a6e;">{t}</div>'
-            )
-    blocks = "".join(block_parts)
+    blocks = _atlas_modal_blocks_html(sections)
     title_e = html.escape(modal_title)
+    h3rem = _ATLAS_MODAL_H3_REM
     overlay = (
         f'<div id="atlas_infomodal_{bid}" class="atlas-infomodal-overlay" style="position:fixed;inset:0;z-index:999999;'
         f'background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;padding:16px;">'
         f'<div style="background:#fff;border-radius:16px;max-width:min(720px,96vw);max-height:85vh;overflow:auto;'
-        f'box-shadow:0 25px 50px rgba(0,0,0,0.35);padding:18px 22px;font-family:system-ui,sans-serif;" '
+        f'box-shadow:0 25px 50px rgba(0,0,0,0.35);padding:20px 24px;font-family:system-ui,sans-serif;" '
         f'onclick="event.stopPropagation()">'
         f'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;">'
-        f'<h3 style="margin:0;font-size:1.08rem;color:#0c4a6e;line-height:1.3;">{title_e}</h3>'
+        f'<h3 style="margin:0;font-size:{h3rem};color:#0c4a6e;line-height:1.35;">{title_e}</h3>'
         f'<button type="button" class="atlas-infomodal-x" style="flex-shrink:0;border:none;background:#e0f2fe;'
         f'width:36px;height:36px;border-radius:10px;cursor:pointer;font-size:22px;line-height:1;color:#0369a1;">'
         f"&times;</button></div>"
@@ -5404,8 +5502,8 @@ def _atlas_streamlit_info_modal_icon_html(
     b64 = base64.standard_b64encode(overlay.encode("utf-8")).decode("ascii")
     aria = html.escape(button_aria, quote=True)
     return (
-        f'<div style="width:100%;display:flex;align-items:flex-start;justify-content:center;'
-        f'padding-top:6px;min-height:44px;box-sizing:border-box;">'
+        f'<div style="width:100%;display:flex;align-items:center;justify-content:flex-start;'
+        f'padding-top:0;min-height:44px;box-sizing:border-box;">'
         f'<button type="button" id="infomodal_btn_{bid}" title="{aria}" aria-label="{aria}" '
         f'style="flex-shrink:0;width:42px;height:42px;border-radius:50%;border:2px solid #0284c7;'
         f'background:#f0f9ff;cursor:pointer;font-size:22px;line-height:1;color:#0369a1;padding:0;'
@@ -5432,6 +5530,68 @@ def _atlas_streamlit_info_modal_icon_html(
         ",true);"
         "})();"
         "</script></div>"
+    )
+
+
+def _complex_file_warning_banner_html(
+    dom_base: str,
+    modal_title: str,
+    sections: list[tuple[str, str]],
+) -> str:
+    """Κείμενο στυλ προειδοποίησης (χωρίς περίγραμμα) + «Διαβάστε περισσότερα»· ίδιο modal id/script με infomodal."""
+    bid = re.sub(r"[^a-zA-Z0-9_]", "_", dom_base)[:72]
+    blocks = _atlas_modal_blocks_html(sections)
+    title_e = html.escape(modal_title)
+    h3rem = _ATLAS_MODAL_H3_REM
+    overlay = (
+        f'<div id="atlas_infomodal_{bid}" class="atlas-infomodal-overlay" style="position:fixed;inset:0;z-index:999999;'
+        f'background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;padding:16px;">'
+        f'<div style="background:#fff;border-radius:16px;max-width:min(720px,96vw);max-height:85vh;overflow:auto;'
+        f'box-shadow:0 25px 50px rgba(0,0,0,0.35);padding:20px 24px;font-family:system-ui,sans-serif;" '
+        f'onclick="event.stopPropagation()">'
+        f'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;">'
+        f'<h3 style="margin:0;font-size:{h3rem};color:#0c4a6e;line-height:1.35;">{title_e}</h3>'
+        f'<button type="button" class="atlas-infomodal-x" style="flex-shrink:0;border:none;background:#e0f2fe;'
+        f'width:36px;height:36px;border-radius:10px;cursor:pointer;font-size:22px;line-height:1;color:#0369a1;">'
+        f"&times;</button></div>"
+        f"<div>{blocks}</div>"
+        f"</div></div>"
+    )
+    b64 = base64.standard_b64encode(overlay.encode("utf-8")).decode("ascii")
+    more_lbl = html.escape("Διαβάστε περισσότερα", quote=True)
+    # Χωρίς border/outline: απαλό φόντο παρόμοιο με st.error (Streamlit), όχι «κουτί» με περίγραμμα.
+    return (
+        f'<div style="width:100%;box-sizing:border-box;border:none;outline:none;box-shadow:none;'
+        f'background:rgba(255,75,75,0.09);border-radius:0.35rem;padding:0.85rem 1rem;'
+        f'color:#3f0f12;font-size:1rem;line-height:1.55;font-family:Source Sans Pro,sans-serif;">'
+        f"<strong>Προσοχή: Περίπλοκο αρχείο</strong> — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ. "
+        f'<button type="button" id="infomodal_btn_{bid}" title="{more_lbl}" aria-label="{more_lbl}" '
+        f'style="margin:0;padding:0;border:none;background:transparent;color:inherit;'
+        f'text-decoration:underline;cursor:pointer;font-size:inherit;font-weight:600;">'
+        f"Διαβάστε περισσότερα</button>"
+        f"</div>"
+        f'<pre id="infomodal_b64_{bid}" style="display:none;margin:0;">{b64}</pre>'
+        "<script>"
+        "(function(){"
+        f'var bid="{bid}";'
+        'var btn=document.getElementById("infomodal_btn_"+bid);'
+        'var pre=document.getElementById("infomodal_b64_"+bid);'
+        "if(!btn||!pre)return;"
+        "function rootDoc(){try{return window.parent.document;}catch(e){return document;}}"
+        "function closeOv(id){var d=rootDoc();var el=d.getElementById(id);if(el)el.remove();}"
+        "btn.onclick=function(e){e.preventDefault();var id=\"atlas_infomodal_\"+bid;var d=rootDoc();"
+        "if(d.getElementById(id))return;"
+        "var b64=pre.textContent.trim();var bin=atob(b64);var u8=new Uint8Array(bin.length);"
+        "for(var i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i)&255;"
+        "var html=new TextDecoder(\"utf-8\").decode(u8);var wrap=d.createElement(\"div\");wrap.innerHTML=html;"
+        "var node=wrap.firstElementChild;if(!node)return;node.id=id;d.body.appendChild(node);"
+        "var x=node.querySelector(\".atlas-infomodal-x\");if(x)x.onclick=function(ev){ev.stopPropagation();closeOv(id);};"
+        "node.onclick=function(ev){if(ev.target===node)closeOv(id);};};"
+        "document.addEventListener(\"keydown\",function(e){"
+        "if(e.key!==\"Escape\")return;var d=rootDoc();var id=\"atlas_infomodal_\"+bid;if(d.getElementById(id))closeOv(id);}"
+        ",true);"
+        "})();"
+        "</script>"
     )
 
 

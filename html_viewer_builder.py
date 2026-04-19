@@ -67,6 +67,126 @@ COMPLEX_FILE_WARNING_HTML = (
     '</div>'
 )
 
+
+def _html_build_complex_file_modal_sections(
+    n_aggregated: int, n_limits_25: int, n_unpaid_months: int
+) -> list[tuple[str, str]]:
+    """Ίδια λογική/κείμενα με LOCAL_DEV/kyria/app_final.build_complex_file_warning_modal_sections (συγχρονίστε αν αλλάξει)."""
+    sections: list[tuple[str, str]] = []
+    na, nl, nu = n_aggregated, n_limits_25, n_unpaid_months
+    primary = na > 15 or nl > 15
+    if primary:
+        if na > 15:
+            sections.append(
+                (
+                    "warning",
+                    f"Εμφανίζονται πολλά ενοποιημένα διαστήματα στο ιστορικό ({na} περιπτώσεις): "
+                    "δηλαδή γραμμές που καλύπτουν πάνω από έναν ημερολογιακό μήνα για το διάστημα έως το 2001, "
+                    "χωρίς να υπολογίζονται οι συνήθεις «αναμενόμενες» περιπτώσεις ΟΑΕΕ ή ΤΣΜΕΔΕ με 2μηνα ή 6μηνα αντίστοιχα. "
+                    "Τέτοιοι φάκελοι χρειάζονται έλεγχο-επιβεβαίωση με το πρωτότυπο ΑΤΛΑΣ.",
+                )
+            )
+        if nl > 15:
+            sections.append(
+                (
+                    "warning",
+                    f"Εντοπίζονται πολλοί μήνες με το άθροισμα ημερών να ξεπερνά το ανώτατο των 25 ημερών ασφάλισης ανά μήνα "
+                    f"(εκτός ΙΚΑ) – {nl} περιπτώσεις. Η ανακεφαλαίωση-οριστικοποίηση της προϋπηρεσίας χρειάζεται λεπτομερή έλεγχο· "
+                    "συγκρίνετε με το αρχείο ΑΤΛΑΣ.",
+                )
+            )
+    else:
+        over_10_agg = na > 10
+        over_30_unpaid = nu > 30
+        over_10_limits = nl > 10
+        if over_10_agg and over_30_unpaid:
+            sections.append(
+                (
+                    "warning",
+                    f"Ταυτόχρονα υπάρχουν αρκετά ενοποιημένα διαστήματα ({na}) και πολλοί μήνες στην καταμέτρηση "
+                    f"με ημέρες αλλά χωρίς αναφερόμενη εισφορά ({nu}). Αυτός ο συνδυασμός κάνει τον φάκελο πιο περίπλοκο· "
+                    "επαληθεύστε στο πρωτότυπο ΑΤΛΑΣ.",
+                )
+            )
+        if over_10_agg and over_10_limits:
+            sections.append(
+                (
+                    "warning",
+                    f"Ταυτόχρονα εμφανίζονται αρκετά ενοποιημένα διαστήματα ({na}) πριν το 2002 αλλά και αρκετές εφαρμογές "
+                    f"του ανώτατου ορίου 25 ημερών τον μήνα ({nl}). Συγκρίνετε με το ΑΤΛΑΣ.",
+                )
+            )
+        if over_30_unpaid and over_10_limits:
+            sections.append(
+                (
+                    "warning",
+                    f"Συνυπάρχουν πολλοί μήνες με ημέρες αλλά χωρίς εισφορά ({nu}) και αρκετές εφαρμογές του ανώτατου ορίου "
+                    f"25 ημερών ({nl}). Απαιτείται επαλήθευση με το πρωτότυπο ΑΤΛΑΣ.",
+                )
+            )
+    if not sections:
+        sections.append(
+            (
+                "warning",
+                "Η εφαρμογή έκρινε τον φάκελο περίπλοκο· ελέγξτε το πρωτότυπο ΑΤΛΑΣ.",
+            )
+        )
+    return sections
+
+
+def _viewer_synopsis_blocks_html(sections: list[tuple[str, str]]) -> str:
+    """Σώμα modal (ίδια λογική χρωμάτων με την Κυρία) για το synopsis-modal του viewer."""
+    parts: list[str] = []
+    for kind, text in sections:
+        esc = html_mod.escape(text)
+        cls = "atlas-synopsis-warning" if kind == "warning" else "atlas-synopsis-info"
+        parts.append(f'<div class="atlas-synopsis-block {cls}">{esc}</div>')
+    return "".join(parts)
+
+
+def _js_single_quoted_literal(s: str) -> str:
+    """Κείμενο ως JavaScript string με μονά εισαγωγικά — για onclick=\"...\" χωρίς σπάσιμο από json.dumps."""
+    esc = (
+        s.replace("\\", "\\\\")
+        .replace("'", "\\'")
+        .replace("\r", "")
+        .replace("\n", "\\n")
+    )
+    return f"'{esc}'"
+
+
+def _atlas_html_tab_heading_row_info(
+    h2_plain: str, modal_title: str, sections: list[tuple[str, str]], store_id: str
+) -> str:
+    """ℹ αριστερά + τίτλος h2· κρυφό div με HTML για window.openSynopsisModal (ίδιο modal με Σύνοψη)."""
+    body = _viewer_synopsis_blocks_html(sections)
+    h2_esc = html_mod.escape(h2_plain)
+    title_js = _js_single_quoted_literal(modal_title)
+    sid_js = _js_single_quoted_literal(store_id)
+    aria_title = html_mod.escape(modal_title, quote=True)
+    return (
+        f'<div class="atlas-tab-title-row">'
+        f'<button type="button" class="atlas-tabinfo-btn" aria-label="Πληροφορίες" title="{aria_title}" '
+        f"onclick=\"window.openSynopsisModal({title_js}, document.getElementById({sid_js}).innerHTML); return false;\">"
+        f"\u2139</button>"
+        f"<h2>{h2_esc}</h2></div>"
+        f'<div id="{html_mod.escape(store_id)}" class="atlas-tabinfo-body-store" hidden="hidden">{body}</div>'
+    )
+
+
+def _viewer_complex_file_banner_html() -> str:
+    """Μπάρα όπως στην Κυρία + «Διαβάστε περισσότερα» → synopsis modal (#atlas-complex-reasons-store)."""
+    return (
+        '<div class="complex-file-warning complex-file-warning-viewer">'
+        "<strong>Προσοχή: Περίπλοκο αρχείο</strong> — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ. "
+        '<button type="button" class="complex-file-readmore-btn" '
+        "onclick=\"window.openSynopsisModal('Γιατί χαρακτηρίστηκε περίπλοκο το αρχείο', "
+        "document.getElementById('atlas-complex-reasons-store').innerHTML); return false;\">"
+        "Διαβάστε περισσότερα</button>"
+        "</div>"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -1633,9 +1753,27 @@ def build_count_with_filters(count_display_df, print_style_rows, count_df,
 
     js = _build_count_filter_js()
 
+    _count_info_sections = [
+        (
+            "info",
+            "Αναλυτική καταμέτρηση ημερών ανά έτος, ταμείο, εργοδότη και μήνα.",
+        ),
+        (
+            "warning",
+            "Διαστήματα που καλύπτουν πολλαπλούς μήνες επιμερίζονται και επισημαίνονται με κίτρινο χρώμα.",
+        ),
+        ("info", f"Εξαιρούνται: {EXCLUDED_PACKAGES_LABEL}"),
+    ]
+    _count_heading = _atlas_html_tab_heading_row_info(
+        "Πίνακας Καταμέτρησης",
+        "Οδηγίες — Καταμέτρηση ημερών ασφάλισης",
+        _count_info_sections,
+        "atlas-info-store-count",
+    )
+
     top_block = (
         '<div class="count-layout-top">'
-        '<h2>Πίνακας Καταμέτρησης</h2>'
+        f"{_count_heading}"
         '<p class="print-description">Αναλυτική καταμέτρηση ημερών ασφάλισης ανά μήνα.</p>'
         f'{count_metrics_bar}'
         f'{filter_bar}'
@@ -2008,7 +2146,8 @@ def _build_count_filter_js():
 def build_report_tab_entries(df, description_map=None):
     """Δημιουργεί τα tab entries (id, label, html) για τον HTML viewer.
 
-    Επιστρέφει (audit_df, display_summary, count_display_df, print_style_rows, tab_entries).
+    Επιστρέφει (audit_df, display_summary, count_display_df, print_style_rows, tab_entries,
+              show_complex_warning, complex_modal_body_html).
     """
     if description_map is None:
         description_map = build_description_map(df)
@@ -2025,9 +2164,13 @@ def build_report_tab_entries(df, description_map=None):
     )
 
     show_complex_warning = False
+    complex_modal_body_html = ""
     try:
         n_agg, n_limits_25, n_unpaid = compute_complex_file_metrics(df)
         show_complex_warning = should_show_complex_file_warning(n_agg, n_limits_25, n_unpaid)
+        if show_complex_warning:
+            _secs = _html_build_complex_file_modal_sections(n_agg, n_limits_25, n_unpaid)
+            complex_modal_body_html = _viewer_synopsis_blocks_html(_secs)
     except Exception:
         pass
 
@@ -2087,7 +2230,20 @@ def build_report_tab_entries(df, description_map=None):
                 "καθώς μπορεί να επικαλύπτονται μερικώς από άλλες εγγραφές που να έχουν ημέρες "
                 "ασφάλισης. Απαιτείται λεπτομερής έλεγχος.</p>"
             )
-            tab_entries.append(("gaps", "Κενά", "".join(gaps_parts)))
+            _gaps_info_sections = [
+                (
+                    "info",
+                    "Σκοπός: Εντοπίζει χρονικά διαστήματα που δεν εμφανίζονται καθόλου στο ΑΤΛΑΣ "
+                    "από την έναρξη της ασφάλισης έως σήμερα.",
+                ),
+            ]
+            _gaps_heading = _atlas_html_tab_heading_row_info(
+                "Αναφορά Κενών Διαστήματων και διαστημάτων χωρίς ημέρες ασφάλισης",
+                "Σκοπός — Κενά διαστήματα",
+                _gaps_info_sections,
+                "atlas-info-store-gaps",
+            )
+            tab_entries.append(("gaps", "Κενά", _gaps_heading + "".join(gaps_parts)))
     except Exception:
         pass
 
@@ -2097,9 +2253,26 @@ def build_report_tab_entries(df, description_map=None):
             parallel_df, year_column='Έτος',
             collapse_cols=['Ταμείο', 'Τύπος Ασφάλισης', 'Εργοδότης'],
         )
+        _par_info = [
+            (
+                "info",
+                "Εμφάνιση διαστημάτων όπου συνυπάρχουν στον ίδιο μήνα: ΙΚΑ (Τύπος Αποδοχών 01, 16 ή 99) "
+                "& ΟΑΕΕ (Κλάδος/Πακέτο Κ), ΙΚΑ & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.",
+            ),
+            (
+                "warning",
+                "Διαστήματα που καλύπτουν πολλαπλούς μήνες επιμερίζονται και επισημαίνονται με κίτρινο χρώμα.",
+            ),
+        ]
+        _par_h = _atlas_html_tab_heading_row_info(
+            "Παράλληλη Ασφάλιση",
+            "Πληροφορίες — Παράλληλη ασφάλιση",
+            _par_info,
+            "atlas-info-store-parallel",
+        )
         tab_entries.append((
             "parallel", "Παράλληλη",
-            f"<section class='print-section'><h2>Παράλληλη Ασφάλιση</h2>"
+            f"<section class='print-section'>{_par_h}"
             f"<p class='print-description'>ΙΚΑ & ΟΑΕΕ / ΟΑΕΕ & ΤΣΜΕΔΕ / ΟΓΑ & ΙΚΑ/ΟΑΕΕ "
             f"(έως 31/12/2016).</p>{par_html}</section>",
         ))
@@ -2110,9 +2283,26 @@ def build_report_tab_entries(df, description_map=None):
             parallel_2017_df, year_column='Έτος',
             collapse_cols=['Ταμείο', 'Τύπος Ασφάλισης', 'Εργοδότης'],
         )
+        _p17_info = [
+            (
+                "info",
+                "Εμφάνιση διαστημάτων από 01/2017 και μετά όπου συνυπάρχουν στον ίδιο μήνα: "
+                "ΙΚΑ (αποδοχές 01, 16 ή 99) & ΕΦΚΑ μη μισθωτή ή ΕΦΚΑ μισθωτή & ΕΦΚΑ μη μισθωτή.",
+            ),
+            (
+                "warning",
+                "Διαστήματα που καλύπτουν πολλαπλούς μήνες επιμερίζονται και επισημαίνονται με κίτρινο χρώμα.",
+            ),
+        ]
+        _p17_h = _atlas_html_tab_heading_row_info(
+            "Παράλληλη Απασχόληση 2017+",
+            "Πληροφορίες — Παράλληλη απασχόληση 2017+",
+            _p17_info,
+            "atlas-info-store-parallel2017",
+        )
         tab_entries.append((
             "parallel2017", "Παράλληλη 2017+",
-            f"<section class='print-section'><h2>Παράλληλη Απασχόληση 2017+</h2>"
+            f"<section class='print-section'>{_p17_h}"
             f"<p class='print-description'>Από 01/2017 (ΙΚΑ & ΕΦΚΑ μη μισθωτή / ΕΦΚΑ μισθωτή "
             f"& ΕΦΚΑ μη μισθωτή).</p>{par2017_html}</section>",
         ))
@@ -2196,19 +2386,17 @@ def build_report_tab_entries(df, description_map=None):
         pass
 
     # Στην προβολή HTML εμφανίζονται μόνο οι ίδιες καρτέλες με τη Lite (όχι ΑΠΔ, Κύρια Δεδομένα, Αποζημίωση, Παράρτημα)
+    # Περίπλοκο αρχείο: ενσωματώνεται στον viewer (μπάρα + modal) και στην εκτύπωση ξεχωριστά.
 
-    # -- Complex file warning --
-    if show_complex_warning:
-        tab_entries = [
-            (
-                tid,
-                label,
-                content if tid == "personal" else COMPLEX_FILE_WARNING_HTML + content,
-            )
-            for tid, label, content in tab_entries
-        ]
-
-    return audit_df, display_summary, count_display_df, print_style_rows, tab_entries
+    return (
+        audit_df,
+        display_summary,
+        count_display_df,
+        print_style_rows,
+        tab_entries,
+        show_complex_warning,
+        complex_modal_body_html,
+    )
 
 
 def _safe_call(func, *args):
@@ -2224,6 +2412,7 @@ def _safe_call(func, *args):
 
 def build_print_html_document(
     tab_entries, audit_df, display_summary, client_name="",
+    show_complex_warning=False,
 ):
     """Κατασκευή εκτυπώσιμου HTML (χωρίς sidebar, compact, A4)."""
     synopsis_print = build_print_section_html(
@@ -2240,8 +2429,15 @@ def build_print_html_document(
         )
 
     _skip_in_print = {"totals", "synopsis", "personal"}
+
+    def _print_tab_body(tid: str, content: str) -> str:
+        body = content
+        if show_complex_warning and tid != "personal":
+            body = COMPLEX_FILE_WARNING_HTML + body
+        return (EXCLUSION_NOTE_HTML if tid == "count" else "") + body
+
     rest = [
-        (EXCLUSION_NOTE_HTML if tid == "count" else "") + content
+        _print_tab_body(tid, content)
         for tid, _, content in tab_entries
         if tid not in _skip_in_print
     ]
@@ -2284,6 +2480,8 @@ def build_viewer_html_document(
     print_styles=None,
     default_active_tab="timeline",
     full_save_suffix="ATLAS Pro.html",
+    show_complex_warning=False,
+    complex_modal_body_html="",
 ):
     """Κατασκευή πλήρους interactive HTML viewer (sidebar + tabs + JS)."""
     safe_name = html_mod.escape(client_name.strip()) if client_name.strip() else ""
@@ -2304,11 +2502,20 @@ def build_viewer_html_document(
         for tid, label, _ in tab_entries
     )
 
+    _cf_banner = _viewer_complex_file_banner_html() if show_complex_warning else ""
     tab_panes = "\n".join(
         f'<div id="pane-{tid}" class="tab-pane{" active" if tid == active_tid else ""}">'
+        f'{_cf_banner if (show_complex_warning and tid != "personal") else ""}'
         f'{(EXCLUSION_NOTE_HTML if (add_exclusion_note_for_count and tid == "count") else "")}{content}</div>'
         for tid, _, content in tab_entries
     )
+
+    _complex_store = ""
+    if show_complex_warning:
+        _complex_store = (
+            f'<div id="atlas-complex-reasons-store" class="atlas-tabinfo-body-store" '
+            f'hidden="hidden">{complex_modal_body_html or ""}</div>'
+        )
 
     print_js = json.dumps(print_html).replace("</script>", "<\\/script>")
     _styles = print_styles if print_styles is not None else PRINT_STYLES
@@ -2357,6 +2564,7 @@ def build_viewer_html_document(
     {name_block}
     <div class="main-title-wrap"><span id="main-title-person" class="main-title-person" aria-live="polite"></span><span class="main-title">{_main_heading}</span></div>
     <div class="tab-panes-container">
+    {_complex_store}
     {tab_panes}
     <div class="main-footer-disclaimer">{disclaimer}</div>
     </div>
@@ -2393,12 +2601,22 @@ def generate_full_html_report(df, client_name="", app_title="ATLAS",
                                full_save_suffix=None):
     """Παράγει (viewer_html, print_html) από ένα DataFrame."""
     description_map = build_description_map(df)
-    audit_df, display_summary, _, _, tab_entries = build_report_tab_entries(
-        df, description_map=description_map,
-    )
+    (
+        audit_df,
+        display_summary,
+        _,
+        _,
+        tab_entries,
+        show_complex_warning,
+        complex_modal_body_html,
+    ) = build_report_tab_entries(df, description_map=description_map)
 
     print_html = build_print_html_document(
-        tab_entries, audit_df, display_summary, client_name=client_name,
+        tab_entries,
+        audit_df,
+        display_summary,
+        client_name=client_name,
+        show_complex_warning=show_complex_warning,
     )
 
     dl_safe = re.sub(r'[<>:"/\\|?*]', '', (client_name or "Αναφορά").strip())[:60].strip() or "Αναφορά"
@@ -2418,6 +2636,8 @@ def generate_full_html_report(df, client_name="", app_title="ATLAS",
         app_subtitle=app_subtitle,
         print_brand_suffix=app_title,
         full_save_suffix=full_save_suffix,
+        show_complex_warning=show_complex_warning,
+        complex_modal_body_html=complex_modal_body_html,
     )
     return viewer_html, print_html
 
@@ -2500,7 +2720,7 @@ def build_frontend_viewer_html(df, client_name="", app_title="ATLAS Lite"):
 
 PRINT_STYLES = """
 @media print { @page { size: A4 landscape; margin: 8mm; } }
-@media print { .totals-filters { display: none !important; } .count-filters { display: none !important; } .totals-info-bar { display: none !important; } .totals-exceeded-wrap, .totals-exceeded-modal-overlay { display: none !important; } .section-actions { display: none !important; } .complex-file-warning { display: none !important; } .lite-exclusion-note { display: none !important; } .tl-zoom-controls { display: none !important; } #tl-zoom-inner, #tl-paketo-zoom-inner { transform: none !important; } .tl-zoom-wrapper, .tl-paketo-zoom-scroll { overflow-x: hidden !important; } }
+@media print { .totals-filters { display: none !important; } .count-filters { display: none !important; } .totals-info-bar { display: none !important; } .totals-exceeded-wrap, .totals-exceeded-modal-overlay { display: none !important; } .section-actions { display: none !important; } .complex-file-warning { display: none !important; } .atlas-tabinfo-btn { display: none !important; } .lite-exclusion-note { display: none !important; } .tl-zoom-controls { display: none !important; } #tl-zoom-inner, #tl-paketo-zoom-inner { transform: none !important; } .tl-zoom-wrapper, .tl-paketo-zoom-scroll { overflow-x: hidden !important; } }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: "Source Sans 3", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #222; margin: 0; padding: 12px 16px; font-size: 11px; line-height: 1.4; background: #ffffff; }
 .prt-name { text-align: center; font-size: 18px; font-weight: 800; margin-bottom: 2px; }
@@ -2731,7 +2951,7 @@ body { overflow-x: hidden; }
   pointer-events: auto;
 }
 .synopsis-modal {
-  width: min(640px, 100%);
+  width: min(720px, 100%);
   max-height: min(78vh, 720px);
   display: flex;
   flex-direction: column;
@@ -2745,31 +2965,32 @@ body { overflow-x: hidden; }
 .synopsis-modal-overlay.is-open .synopsis-modal {
   transform: scale(1) translateY(0);
 }
+/* Modal popups (Σύνοψη, ℹ, περίπλοκο κ.λπ.): ×1.5 κείμενο για ανάγνωση — νέα modals στο ίδιο μοτίβο */
 .synopsis-modal-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding: 18px 20px 14px;
+  padding: 27px 30px 21px;
   border-bottom: 1px solid #e2e8f0;
   background: linear-gradient(180deg, #f8fafc 0%, #fff 100%);
 }
 .synopsis-modal-head h3 {
   margin: 0;
-  font-size: 17px;
+  font-size: 25.5px;
   font-weight: 800;
   color: #0f172a;
   line-height: 1.3;
 }
 .synopsis-modal-close {
   flex-shrink: 0;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   border: none;
   border-radius: 10px;
   background: #f1f5f9;
   color: #64748b;
-  font-size: 22px;
+  font-size: 33px;
   line-height: 1;
   cursor: pointer;
   transition: background 0.2s, color 0.2s;
@@ -2779,19 +3000,104 @@ body { overflow-x: hidden; }
   color: #0f172a;
 }
 .synopsis-modal-body {
-  padding: 16px 20px 20px;
+  padding: 24px 30px 30px;
   overflow-y: auto;
-  font-size: 14px;
+  font-size: 21px;
   line-height: 1.55;
   color: #475569;
   -webkit-overflow-scrolling: touch;
 }
+.synopsis-modal-body p { font-size: inherit; line-height: inherit; }
 .synopsis-trunc-note {
   display: block;
-  margin-top: 8px;
-  font-size: 12px;
+  margin-top: 12px;
+  font-size: 18px;
   color: #64748b;
   font-style: italic;
+}
+.atlas-tab-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  text-align: left;
+  margin: 0 0 6px 0;
+  flex-wrap: wrap;
+}
+.atlas-tab-title-row h2 {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+}
+.atlas-tabinfo-btn {
+  flex-shrink: 0;
+  width: 33.6px;
+  height: 33.6px;
+  border-radius: 50%;
+  border: 1.5px solid #0284c7;
+  background: #f0f9ff;
+  cursor: pointer;
+  font-size: 17.6px;
+  line-height: 1;
+  color: #0369a1;
+  padding: 0;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s;
+}
+.atlas-tabinfo-btn:hover {
+  background: #e0f2fe;
+  border-color: #0369a1;
+}
+.atlas-tabinfo-body-store {
+  display: none !important;
+}
+.synopsis-modal-body .atlas-synopsis-block {
+  margin: 0 0 18px 0;
+  padding: 21px 24px;
+  border-radius: 8px;
+  font-size: 21px;
+  line-height: 1.55;
+  text-align: left;
+}
+.synopsis-modal-body .atlas-synopsis-block:last-child {
+  margin-bottom: 0;
+}
+.synopsis-modal-body .atlas-synopsis-info {
+  background: #e0f2fe;
+  border-left: 4px solid #0284c7;
+  color: #0c4a6e;
+}
+.synopsis-modal-body .atlas-synopsis-warning {
+  background: #fef9c3;
+  border-left: 4px solid #ca8a04;
+  color: #713f12;
+}
+.complex-file-warning-viewer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px 14px;
+  text-align: left;
+}
+.complex-file-readmore-btn {
+  margin: 0;
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #991b1b;
+  background: #fff;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.complex-file-readmore-btn:hover {
+  background: #fef2f2;
+  border-color: #f87171;
 }
 .print-section { margin-bottom: 24px; }
 .print-section h2 { font-size: 20px; font-weight: 700; color: #1e293b; margin: 0 0 6px 0; padding-bottom: 0; border-bottom: none; }
@@ -2850,7 +3156,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .apodoxes-tooltip.visible { opacity: 1; visibility: visible; transform: translateY(0); }
 .has-apodoxes-tooltip { cursor: help; }
 .cell-description { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
-@media print { .section-actions { display: none !important; } .btn-fs { display: none !important; } .btn-print-tab { display: none !important; } .apodoxes-tooltip { display: none !important; } #tl-paketo-tooltip { display: none !important; } .complex-file-warning { display: none !important; } .totals-info-bar { display: none !important; } .totals-exceeded-wrap, .totals-exceeded-modal-overlay { display: none !important; } .lite-exclusion-note { display: none !important; } .tl-zoom-controls { display: none !important; } #tl-zoom-inner, #tl-paketo-zoom-inner { transform: none !important; } .tl-zoom-wrapper, .tl-paketo-zoom-scroll { overflow-x: hidden !important; } .personal-form { display: none !important; } .personal-notes { display: none !important; } .synopsis-modal-overlay, .synopsis-expand-btn { display: none !important; } }
+@media print { .section-actions { display: none !important; } .btn-fs { display: none !important; } .btn-print-tab { display: none !important; } .apodoxes-tooltip { display: none !important; } #tl-paketo-tooltip { display: none !important; } .complex-file-warning { display: none !important; } .atlas-tabinfo-btn { display: none !important; } .complex-file-readmore-btn { display: none !important; } .totals-info-bar { display: none !important; } .totals-exceeded-wrap, .totals-exceeded-modal-overlay { display: none !important; } .lite-exclusion-note { display: none !important; } .tl-zoom-controls { display: none !important; } #tl-zoom-inner, #tl-paketo-zoom-inner { transform: none !important; } .tl-zoom-wrapper, .tl-paketo-zoom-scroll { overflow-x: hidden !important; } .personal-form { display: none !important; } .personal-notes { display: none !important; } .synopsis-modal-overlay, .synopsis-expand-btn { display: none !important; } }
 .year-section { margin-bottom: 20px; }
 .year-heading { font-size: 15px; font-weight: 800; color: #1e293b; padding: 8px 0 4px 0; border-bottom: 2px solid #6366f1; margin-bottom: 6px; }
 .print-disclaimer { font-size: 12px; color: #64748b; margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; line-height: 1.6; }
@@ -2919,8 +3225,8 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .totals-exceeded-modal-btn {
   flex: 0 0 auto;
   margin-left: auto;
-  padding: 8px 14px;
-  font-size: 13px;
+  padding: 12px 21px;
+  font-size: 19.5px;
   font-weight: 600;
   color: #78350f;
   background: #fff;
@@ -2929,7 +3235,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
   cursor: pointer;
 }
 .totals-exceeded-modal-btn:hover { background: #fffbeb; }
-.totals-exceeded-modal-intro { margin: 0 0 12px 0; font-size: 13px; color: #64748b; }
+.totals-exceeded-modal-intro { margin: 0 0 18px 0; font-size: 19.5px; color: #64748b; }
 .totals-exceeded-modal-overlay {
   position: fixed;
   inset: 0;
@@ -2971,27 +3277,27 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding: 18px 20px 14px;
+  padding: 27px 30px 21px;
   border-bottom: 1px solid #e2e8f0;
   background: linear-gradient(180deg, #fffbeb 0%, #fff 100%);
   flex-shrink: 0;
 }
 .totals-exceeded-modal-head h3 {
   margin: 0;
-  font-size: 17px;
+  font-size: 25.5px;
   font-weight: 800;
   color: #78350f;
   line-height: 1.3;
 }
 .totals-exceeded-modal-close {
   flex-shrink: 0;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   border: none;
   border-radius: 10px;
   background: #fef3c7;
   color: #92400e;
-  font-size: 22px;
+  font-size: 33px;
   line-height: 1;
   cursor: pointer;
   transition: background 0.2s, color 0.2s;
@@ -3001,15 +3307,16 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
   color: #451a03;
 }
 .totals-exceeded-modal-body {
-  padding: 16px 20px 20px;
+  padding: 24px 30px 30px;
   overflow-y: auto;
-  font-size: 14px;
+  font-size: 21px;
   line-height: 1.55;
   color: #475569;
   -webkit-overflow-scrolling: touch;
   flex: 1 1 auto;
   min-height: 0;
 }
+.totals-exceeded-modal-body p { font-size: inherit; line-height: inherit; }
 .totals-info-msg { font-size: 16px; font-weight: 600; color: #1e40af; flex: 1; min-width: 200px; }
 .totals-summary { display: flex; gap: 24px; flex-wrap: wrap; }
 .totals-summary-item { display: flex; flex-direction: column; gap: 4px; }
@@ -3093,7 +3400,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .date-key-num { width: 30px; height: 30px; background: #6366f1; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
 .date-key-label { font-size: 13px; color: #475569; line-height: 1.3; }
 .date-key-value { font-size: 20px; font-weight: 800; color: #1e293b; margin-top: 2px; }
-@media print { .totals-filters { display: none !important; } .count-filters { display: none !important; } .totals-info-bar { display: none !important; } .totals-exceeded-wrap, .totals-exceeded-modal-overlay { display: none !important; } .complex-file-warning { display: none !important; } .lite-exclusion-note { display: none !important; font-size: 9px; margin-bottom: 4px; } .tl-zoom-controls { display: none !important; } #tl-zoom-inner, #tl-paketo-zoom-inner { transform: none !important; } .tl-zoom-wrapper, .tl-paketo-zoom-scroll { overflow-x: hidden !important; } .personal-form { display: none !important; } .personal-notes { display: none !important; } .date-key-panel { break-inside: avoid; } }
+@media print { .totals-filters { display: none !important; } .count-filters { display: none !important; } .totals-info-bar { display: none !important; } .totals-exceeded-wrap, .totals-exceeded-modal-overlay { display: none !important; } .complex-file-warning { display: none !important; } .atlas-tabinfo-btn { display: none !important; } .complex-file-readmore-btn { display: none !important; } .lite-exclusion-note { display: none !important; font-size: 9px; margin-bottom: 4px; } .tl-zoom-controls { display: none !important; } #tl-zoom-inner, #tl-paketo-zoom-inner { transform: none !important; } .tl-zoom-wrapper, .tl-paketo-zoom-scroll { overflow-x: hidden !important; } .personal-form { display: none !important; } .personal-notes { display: none !important; } .date-key-panel { break-inside: avoid; } }
 .copy-target { cursor: pointer; position: relative; transition: background-color 0.15s; }
 .copy-target:hover { background-color: rgba(99,102,241,0.15) !important; }
 .copy-target:active { background-color: rgba(99,102,241,0.25) !important; }
@@ -3280,6 +3587,9 @@ SYNOPSIS_ENHANCE_JS = r"""
   } else {
     scheduleEnhance();
   }
+
+  window.openSynopsisModal = openSynopsisModal;
+  window.closeSynopsisModal = closeSynopsisModal;
 })();
 """
 
