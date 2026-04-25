@@ -11130,6 +11130,9 @@ def show_results_page(df, filename):
 
                     # Ομαδοποίηση οπτική: Έτος και Ταμείο μια φορά με bold (όπως Παράλληλη ≤2016)
                     display_df = display_df.sort_values(['Έτος', 'Ταμείο', 'Τύπος Ασφάλισης', 'Εργοδότης', 'Κλάδος/Πακέτο'])
+                    # Streamlit Cloud (νεότερο pandas): αποφεύγουμε TypeError από ανάθεση '' σε numeric dtype.
+                    display_df['Έτος'] = display_df['Έτος'].astype('string').fillna('')
+                    display_df['Ταμείο'] = display_df['Ταμείο'].astype('string').fillna('')
                     prev_etos, prev_tameio = None, None
                     for idx in display_df.index:
                         curr_etos = display_df.at[idx, 'Έτος']
