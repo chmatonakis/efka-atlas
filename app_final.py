@@ -1618,6 +1618,20 @@ def format_number_greek(value, decimals=None):
     except (ValueError, TypeError):
         return str(value) if value else ''
 
+
+def format_insurance_years_from_days(days, year_days: float = 300.0, empty: str = "•") -> str:
+    """Έτη ασφάλισης = ημέρες / year_days, πάντα 2 δεκαδικά."""
+    if days is None:
+        return empty
+    try:
+        yd = float(year_days)
+        if yd == 0:
+            return empty
+        return format_number_greek(float(days) / yd, decimals=2)
+    except (TypeError, ValueError):
+        return empty
+
+
 def clean_numeric_value(value, exclude_drx=False):
     """Καθαρισμός και μετατροπή αριθμητικών τιμών σε float
     
@@ -5782,7 +5796,6 @@ def render_totals_tab(
         )
 
     total_ins_days = None
-    total_years_val = None
     display_summary = None
     year_days = 300
 
@@ -5945,7 +5958,6 @@ def render_totals_tab(
             total_ins_days = int(capped_days['Συνολικές_Ημέρες_cap'].sum())
         else:
             total_ins_days = int(summary_final['Συνολικές ημέρες'].sum())
-        total_years_val = total_ins_days / year_days if year_days else 0
 
     with row1_cols[0]:
         st.info("Επιλέξτε πακέτα κάλυψης για να δείτε την αθροιστική προϋπηρεσία.")
@@ -5953,7 +5965,7 @@ def render_totals_tab(
         m_val = format_number_greek(total_ins_days, decimals=0) if total_ins_days is not None else "•"
         st.metric("Εκτίμηση Ημερών Ασφάλισης", m_val)
     with row1_cols[2]:
-        y_val = format_number_greek(total_years_val, decimals=1) if total_years_val is not None else "•"
+        y_val = format_insurance_years_from_days(total_ins_days, year_days) if total_ins_days is not None else "•"
         st.metric("Συνολικά Έτη", y_val)
 
     exceeded_body_html = ""
@@ -8727,9 +8739,15 @@ def show_results_page(df, filename):
                             count_df = count_df[count_df[e_col].astype(str).isin(sel_cnt_earn)]
 
                 with col6:
-                    from_date_cnt = st.text_input("Από (dd/mm/yyyy):", value="", placeholder="01/01/2000", key="cnt_filter_from")
+                    if "cnt_filter_from" not in st.session_state:
+                        st.session_state["cnt_filter_from"] = ""
+                    st.text_input("Από (dd/mm/yyyy):", placeholder="01/01/2000", key="cnt_filter_from")
+                    from_date_cnt = st.session_state.get("cnt_filter_from", "").strip()
                 with col7:
-                    to_date_cnt = st.text_input("Έως (dd/mm/yyyy):", value="", placeholder="31/12/2020", key="cnt_filter_to")
+                    if "cnt_filter_to" not in st.session_state:
+                        st.session_state["cnt_filter_to"] = ""
+                    st.text_input("Έως (dd/mm/yyyy):", placeholder="31/12/2020", key="cnt_filter_to")
+                    to_date_cnt = st.session_state.get("cnt_filter_to", "").strip()
 
                 # Apply date filters
                 if from_date_cnt or to_date_cnt:
@@ -8952,7 +8970,6 @@ def show_results_page(df, filename):
                     _sum_days_cnt = _sum_misthoti_cnt + _sum_nm_cnt
                     _basis_cnt_tab = st.session_state.get('ins_days_basis', 'Μήνας = 25, Έτος = 300')
                     _year_days_cnt = 360 if str(_basis_cnt_tab).startswith('Μήνας = 30') else 300
-                    _years_equiv_cnt = _sum_days_cnt / _year_days_cnt if _year_days_cnt else 0.0
                     with cnt_metrics_ph.container():
                         _cnt_sum_row = st.columns([2, 1, 1, 1, 1])
                         with _cnt_sum_row[0]:
@@ -8989,7 +9006,7 @@ def show_results_page(df, filename):
                         with _cnt_sum_row[4]:
                             st.metric(
                                 "Συνολικά έτη",
-                                format_number_greek(_years_equiv_cnt, decimals=1),
+                                format_insurance_years_from_days(_sum_days_cnt, _year_days_cnt),
                             )
                 else:
                     cnt_metrics_ph.empty()
@@ -10138,9 +10155,6 @@ def show_results_page(df, filename):
                                 if span_days > 0:
                                     total_days_last_pre += d_val * (pre_days / span_days)
 
-                        years_last = total_days_last / 300.0
-                        years_last_pre = total_days_last_pre / 300.0
-
                         # Τελευταίος μισθός: πιο πρόσφατη μικτή αποδοχή κωδ. 01 από df
                         last_salary = None
                         try:
@@ -10167,11 +10181,11 @@ def show_results_page(df, filename):
                         with m2:
                             st.metric("Ημέρες τελ. εργοδότη", format_number_greek(total_days_last, decimals=0))
                         with m3:
-                            st.metric("Έτη τελ. εργοδότη", format_number_greek(years_last, decimals=2))
+                            st.metric("Έτη τελ. εργοδότη", format_insurance_years_from_days(total_days_last))
                         with m4:
                             st.metric("Ημέρες έως 12/11/2012", format_number_greek(total_days_last_pre, decimals=0))
                         with m5:
-                            st.metric("Έτη έως 12/11/2012", format_number_greek(years_last_pre, decimals=2))
+                            st.metric("Έτη έως 12/11/2012", format_insurance_years_from_days(total_days_last_pre))
                         with m6:
                             if last_salary is not None and last_salary > 0:
                                 st.metric("Τελευταίος μισθός", format_currency(last_salary))

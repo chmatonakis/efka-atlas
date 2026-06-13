@@ -272,7 +272,8 @@ PLAFOND_PALIOS = {
   "2010": 2432.25, "2011": 2432.25, "2012": 2432.25, "2013": 5546.80,
   "2014": 5546.80, "2015": 5546.80, "2016": 5861.00, "2017": 5861.00,
   "2018": 5861.00, "2019": 6500.00, "2020": 6500.00, "2021": 6500.00,
-  "2022": 6500.00, "2023": 7126.94, "2024": 7126.94, "2025": 7572.62
+  "2022": 6500.00, "2023": 7126.94, "2024": 7126.94, "2025": 7572.62,
+  "2026": 7761.94, "2027": 7917.18, "2028": 8075.52, "2029": 8237.03, "2030": 8401.77
 }
 
 PLAFOND_NEOS = {
@@ -281,7 +282,8 @@ PLAFOND_NEOS = {
   "2010": 5543.55, "2011": 5543.55, "2012": 5546.80, "2013": 5546.80,
   "2014": 5546.80, "2015": 5546.80, "2016": 5861.00, "2017": 5861.00,
   "2018": 5861.00, "2019": 6500.00, "2020": 6500.00, "2021": 6500.00,
-  "2022": 6500.00, "2023": 7126.94, "2024": 7126.94, "2025": 7572.62
+  "2022": 6500.00, "2023": 7126.94, "2024": 7126.94, "2025": 7572.62,
+  "2026": 7761.94, "2027": 7917.18, "2028": 8075.52, "2029": 8237.03, "2030": 8401.77
 }
 
 # CSS Design System: ίδιο για Kyria και Lite (Lite ακριβώς ίδιο frontend, μόνο κεφαλίδα "ATLAS Lite")
@@ -1562,6 +1564,20 @@ def format_number_greek(value, decimals=None):
     except (ValueError, TypeError):
         return str(value) if value else ''
 
+
+def format_insurance_years_from_days(days, year_days: float = 300.0, empty: str = "•") -> str:
+    """Έτη ασφάλισης = ημέρες / year_days, πάντα 2 δεκαδικά."""
+    if days is None:
+        return empty
+    try:
+        yd = float(year_days)
+        if yd == 0:
+            return empty
+        return format_number_greek(float(days) / yd, decimals=2)
+    except (TypeError, ValueError):
+        return empty
+
+
 def clean_numeric_value(value, exclude_drx=False):
     """Καθαρισμός και μετατροπή αριθμητικών τιμών σε float
     
@@ -2093,15 +2109,6 @@ def compute_parallel_months(base_df: pd.DataFrame) -> list[tuple[int, int]]:
 
     p_c_df = pd.DataFrame(parallel_rows)
 
-    def is_ika_match(row):
-        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
-        i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
-        et = str(row.get('ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ', '')).strip()
-        is_ika_tameio = 'IKA' in t or 'ΙΚΑ' in t
-        is_misthoti = 'ΜΙΣΘΩΤΗ' in i_type and 'ΜΗ' not in i_type
-        is_et_ika = et in ['01', '1', '16', '99']
-        return (is_ika_tameio or is_misthoti) and is_et_ika
-
     def is_oaee_match(row):
         t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
         kl = str(row.get('ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', '')).strip().upper()
@@ -2123,7 +2130,7 @@ def compute_parallel_months(base_df: pd.DataFrame) -> list[tuple[int, int]]:
         is_k = kl in ['K', 'Κ']
         return is_oga_tameio and is_k
 
-    p_c_df['is_ika'] = p_c_df.apply(is_ika_match, axis=1)
+    p_c_df['is_ika'] = p_c_df.apply(_is_ika_parallel_row, axis=1)
     p_c_df['is_oaee'] = p_c_df.apply(is_oaee_match, axis=1)
     p_c_df['is_tsm'] = p_c_df.apply(is_tsm_match, axis=1)
     p_c_df['is_oga'] = p_c_df.apply(is_oga_match, axis=1)
@@ -2261,6 +2268,38 @@ EXCLUDED_PACKAGES_PARALLEL = {'Α', 'Λ', 'Υ', 'Ο', 'Χ', '026', '899'}
 
 # Για παράλληλη έως 2016: εξαιρούνται και 127, 131, 132, 133 (και 026) ακόμα κι αν έχουν τύπο αποδοχών 01 κτλ με ημέρες
 EXCLUDED_PACKAGES_PARALLEL_UNTIL_2016 = {'127', '131', '132', '133', '026'}
+
+_IKA_VALID_ET_PARALLEL = {'01', '1', '16', '99'}
+
+
+def _normalize_earnings_type_code(et_raw) -> str:
+    if pd.isna(et_raw):
+        return ''
+    et = str(et_raw).strip()
+    return '' if et.lower() in ('nan', 'none') else et
+
+
+def _is_ika_parallel_row(row) -> bool:
+    """Έλεγχος αν εγγραφή μετρά ως ΙΚΑ για παράλληλη ασφάλιση ≤2016."""
+    t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+    i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+    et = _normalize_earnings_type_code(row.get('ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ', ''))
+
+    is_ika_tameio = 'IKA' in t or 'ΙΚΑ' in t
+    is_misthoti = 'ΜΙΣΘΩΤΗ' in i_type and 'ΜΗ' not in i_type
+    if not (is_ika_tameio or is_misthoti):
+        return False
+    if et in _IKA_VALID_ET_PARALLEL:
+        return True
+
+    year = row.get('ΕΤΟΣ')
+    if year is not None and not pd.isna(year):
+        try:
+            if int(year) < 2002 and et == '':
+                return True
+        except (TypeError, ValueError):
+            pass
+    return False
 
 
 def _build_monthly_rows_for_parallel(df: pd.DataFrame, description_map: dict | None = None) -> list[dict]:
@@ -2405,12 +2444,6 @@ def build_parallel_print_df(df: pd.DataFrame, description_map: dict | None = Non
     p_df['ΕΤΟΣ'] = p_df['ΕΤΟΣ'].astype(int)
     p_df['Μήνας_Num'] = p_df['Μήνας_Num'].astype(int)
 
-    def _is_ika_match(row):
-        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
-        i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
-        et = str(row.get('ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ', '')).strip()
-        return (('IKA' in t or 'ΙΚΑ' in t) or ('ΜΙΣΘΩΤΗ' in i_type and 'ΜΗ' not in i_type)) and et in ['01', '1', '16', '99']
-
     def _is_oaee_match(row):
         t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
         kl = str(row.get('ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', '')).strip().upper()
@@ -2431,7 +2464,7 @@ def build_parallel_print_df(df: pd.DataFrame, description_map: dict | None = Non
         i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
         return ('IKA' in t or 'ΙΚΑ' in t) or ('ΜΙΣΘΩΤΗ' in i_type and 'ΜΗ' not in i_type)
 
-    p_df['is_ika'] = p_df.apply(_is_ika_match, axis=1)
+    p_df['is_ika'] = p_df.apply(_is_ika_parallel_row, axis=1)
     p_df['is_oaee'] = p_df.apply(_is_oaee_match, axis=1)
     p_df['is_tsm'] = p_df.apply(_is_tsm_match, axis=1)
     p_df['is_oga'] = p_df.apply(_is_oga_match, axis=1)
@@ -3752,7 +3785,7 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
             audit_rows.append({
                 'A/A': 5, 'Έλεγχος': 'Παράλληλη ασφάλιση',
                 'Εύρημα': 'Πιθανή',
-                'Λεπτομέρειες': 'Βρέθηκαν χρονικά επικαλυπτόμενα διαστήματα ΙΚΑ (αποδοχές 01, 16, ή 99) & ΟΑΕΕ (Κ), ΙΚΑ & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ) ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.',
+                'Λεπτομέρειες': 'Βρέθηκαν χρονικά επικαλυπτόμενα διαστήματα ΙΚΑ (αποδοχές 01, 16, ή 99· έως 2001 και κενός τύπος αποδοχών) & ΟΑΕΕ (Κ), ΙΚΑ & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ) ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.',
                 'Ενέργειες': 'Ελέγξτε την καρτέλα "Παράλληλη Ασφάλιση"'
             })
         else:
@@ -5709,7 +5742,6 @@ def render_totals_tab(
         )
 
     total_ins_days = None
-    total_years_val = None
     display_summary = None
     year_days = 300
 
@@ -5872,7 +5904,6 @@ def render_totals_tab(
             total_ins_days = int(capped_days['Συνολικές_Ημέρες_cap'].sum())
         else:
             total_ins_days = int(summary_final['Συνολικές ημέρες'].sum())
-        total_years_val = total_ins_days / year_days if year_days else 0
 
     with row1_cols[0]:
         st.info("Επιλέξτε πακέτα κάλυψης για να δείτε την αθροιστική προϋπηρεσία.")
@@ -5880,7 +5911,7 @@ def render_totals_tab(
         m_val = format_number_greek(total_ins_days, decimals=0) if total_ins_days is not None else "•"
         st.metric("Εκτίμηση Ημερών Ασφάλισης", m_val)
     with row1_cols[2]:
-        y_val = format_number_greek(total_years_val, decimals=1) if total_years_val is not None else "•"
+        y_val = format_insurance_years_from_days(total_ins_days, year_days) if total_ins_days is not None else "•"
         st.metric("Συνολικά Έτη", y_val)
 
     exceeded_body_html = ""
