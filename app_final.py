@@ -997,6 +997,9 @@ def wrap_print_html(
     table.print-table.wrap-cells thead th {{
         vertical-align: bottom; font-size: 7.5px; line-height: 1.25; padding: 4px 3px;
     }}
+    /* Καταμέτρηση — ομοιόμορφη κατανομή στηλών (ίδια λογική με Lite full screen) */
+    .count-print-tables table.print-table {{ table-layout: auto; }}
+    .count-print-tables table.print-table colgroup col {{ width: auto !important; }}
     /* --- Yearly sections --- */
     .year-section {{ margin-bottom: 18px; }}
     .year-heading {{
@@ -1072,6 +1075,7 @@ def build_print_html(
     col_width_overrides: dict[str, str] | None = None,
     footer_note: str | None = None,
     summary_html: str | None = None,
+    auto_column_layout: bool = False,
 ) -> str:
     client_name = (client_name or '').strip()
     client_amka = (client_amka or '').strip()
@@ -1092,6 +1096,8 @@ def build_print_html(
             dataframe, style_rows, wrap_cells=wrap_cells,
             bold_columns=bold_columns, col_width_overrides=col_width_overrides
         )
+    if auto_column_layout:
+        table_html = f'<div class="count-print-tables">{table_html}</div>'
     disclaimer_html = get_print_disclaimer_html()
     footer_note_html = (
         f"<p class='print-description' style='margin-top:1.25em; padding:0.5em 0; border-top:1px solid #e2e8f0; font-size:0.95em;'>{html.escape(footer_note)}</p>"
@@ -1154,6 +1160,7 @@ def render_print_button(
     download_label: str = "Λήψη",
     download_key: str | None = None,
     download_mime: str = "application/json",
+    auto_column_layout: bool = False,
 ) -> None:
     if download_data is not None:
         # Λήψη πριν την εκτύπωση· ευρύτερη στήλη ώστε το κείμενο να μην ανασπάται
@@ -1196,6 +1203,7 @@ def render_print_button(
             col_width_overrides=col_width_overrides,
             footer_note=footer_note,
             summary_html=summary_html,
+            auto_column_layout=auto_column_layout,
         )
         b64_html = base64.standard_b64encode(html_content.encode("utf-8")).decode("ascii")
         _dom_safe = re.sub(r"[^a-zA-Z0-9_]", "_", button_key)
@@ -1733,8 +1741,10 @@ def apply_negative_time_sign(df: pd.DataFrame,
     sign_series = df.apply(_row_sign, axis=1)
     for col in ['Έτη', 'Μήνες', 'Ημέρες']:
         if col in df.columns:
-            df[col] = df[col].apply(clean_numeric_value)
-            df[col] = df[col] * sign_series
+            numeric = df[col].apply(clean_numeric_value)
+            # Ίδια λογική με Καταμέτρηση: -abs() όταν αρνητικές αποδοχές/εισφορές,
+            # όχι val*sign (αλλιώς ήδη αρνητικές ημέρες γίνονται θετικές: -17 → +17).
+            df[col] = numeric.where(sign_series >= 0, -numeric.abs())
     return df
 
 def find_negative_entries(df: pd.DataFrame) -> pd.DataFrame:
@@ -2744,12 +2754,12 @@ def compute_applied_monthly_day_caps(data_df: pd.DataFrame) -> list[dict]:
     return capped[['Έτος', 'Μήνας', 'Ταμείο', 'Πακέτο', 'Ημέρες']].to_dict('records')
 
 
-def compute_complex_file_metrics(data_df: pd.DataFrame) -> tuple[int, int, int]:
+def compute_complex_file_metrics(data_df: pd.DataFrame) -> tuple[int, int, int, int]:
     """
     Υπολογίζει μετρήσεις για το προειδοποιητικό «Περίπλοκο αρχείο».
-    Επιστρέφει (n_aggregated, n_limits_25, n_unpaid_months).
+    Επιστρέφει (n_aggregated, n_limits_25, n_unpaid_months, n_negative).
     """
-    n_agg, n_limits_25, n_unpaid = 0, 0, 0
+    n_agg, n_limits_25, n_unpaid, n_negative = 0, 0, 0, 0
     # 1. Ενοποιημένα διαστήματα (Check 9 λογική)
     try:
         if 'Από' in data_df.columns and 'Έως' in data_df.columns:
@@ -2831,15 +2841,23 @@ def compute_complex_file_metrics(data_df: pd.DataFrame) -> tuple[int, int, int]:
                             n_unpaid += _count_unpaid(sub_d.iloc[i], sub_c.iloc[i])
     except Exception:
         pass
-    return n_agg, n_limits_25, n_unpaid
+    # 4. Αρνητικές εγγραφές (διαγραφές/διορθώσεις χρόνου: αρνητικές αποδοχές/εισφορές → αρνητικές ημέρες/μήνες/έτη)
+    try:
+        neg_df = find_negative_entries(data_df)
+        n_negative = len(neg_df) if neg_df is not None and not neg_df.empty else 0
+    except Exception:
+        pass
+    return n_agg, n_limits_25, n_unpaid, n_negative
 
 
-def should_show_complex_file_warning(n_aggregated: int, n_limits_25: int, n_unpaid_months: int) -> bool:
+def should_show_complex_file_warning(n_aggregated: int, n_limits_25: int, n_unpaid_months: int, n_negative: int = 0) -> bool:
     """
     True αν πρέπει να εμφανιστεί το προειδοποιητικό «Περίπλοκο αρχείο».
     Κριτήρια: (πάνω από 10 ενοπ. + πάνω από 30 απλήρωτοι + πάνω από 10 όρια 25) ή ανά δύο,
-    ή πάνω από 15 ενοποιημένα, ή πάνω από 15 όρια 25.
+    ή πάνω από 15 ενοποιημένα, ή πάνω από 15 όρια 25, ή ύπαρξη αρνητικών εγγραφών.
     """
+    if n_negative > 0:
+        return True
     if n_aggregated > 15 or n_limits_25 > 15:
         return True
     over_10_agg = n_aggregated > 10
@@ -2855,7 +2873,7 @@ def should_show_complex_file_warning(n_aggregated: int, n_limits_25: int, n_unpa
 
 
 def build_complex_file_warning_modal_sections(
-    n_aggregated: int, n_limits_25: int, n_unpaid_months: int
+    n_aggregated: int, n_limits_25: int, n_unpaid_months: int, n_negative: int = 0
 ) -> list[tuple[str, str]]:
     """Μόνο τα κριτήρια που πραγματικά ενεργοποιούν την προειδοποίηση, σε φυσική γλώσσα (ίδιο στυλ blocks με τις οδηγίες)."""
     sections: list[tuple[str, str]] = []
@@ -2913,6 +2931,17 @@ def build_complex_file_warning_modal_sections(
                 )
             )
 
+    if n_negative > 0:
+        sections.append(
+            (
+                "warning",
+                f"Εντοπίστηκαν αρνητικές εγγραφές χρόνου ({n_negative} "
+                f"{'περίπτωση' if n_negative == 1 else 'περιπτώσεις'}): γραμμές με αρνητικές αποδοχές/εισφορές "
+                "που αντιστοιχούν σε διαγραφές ή διορθώσεις ημερών-μηνών-ετών ασφάλισης. "
+                "Οι εγγραφές αυτές αφαιρούν χρόνο από τα σύνολα· επαληθεύστε τον υπολογισμό με το πρωτότυπο ΑΤΛΑΣ.",
+            )
+        )
+
     if not sections:
         sections.append(
             (
@@ -2930,7 +2959,8 @@ def _render_complex_file_warning_banner(dom_base: str) -> None:
     n_agg = int(st.session_state.get("complex_file_n_agg", 0))
     n_lim = int(st.session_state.get("complex_file_n_limits_25", 0))
     n_unpaid = int(st.session_state.get("complex_file_n_unpaid", 0))
-    sections = build_complex_file_warning_modal_sections(n_agg, n_lim, n_unpaid)
+    n_negative = int(st.session_state.get("complex_file_n_negative", 0))
+    sections = build_complex_file_warning_modal_sections(n_agg, n_lim, n_unpaid, n_negative)
     banner_html = _complex_file_warning_banner_html(
         dom_base,
         "Γιατί χαρακτηρίστηκε περίπλοκο το αρχείο",
@@ -5033,7 +5063,7 @@ def _count_display_df_arrow_safe(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] | None = None, show_count_totals_only: bool = False):
+def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] | None = None, show_count_totals_only: bool = False, force_insurance_type_subtotals: bool = False):
     required_cols = ['Από', 'Έως', 'Ημέρες']
     if not all(col in count_df.columns for col in required_cols):
         return pd.DataFrame(), [], None, [], []
@@ -5173,11 +5203,16 @@ def build_count_report(count_df: pd.DataFrame, description_map: dict[str, str] |
     # - στο Streamlit μόνο όταν έχουν επιλεγεί πακέτα κάλυψης (cnt_filter_klados),
     # - στην HTML: οι γραμμές υπάρχουν στο DOM αλλά κρύβονται από JS μέχρι να επιλεγεί ≥1 πακέτο.
     _show_insurance_type_subtotals = True
-    try:
-        if "cnt_filter_klados" in st.session_state:
-            _show_insurance_type_subtotals = bool(st.session_state.get("cnt_filter_klados"))
-    except Exception:
+    if force_insurance_type_subtotals:
+        # Παραγωγή HTML: πάντα δημιουργούμε τις γραμμές υποσυνόλου στο DOM·
+        # η εμφάνιση/απόκρυψη γίνεται client-side ανάλογα με τα επιλεγμένα πακέτα.
         _show_insurance_type_subtotals = True
+    else:
+        try:
+            if "cnt_filter_klados" in st.session_state:
+                _show_insurance_type_subtotals = bool(st.session_state.get("cnt_filter_klados"))
+        except Exception:
+            _show_insurance_type_subtotals = True
     # Σύνολα ανά (έτος, ταμείο, τύπος): οι ημέρες ανά μήνα δεν αθροίζονται απεριόριστα
     # σε πολλαπλούς κλάδους — εφαρμόζεται το ίδιο ανώτατο ανά μήνα/ταμείο με την καταμέτρηση (25, 31 ΙΚΑ).
     insurance_type_totals = {}
@@ -6545,16 +6580,18 @@ def show_results_page(df, filename):
 
     # Μετρήσεις για προειδοποίηση «Περίπλοκο αρχείο»
     try:
-        n_agg, n_limits_25, n_unpaid = compute_complex_file_metrics(df)
-        st.session_state['show_complex_file_warning'] = should_show_complex_file_warning(n_agg, n_limits_25, n_unpaid)
+        n_agg, n_limits_25, n_unpaid, n_negative = compute_complex_file_metrics(df)
+        st.session_state['show_complex_file_warning'] = should_show_complex_file_warning(n_agg, n_limits_25, n_unpaid, n_negative)
         st.session_state['complex_file_n_agg'] = n_agg
         st.session_state['complex_file_n_limits_25'] = n_limits_25
         st.session_state['complex_file_n_unpaid'] = n_unpaid
+        st.session_state['complex_file_n_negative'] = n_negative
     except Exception:
         st.session_state['show_complex_file_warning'] = False
         st.session_state['complex_file_n_agg'] = 0
         st.session_state['complex_file_n_limits_25'] = 0
         st.session_state['complex_file_n_unpaid'] = 0
+        st.session_state['complex_file_n_negative'] = 0
 
     # Δημιουργία tabs (προαιρετικό tab Συντάξιμες Αποδοχές μετά την Καταμέτρηση αν έχουν επιλεγεί πακέτα).
     # Χρησιμοποιούμε το κλειδί widget cnt_filter_klados (όχι count_klados_selected): το st.tabs() εκτελείται
@@ -8723,6 +8760,30 @@ def show_results_page(df, filename):
                     else:
                         st.session_state["_cnt_klados_map"] = {}
                 
+                def _cnt_toggle_date_preset(preset_key, from_val, to_val=None, from_only=False):
+                    if st.session_state.get("cnt_date_preset_active") == preset_key:
+                        st.session_state["cnt_filter_from"] = ""
+                        st.session_state["cnt_filter_to"] = ""
+                        st.session_state["cnt_date_preset_active"] = None
+                    else:
+                        st.session_state["cnt_filter_from"] = from_val
+                        if not from_only and to_val is not None:
+                            st.session_state["cnt_filter_to"] = to_val
+                        st.session_state["cnt_date_preset_active"] = preset_key
+
+                def _cnt_sync_date_preset_active():
+                    active = st.session_state.get("cnt_date_preset_active")
+                    if not active:
+                        return
+                    from_v = (st.session_state.get("cnt_filter_from") or "").strip()
+                    to_v = (st.session_state.get("cnt_filter_to") or "").strip()
+                    if active == "from_2002" and from_v != "01/01/2002":
+                        st.session_state["cnt_date_preset_active"] = None
+                    elif active == "range_2002_2014" and (from_v != "01/01/2002" or to_v != "31/12/2014"):
+                        st.session_state["cnt_date_preset_active"] = None
+                    elif active == "range_2009_2013" and (from_v != "01/01/2009" or to_v != "31/12/2013"):
+                        st.session_state["cnt_date_preset_active"] = None
+
                 with col5:
                     # Φίλτρο Τύπου Αποδοχών
                     e_col = next((c for c in count_df.columns if 'Τύπος Αποδοχών' in c), None)
@@ -8748,6 +8809,40 @@ def show_results_page(df, filename):
                         st.session_state["cnt_filter_to"] = ""
                     st.text_input("Έως (dd/mm/yyyy):", placeholder="31/12/2020", key="cnt_filter_to")
                     to_date_cnt = st.session_state.get("cnt_filter_to", "").strip()
+
+                _cnt_sync_date_preset_active()
+                _cnt_active = st.session_state.get("cnt_date_preset_active")
+                _, _, _, _, _cnt_btn5, _cnt_btn6, _cnt_btn7 = st.columns([1.1, 1.0, 1.2, 1.3, 1.1, 0.9, 0.9])
+                with _cnt_btn5:
+                    st.button(
+                        "Από 1/1/2002",
+                        key="cnt_btn_from_2002",
+                        on_click=_cnt_toggle_date_preset,
+                        args=("from_2002", "01/01/2002", None, True),
+                        type="primary" if _cnt_active == "from_2002" else "secondary",
+                        use_container_width=True,
+                        help="Συμπλήρωση «Από» με 01/01/2002 — ξανά κλικ για επαναφορά ημερομηνιών",
+                    )
+                with _cnt_btn6:
+                    st.button(
+                        "1/1/2002 – 31/12/2014",
+                        key="cnt_btn_range_2002_2014",
+                        on_click=_cnt_toggle_date_preset,
+                        args=("range_2002_2014", "01/01/2002", "31/12/2014"),
+                        type="primary" if _cnt_active == "range_2002_2014" else "secondary",
+                        use_container_width=True,
+                        help="Φίλτρο 01/01/2002 – 31/12/2014 — ξανά κλικ για επαναφορά ημερομηνιών",
+                    )
+                with _cnt_btn7:
+                    st.button(
+                        "1/1/2009 – 31/12/2013",
+                        key="cnt_btn_range_2009_2013",
+                        on_click=_cnt_toggle_date_preset,
+                        args=("range_2009_2013", "01/01/2009", "31/12/2013"),
+                        type="primary" if _cnt_active == "range_2009_2013" else "secondary",
+                        use_container_width=True,
+                        help="Φίλτρο 01/01/2009 – 31/12/2013 — ξανά κλικ για επαναφορά ημερομηνιών",
+                    )
 
                 # Apply date filters
                 if from_date_cnt or to_date_cnt:
@@ -9597,7 +9692,8 @@ def show_results_page(df, filename):
                     style_rows=print_style_rows,
                     scale=0.9,
                     yearly=True,
-                    year_column='ΕΤΟΣ'
+                    year_column='ΕΤΟΣ',
+                    auto_column_layout=True,
                 )
                 
             else:

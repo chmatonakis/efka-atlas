@@ -10,8 +10,12 @@ from pathlib import Path as _Path
 
 _root = _Path(__file__).resolve().parent
 _kyria = _root / "LOCAL_DEV" / "kyria"
-if _kyria.exists() and not (_root / "app_final.py").exists():
-    sys.path.insert(0, str(_kyria))
+# Πάντα Κυρία πριν από ρίζα — το root app_final.py είναι για deploy και μένει πίσω.
+if _kyria.exists():
+    _kp = str(_kyria)
+    if _kp in sys.path:
+        sys.path.remove(_kp)
+    sys.path.insert(0, _kp)
 
 import datetime
 import html as html_mod
@@ -36,6 +40,7 @@ from app_final import (
     compute_summary_capped_dk,
     compute_complex_file_metrics,
     find_gaps_in_insurance_data,
+    find_negative_entries,
     find_zero_duration_intervals,
     generate_audit_report,
     get_print_disclaimer_html,
@@ -69,7 +74,7 @@ COMPLEX_FILE_WARNING_HTML = (
 
 
 def _html_build_complex_file_modal_sections(
-    n_aggregated: int, n_limits_25: int, n_unpaid_months: int
+    n_aggregated: int, n_limits_25: int, n_unpaid_months: int, n_negative: int = 0
 ) -> list[tuple[str, str]]:
     """Ίδια λογική/κείμενα με LOCAL_DEV/kyria/app_final.build_complex_file_warning_modal_sections (συγχρονίστε αν αλλάξει)."""
     sections: list[tuple[str, str]] = []
@@ -124,6 +129,16 @@ def _html_build_complex_file_modal_sections(
                     f"25 ημερών ({nl}). Απαιτείται επαλήθευση με το πρωτότυπο ΑΤΛΑΣ.",
                 )
             )
+    if n_negative > 0:
+        sections.append(
+            (
+                "warning",
+                f"Εντοπίστηκαν αρνητικές εγγραφές χρόνου ({n_negative} "
+                f"{'περίπτωση' if n_negative == 1 else 'περιπτώσεις'}): γραμμές με αρνητικές αποδοχές/εισφορές "
+                "που αντιστοιχούν σε διαγραφές ή διορθώσεις ημερών-μηνών-ετών ασφάλισης. "
+                "Οι εγγραφές αυτές αφαιρούν χρόνο από τα σύνολα· επαληθεύστε τον υπολογισμό με το πρωτότυπο ΑΤΛΑΣ.",
+            )
+        )
     if not sections:
         sections.append(
             (
@@ -695,11 +710,14 @@ def _totals_raw_records_for_js(raw_df, month_days=25, year_days=300):
         if col in rdf.columns:
             rdf[col] = rdf[col].apply(lambda x: clean_numeric_value(x) or 0)
     rdf = apply_negative_time_sign(rdf)
+    # Δεν κλιπάρουμε σε >=0: οι διορθωτικές (αρνητικές) εγγραφές πρέπει να ΑΦΑΙΡΟΥΝ ημέρες
+    # ανά πακέτο/μήνα, όπως κάνει η Κυρία (compute_summary_capped_days_by_group),
+    # αλλιώς τα Σύνολα στη Lite βγαίνουν μεγαλύτερα.
     rdf['_h'] = (
         rdf['Ημέρες'].fillna(0)
         + rdf['Μήνες'].fillna(0) * month_days
         + rdf['Έτη'].fillna(0) * year_days
-    ).clip(lower=0).round(0).astype(int)
+    ).round(0).astype(int)
 
     def _gross(r):
         raw = str(r.get(gross_col, '') or '')
@@ -903,13 +921,9 @@ def _build_paketo_timeline_rows_html(records, desc_map):
 
 
 def _format_totals_exceeded_block(n_count: int, body_inner_html: str, visible: bool) -> str:
-    """Μία γραμμή ειδοποίησης + κουμπί· το πλήρες κείμενο στο modal (HTML Σύνολα)."""
+    """Μία γραμμή ειδοποίησης + κουμπί· στο modal μόνο τα αποτελέσματα (χωρίς κείμενο κριτηρίου)."""
     vis = '' if visible else ' style="display:none"'
-    intro_p = (
-        '<p class="totals-exceeded-modal-intro">Πλαφόν: ΙΚΑ 31 ημ./μήνα, ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ και υπόλοιπα '
-        '25 ημ./μήνα· μήνυμα για ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ μόνο όταν &gt;30.</p>'
-    )
-    full_body = (intro_p + body_inner_html) if body_inner_html else ''
+    full_body = body_inner_html or ''
     return (
         f'<div id="totals-exceeded-wrap" class="totals-exceeded-wrap"{vis} role="region" '
         f'aria-label="Υπέρβαση πλαφόν ημερών">'
@@ -928,6 +942,68 @@ def _format_totals_exceeded_block(n_count: int, body_inner_html: str, visible: b
         f'</div>'
         f'<div id="totals-exceeded-modal-body" class="totals-exceeded-modal-body">{full_body}</div>'
         f'</div></div>'
+    )
+
+
+def _apodoxes_option_pairs(values):
+    """Ζεύγη (κωδικός, ετικέτα) για φίλτρο τύπου αποδοχών με περιγραφή."""
+    pairs = []
+    for v in values:
+        code = str(v).strip()
+        if not code:
+            continue
+        lookup = code
+        if len(code) == 1 and code.isdigit():
+            lookup = "0" + code
+        desc = (APODOXES_DESCRIPTIONS.get(code) or APODOXES_DESCRIPTIONS.get(lookup) or "").strip()
+        label = f"{code} – {desc}" if desc else code
+        pairs.append((code, label))
+    return pairs
+
+
+def _lite_filter_modal_group(
+    name,
+    options,
+    data_attr,
+    checkbox_name=None,
+    with_desc=False,
+    desc_map=None,
+):
+    """Modal-based φίλτρο Lite — checkboxes σε κρυφό store, πλήρες modal στο κλικ."""
+    if not options:
+        return ""
+    desc_map = desc_map or {}
+    cb_name = checkbox_name if checkbox_name is not None else name
+    if options and isinstance(options[0], tuple):
+        pairs = list(options)
+    else:
+        pairs = []
+        for v in options:
+            if with_desc:
+                desc = (desc_map.get(v) or "").strip()
+                label = f"{v} – {desc}" if desc else str(v)
+            else:
+                label = str(v)
+            pairs.append((v, label))
+    items_html = "".join(
+        f'<label class="filter-cb"><input type="checkbox" name="{html_mod.escape(cb_name)}" '
+        f'value="{html_mod.escape(str(val))}" data-attr="{html_mod.escape(data_attr)}">'
+        f'<span class="lite-filter-opt-label">{html_mod.escape(label)}</span></label>'
+        for val, label in pairs
+    )
+    return (
+        f'<div class="filter-group filter-modal-group" data-filter-name="{html_mod.escape(name)}" '
+        f'data-filter-key="{html_mod.escape(data_attr)}">'
+        f'<button type="button" class="filter-modal-trigger" aria-haspopup="dialog" '
+        f'title="Επιλέξτε {html_mod.escape(name)}">'
+        f'<span class="filter-modal-trigger-label">{html_mod.escape(name)}</span>'
+        f'<span class="filter-modal-badge" hidden aria-hidden="true"></span>'
+        f'</button>'
+        f'<div class="filter-selected-label" aria-live="polite"></div>'
+        f'<div class="filter-modal-store" hidden aria-hidden="true">'
+        f'<div class="filter-options">{items_html}</div>'
+        f'</div>'
+        f'</div>'
     )
 
 
@@ -968,32 +1044,12 @@ def build_totals_with_filters(display_summary, raw_df=None, desc_map=None,
         paketo_options.append((v, label))
     tameio_options = [(v, v) for v in tameio_vals]
     typos_options = [(v, v) for v in typos_vals]
-    apodochon_options = [(v, v) for v in apodochon_vals]
+    apodochon_options = _apodoxes_option_pairs(apodochon_vals)
 
-    def _dropdown(name, options, data_attr):
-        if not options:
-            return ""
-        items = "".join(
-            f'<label class="filter-cb"><input type="checkbox" name="{name}" '
-            f'value="{html_mod.escape(str(val))}" data-attr="{data_attr}">'
-            f'{html_mod.escape(label)}</label>'
-            for val, label in options
-        )
-        return (
-            f'<div class="filter-group filter-dropdown" data-filter-name="{html_mod.escape(name)}" data-filter-key="{html_mod.escape(data_attr)}">'
-            f'<div class="filter-dropdown-trigger" tabindex="0" role="button" '
-            f'aria-haspopup="listbox" aria-expanded="false" '
-            f'title="Επιλέξτε {html_mod.escape(name)}">'
-            f'{html_mod.escape(name)}</div>'
-            f'<div class="filter-dropdown-panel" role="listbox">'
-            f'<div class="filter-options">{items}</div></div>'
-            f'<div class="filter-selected-label" aria-live="polite"></div></div>'
-        )
-
-    paketo_filters = _dropdown("Πακέτο", paketo_options, "paketo")
-    tameio_filters = _dropdown("Ταμείο", tameio_options, "tameio")
-    typos_filters = _dropdown("Τύπος ασφάλισης", typos_options, "typos") if typos_options else ""
-    apodochon_filters = _dropdown("Τύπος αποδοχών", apodochon_options, "typosApod") if apodochon_options else ""
+    paketo_filters = _lite_filter_modal_group("Πακέτο", paketo_options, "paketo")
+    tameio_filters = _lite_filter_modal_group("Ταμείο", tameio_options, "tameio")
+    typos_filters = _lite_filter_modal_group("Τύπος ασφάλισης", typos_options, "typos") if typos_options else ""
+    apodochon_filters = _lite_filter_modal_group("Τύπος αποδοχών", apodochon_options, "typosApod") if apodochon_options else ""
     date_filters = (
         '<div class="filter-group">'
         '<input type="text" id="filter-apo" class="filter-date" placeholder="Από (ηη/μμ/εεεε)" maxlength="10">'
@@ -1039,8 +1095,13 @@ def build_totals_with_filters(display_summary, raw_df=None, desc_map=None,
                 cap_group_keys.append(tameio_col)
             if typos_col in raw_df.columns:
                 cap_group_keys.append(typos_col)
+            _cap_df = raw_df.copy()
+            for _col in ['Ημέρες', 'Μήνες', 'Έτη']:
+                if _col in _cap_df.columns:
+                    _cap_df[_col] = _cap_df[_col].apply(clean_numeric_value)
+            _cap_df = apply_negative_time_sign(_cap_df)
             _cap_result = compute_summary_capped_days_by_group(
-                raw_df, cap_group_keys, month_days=25, year_days=300, ika_month_days=31
+                _cap_df, cap_group_keys, month_days=25, year_days=300, ika_month_days=31
             )
             if isinstance(_cap_result, tuple):
                 _, exceeded_months = _cap_result
@@ -1318,21 +1379,50 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
     return{dk1:Math.round(dk1),dk3:Math.round(dk3),dk4:Math.round(dk4),dk5:Math.round(dk5),dk6:Math.round(dk6),dk7a:Math.round(dk7a),dk7b:Math.round(dk7b),dk7c:Math.round(dk7c)};
   }
 
+  function liteCollectChecked(sec,key){
+    var out=[],seen={};
+    function add(cb){
+      if(!cb||cb.type!=='checkbox'||!cb.checked)return;
+      if((cb.getAttribute('data-attr')||'')!==key)return;
+      if(seen[cb.value])return;
+      seen[cb.value]=1;out.push(cb.value);
+    }
+    if(sec)sec.querySelectorAll('.filter-modal-group[data-filter-key="'+key+'"] input[type="checkbox"]').forEach(add);
+    var m=document.getElementById('lite-filter-modal-options-mount');
+    if(m)m.querySelectorAll('input[type="checkbox"]').forEach(add);
+    return out;
+  }
+  function liteUncheckAllInSection(sec){
+    if(!sec)return;
+    sec.querySelectorAll('input[type="checkbox"]').forEach(function(cb){cb.checked=false;});
+    var m=document.getElementById('lite-filter-modal-options-mount');
+    if(m)m.querySelectorAll('input[type="checkbox"]').forEach(function(cb){cb.checked=false;});
+  }
+
   function apply(){
     var sec=document.getElementById('totals-section');if(!sec)return;
-    var pC=[],tC=[],tyC=[],etC=[];
-    sec.querySelectorAll('.totals-filters input[name="\\u03A0\\u03B1\\u03BA\\u03AD\\u03C4\\u03BF"]:checked').forEach(function(cb){pC.push(cb.value);});
-    sec.querySelectorAll('.totals-filters input[name="\\u03A4\\u03B1\\u03BC\\u03B5\\u03AF\\u03BF"]:checked').forEach(function(cb){tC.push(cb.value);});
-    sec.querySelectorAll('.totals-filters input[name="\\u03A4\\u03CD\\u03C0\\u03BF\\u03C2 \\u03B1\\u03C3\\u03C6\\u03AC\\u03BB\\u03B9\\u03C3\\u03B7\\u03C2"]:checked').forEach(function(cb){tyC.push(cb.value);});
-    sec.querySelectorAll('.totals-filters input[name="\\u03A4\\u03CD\\u03C0\\u03BF\\u03C2 \\u03B1\\u03C0\\u03BF\\u03B4\\u03BF\\u03C7\\u03CE\\u03BD"]:checked').forEach(function(cb){etC.push(cb.value);});
+    var pC=liteCollectChecked(sec,'paketo');
+    var tC=liteCollectChecked(sec,'tameio');
+    var tyC=liteCollectChecked(sec,'typos');
+    var etC=liteCollectChecked(sec,'typosApod');
 
     var sel={paketo:pC,tameio:tC,typos:tyC,typosApod:etC};
-    sec.querySelectorAll('.totals-filters .filter-dropdown').forEach(function(dd){
+    sec.querySelectorAll('.totals-filters .filter-modal-group').forEach(function(dd){
       var key=dd.getAttribute('data-filter-key');if(!key)return;
       var vals=sel[key]||[];
-      var tr=dd.querySelector('.filter-dropdown-trigger'),lb=dd.querySelector('.filter-selected-label');
-      var nm=dd.getAttribute('data-filter-name')||'';
-      if(tr)tr.textContent=nm;if(lb){if(vals.length){var esc=function(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;};lb.innerHTML=vals.map(function(v){return '<span class="filter-selected-chip">'+esc(v)+'</span>';}).join('');}else lb.textContent='';}
+      var lb=dd.querySelector('.filter-selected-label');
+      var badge=dd.querySelector('.filter-modal-badge');
+      if(badge){
+        if(vals.length){badge.textContent=vals.length;badge.hidden=false;dd.classList.add('has-selection');}
+        else{badge.hidden=true;badge.textContent='';dd.classList.remove('has-selection');}
+      }
+      if(lb){
+        if(vals.length){
+          var esc=function(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;};
+          var escA=function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');};
+          lb.innerHTML=vals.map(function(v){return '<button type="button" class="filter-selected-chip" data-value="'+escA(v)+'" data-filter-key="'+escA(key)+'" title="Αφαίρεση">'+esc(v)+'</button>';}).join('');
+        }else lb.textContent='';
+      }
     });
 
     var aV=(document.getElementById('filter-apo')||{value:''}).value.trim();
@@ -1448,8 +1538,7 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
             pp.push('\\u039C\\u03AE\\u03BD\\u03B1\\u03C2 '+ms+' '+e.y+': '+Math.round(e.days)+' \\u03B7\\u03BC\\u03AD\\u03C1\\u03B5\\u03C2 (\\u03CC\\u03C1\\u03B9\\u03BF '+e.limit+', \\u03C5\\u03C0\\u03AD\\u03C1\\u03B2\\u03B1\\u03C3\\u03B7 +'+ov+')');
             return esc(pp.join(' | '));
           });
-          var intro='<p class="totals-exceeded-modal-intro">\\u03A0\\u03BB\\u03B1\\u03C6\\u03CC\\u03BD: \\u0399\\u039A\\u0391 31 \\u03B7\\u03BC./\\u03BC\\u03AE\\u03BD\\u03B1, \\u0395\\u03A4\\u0391\\u0391-\\u03A4\\u0391\\u039D/\\u039A\\u0395\\u0391\\u0394 \\u03BA\\u03B1\\u03B9 \\u03C5\\u03C0\\u03CC\\u03BB\\u03BF\\u03B9\\u03C0\\u03B1 25 \\u03B7\\u03BC./\\u03BC\\u03AE\\u03BD\\u03B1\\u00B7 \\u03BC\\u03AE\\u03BD\\u03C5\\u03BC\\u03B1 \\u03B3\\u03B9\\u03B1 \\u0395\\u03A4\\u0391\\u0391-\\u03A4\\u0391\\u039D/\\u039A\\u0395\\u0391\\u0394 \\u03BC\\u03CC\\u03BD\\u03BF \\u03CC\\u03C4\\u03B1\\u03BD &gt;30.</p>';
-          bodyEl.innerHTML=intro+exL.join('<br>');
+          bodyEl.innerHTML=exL.join('<br>');
         }else{
           wrap.style.display='none';
           bodyEl.innerHTML='';
@@ -1505,14 +1594,9 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
   /* Bind events */
   var sec=document.getElementById('totals-section');
   if(sec){
-    sec.querySelectorAll('.totals-filters input').forEach(function(inp){inp.addEventListener('change',apply);});
+    window._liteFilterModalApply=window._liteFilterModalApply||{};window._liteFilterModalApply['totals-section']=apply;
     sec.querySelectorAll('.totals-filters input.filter-date').forEach(function(inp){inp.addEventListener('input',apply);inp.addEventListener('change',apply);});
-    sec.querySelectorAll('.totals-filters .filter-dropdown-trigger').forEach(function(tr){
-      tr.addEventListener('click',function(e){e.stopPropagation();var dd=tr.closest('.filter-dropdown');if(dd)dd.classList.toggle('open');tr.setAttribute('aria-expanded',dd&&dd.classList.contains('open')?'true':'false');});
-    });
-    document.addEventListener('click',function(){sec.querySelectorAll('.totals-filters .filter-dropdown.open').forEach(function(dd){dd.classList.remove('open');var t=dd.querySelector('.filter-dropdown-trigger');if(t)t.setAttribute('aria-expanded','false');});});
-    sec.querySelectorAll('.totals-filters .filter-dropdown-panel').forEach(function(p){p.addEventListener('click',function(e){e.stopPropagation();});});
-    var resetBtn=document.createElement('button');resetBtn.type='button';resetBtn.className='filter-reset-btn';resetBtn.textContent='\u21bb';resetBtn.title='Επαναφορά φίλτρων';resetBtn.setAttribute('aria-label','Επαναφορά φίλτρων');resetBtn.addEventListener('click',function(){sec.querySelectorAll('.totals-filters input[type="checkbox"]').forEach(function(cb){cb.checked=false;});var apo=document.getElementById('filter-apo');var eos=document.getElementById('filter-eos');if(apo)apo.value='';if(eos)eos.value='';sec.querySelectorAll('.totals-filters .filter-dropdown.open').forEach(function(dd){dd.classList.remove('open');});apply();});sec.querySelector('.totals-filters').appendChild(resetBtn);
+    var resetBtn=document.createElement('button');resetBtn.type='button';resetBtn.className='filter-reset-btn';resetBtn.textContent='\u21bb';resetBtn.title='Επαναφορά φίλτρων';resetBtn.setAttribute('aria-label','Επαναφορά φίλτρων');resetBtn.addEventListener('click',function(){liteUncheckAllInSection(sec);var apo=document.getElementById('filter-apo');var eos=document.getElementById('filter-eos');if(apo)apo.value='';if(eos)eos.value='';apply();});sec.querySelector('.totals-filters').appendChild(resetBtn);
   }
   (function(){
     var ov=document.getElementById('totals-exceeded-modal-overlay');
@@ -1588,31 +1672,13 @@ def _count_kind_metrics_by_klados_map(
     return out
 
 
-def _count_dropdown(name, options, data_attr, with_desc=False, desc_map=None):
-    """Dropdown για φίλτρα καταμέτρησης (ίδια δομή με totals)."""
-    if not options:
-        return ""
-    desc_map = desc_map or {}
-    items = []
-    for val in options:
-        if with_desc:
-            desc = (desc_map.get(val) or "").strip()
-            label = f"{val} – {desc}" if desc else val
-        else:
-            label = val
-        items.append(
-            f'<label class="filter-cb"><input type="checkbox" name="cnt-{html_mod.escape(data_attr)}" '
-            f'value="{html_mod.escape(str(val))}">'
-            f'{html_mod.escape(label)}</label>'
-        )
-    items_html = "".join(items)
-    return (
-        f'<div class="filter-group filter-dropdown" data-filter-name="{html_mod.escape(name)}" data-filter-key="{html_mod.escape(data_attr)}">'
-        f'<div class="filter-dropdown-trigger" tabindex="0">'
-        f'{html_mod.escape(name)}</div>'
-        f'<div class="filter-dropdown-panel">'
-        f'<div class="filter-options">{items_html}</div></div>'
-        f'<div class="filter-selected-label" aria-live="polite"></div></div>'
+def _count_filter_modal(name, options, data_attr, with_desc=False, desc_map=None):
+    """Modal φίλτρο καταμέτρησης (ίδια δομή με totals)."""
+    return _lite_filter_modal_group(
+        name, options, data_attr,
+        checkbox_name=f"cnt-{data_attr}",
+        with_desc=with_desc,
+        desc_map=desc_map,
     )
 
 
@@ -1653,26 +1719,26 @@ def build_count_with_filters(count_display_df, print_style_rows, count_df,
     apodoxes_col = next((c for c in count_df.columns if 'Τύπος Αποδοχών' in c or 'Αποδοχών' in c), None)
     apodoxes_vals = _vals(apodoxes_col) if apodoxes_col else []
 
-    filter_parts = [
-        _count_dropdown("Ταμείο", tameio_vals, "tameio"),
-        _count_dropdown("Τύπος Ασφάλισης", typos_vals, "typos"),
-        _count_dropdown("Εργοδότης", employer_vals, "employer"),
-        _count_dropdown("Κλάδος/Πακέτο", klados_vals, "klados", with_desc=True, desc_map=desc_map),
-        _count_dropdown("Τύπος Αποδοχών", apodoxes_vals, "apodoxes"),
-        '<div class="filter-group">'
-        '<input type="number" id="cnt-filter-from" class="filter-date" placeholder="Από (έτος) π.χ. 1993" min="1900" max="2100" style="width:90px;">'
-        '</div>'
-        '<div class="filter-group">'
-        '<input type="number" id="cnt-filter-to" class="filter-date" placeholder="Έως (έτος) π.χ. 2024" min="1900" max="2100" style="width:90px;">'
-        '</div>'
-        '<div class="filter-group count-filter-cb-stack">'
-        '<label class="filter-cb">'
-        '<input type="checkbox" id="cnt-totals-only"> Ετήσια σύνολα'
-        '</label>'
-        '<label class="filter-cb">'
-        '<input type="checkbox" id="cnt-year-sparse"> Αραιή'
-        '</label></div>',
-    ]
+    _cnt_dd_tameio = _count_filter_modal("Ταμείο", tameio_vals, "tameio")
+    _cnt_dd_typos = _count_filter_modal("Τύπος Ασφάλισης", typos_vals, "typos")
+    _cnt_dd_employer = _count_filter_modal("Εργοδότης", employer_vals, "employer")
+    _cnt_dd_klados = _count_filter_modal(
+        "Κλάδος/Πακέτο", klados_vals, "klados", with_desc=True, desc_map=desc_map
+    )
+    _cnt_apodoxes_dd = _count_filter_modal(
+        "Τύπος Αποδοχών", _apodoxes_option_pairs(apodoxes_vals), "apodoxes"
+    )
+    _cnt_preset_btns = (
+        '<button type="button" class="count-preset-btn" data-cnt-preset="from_2002" '
+        'data-cnt-from="01/01/2002" data-cnt-from-only="1" '
+        'title="Συμπλήρωση «Από» με 01/01/2002 — ξανά κλικ για επαναφορά ημερομηνιών">Από 1/1/2002</button>'
+        '<button type="button" class="count-preset-btn" data-cnt-preset="range_2002_2014" '
+        'data-cnt-from="01/01/2002" data-cnt-to="31/12/2014" '
+        'title="Φίλτρο 01/01/2002 – 31/12/2014 — ξανά κλικ για επαναφορά ημερομηνιών">1/1/2002 – 31/12/2014</button>'
+        '<button type="button" class="count-preset-btn" data-cnt-preset="range_2009_2013" '
+        'data-cnt-from="01/01/2009" data-cnt-to="31/12/2013" '
+        'title="Φίλτρο 01/01/2009 – 31/12/2013 — ξανά κλικ για επαναφορά ημερομηνιών">1/1/2009 – 31/12/2013</button>'
+    )
     # Ένα μόνο κουμπί reset (στατικό HTML)· όχι appendChild από JS — αποφεύγει διπλό κουμπί αν τρέξει δύο φορές το script.
     _cnt_reset_btn = (
         '<button type="button" class="filter-reset-btn" id="cnt-filter-reset" '
@@ -1680,9 +1746,29 @@ def build_count_with_filters(count_display_df, print_style_rows, count_df,
     )
     filter_bar = (
         '<div class="count-filters" id="count-filters-bar">'
-        + "".join(f for f in filter_parts if f)
-        + _cnt_reset_btn
-        + "</div>"
+        '<div class="count-filters-grid">'
+        f'{_cnt_dd_tameio}{_cnt_dd_typos}{_cnt_dd_employer}{_cnt_dd_klados}'
+        f'<div class="cnt-grid-apodox">{_cnt_apodoxes_dd}</div>'
+        '<div class="cnt-grid-from">'
+        '<input type="text" id="cnt-filter-from" class="filter-date" '
+        'placeholder="01/01/2000" aria-label="Από (dd/mm/yyyy)" autocomplete="off">'
+        '</div>'
+        '<div class="cnt-grid-to">'
+        '<input type="text" id="cnt-filter-to" class="filter-date" '
+        'placeholder="31/12/2020" aria-label="Έως (dd/mm/yyyy)" autocomplete="off">'
+        '</div>'
+        f'<div class="cnt-grid-reset">{_cnt_reset_btn}</div>'
+        '<div class="cnt-grid-cbs count-filter-cb-stack">'
+        '<label class="filter-cb">'
+        '<input type="checkbox" id="cnt-year-sparse"> Αραιή'
+        '</label>'
+        '<label class="filter-cb">'
+        '<input type="checkbox" id="cnt-totals-only"> Ετήσια σύνολα'
+        '</label>'
+        '</div>'
+        f'<div id="count-date-presets-bar" class="count-date-presets-bar cnt-grid-preset">{_cnt_preset_btns}</div>'
+        '</div>'
+        '</div>'
     )
 
     warning_types = warning_types or []
@@ -1960,22 +2046,67 @@ def _build_count_filter_js():
     });
   });
 
+  function cntParseDate(s){
+    if(!s)return null;
+    var t=String(s).trim();
+    if(!t)return null;
+    var m=t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if(m)return new Date(parseInt(m[3],10),parseInt(m[2],10)-1,parseInt(m[1],10));
+    var y=parseInt(t,10);
+    if(!isNaN(y)&&y>=1000&&y<=9999)return new Date(y,0,1);
+    return null;
+  }
+  function cntYearFromInput(id,fallback){
+    var el=document.getElementById(id);
+    if(!el)return fallback;
+    var d=cntParseDate(el.value);
+    if(d)return d.getFullYear();
+    return fallback;
+  }
+
+  function liteCollectChecked(sec,key){
+    var out=[],seen={};
+    function add(cb){
+      if(!cb||cb.type!=='checkbox'||!cb.checked)return;
+      if((cb.getAttribute('data-attr')||'')!==key)return;
+      if(seen[cb.value])return;
+      seen[cb.value]=1;out.push(cb.value);
+    }
+    if(sec)sec.querySelectorAll('.filter-modal-group[data-filter-key="'+key+'"] input[type="checkbox"]').forEach(add);
+    var m=document.getElementById('lite-filter-modal-options-mount');
+    if(m)m.querySelectorAll('input[type="checkbox"]').forEach(add);
+    return out;
+  }
+  function liteUncheckAllInSection(sec){
+    if(!sec)return;
+    sec.querySelectorAll('input[type="checkbox"]').forEach(function(cb){cb.checked=false;});
+    var m=document.getElementById('lite-filter-modal-options-mount');
+    if(m)m.querySelectorAll('input[type="checkbox"]').forEach(function(cb){cb.checked=false;});
+  }
+
   function apply(){
     var f={tameio:[],typos:[],employer:[],klados:[],apodoxes:[]};
     ['tameio','typos','employer','klados','apodoxes'].forEach(function(attr){
-      sec.querySelectorAll('input[name="cnt-'+attr+'"]:checked').forEach(function(cb){f[attr].push(cb.value);});
+      f[attr]=liteCollectChecked(sec,attr);
     });
-    sec.querySelectorAll('.count-filters .filter-dropdown').forEach(function(dd){
+    sec.querySelectorAll('.count-filters .filter-modal-group').forEach(function(dd){
       var key=dd.getAttribute('data-filter-key');
       if(!key)return;
-      var vals=f[key];
+      var vals=f[key]||[];
       var label=dd.querySelector('.filter-selected-label');
+      var badge=dd.querySelector('.filter-modal-badge');
+      if(badge){
+        if(vals.length){badge.textContent=vals.length;badge.hidden=false;dd.classList.add('has-selection');}
+        else{badge.hidden=true;badge.textContent='';dd.classList.remove('has-selection');}
+      }
       if(!label)return;
       if(vals.length===0){ label.textContent=''; return; }
-      var esc=function(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;};label.innerHTML=vals.map(function(v){return '<span class="filter-selected-chip">'+esc(v)+'</span>';}).join('');
+      var esc=function(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;};
+      var escA=function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');};
+      label.innerHTML=vals.map(function(v){return '<button type="button" class="filter-selected-chip" data-value="'+escA(v)+'" data-filter-key="'+escA(key)+'" title="Αφαίρεση">'+esc(v)+'</button>';}).join('');
     });
-    var fromY=parseInt((document.getElementById('cnt-filter-from')||{}).value,10)||0;
-    var toY=parseInt((document.getElementById('cnt-filter-to')||{}).value,10)||9999;
+    var fromY=cntYearFromInput('cnt-filter-from',0);
+    var toY=cntYearFromInput('cnt-filter-to',9999);
     var totOnly=document.getElementById('cnt-totals-only')&&document.getElementById('cnt-totals-only').checked;
     var sparseGap=document.getElementById('cnt-year-sparse')&&document.getElementById('cnt-year-sparse').checked;
     sec.classList.toggle('count-year-sparse', !!sparseGap);
@@ -2127,13 +2258,56 @@ def _build_count_filter_js():
     })();
   }
 
+  window._liteFilterModalApply=window._liteFilterModalApply||{};window._liteFilterModalApply['count-section']=apply;
   ['cnt-filter-from','cnt-filter-to','cnt-totals-only','cnt-year-sparse'].forEach(function(id){var el=document.getElementById(id);if(el)el.addEventListener('input',apply);if(el)el.addEventListener('change',apply);});
-  sec.querySelectorAll('.count-filters input[type="checkbox"]').forEach(function(cb){cb.addEventListener('change',apply);});
-  document.addEventListener('click',function(){sec.querySelectorAll('.count-filters .filter-dropdown.open').forEach(function(o){o.classList.remove('open');});});
-  sec.querySelectorAll('.count-filters .filter-dropdown-panel').forEach(function(p){p.addEventListener('click',function(e){e.stopPropagation();});});
-  sec.querySelectorAll('.count-filters .filter-dropdown').forEach(function(dd){var tr=dd.querySelector('.filter-dropdown-trigger');if(tr){tr.addEventListener('click',function(e){e.stopPropagation();dd.classList.toggle('open');sec.querySelectorAll('.count-filters .filter-dropdown').forEach(function(other){if(other!==dd)other.classList.remove('open');});});}});
   var rb=document.getElementById('cnt-filter-reset');
-  if(rb)rb.addEventListener('click',function(){sec.querySelectorAll('.count-filters input[type="checkbox"]').forEach(function(cb){cb.checked=false;});var fromEl=document.getElementById('cnt-filter-from');var toEl=document.getElementById('cnt-filter-to');var totOnly=document.getElementById('cnt-totals-only');var sparseEl=document.getElementById('cnt-year-sparse');if(fromEl)fromEl.value='';if(toEl)toEl.value='';if(totOnly)totOnly.checked=false;if(sparseEl)sparseEl.checked=false;sec.querySelectorAll('.count-filters .filter-dropdown.open').forEach(function(o){o.classList.remove('open');});apply();});
+  if(rb)rb.addEventListener('click',function(){liteUncheckAllInSection(sec);var fromEl=document.getElementById('cnt-filter-from');var toEl=document.getElementById('cnt-filter-to');var totOnly=document.getElementById('cnt-totals-only');var sparseEl=document.getElementById('cnt-year-sparse');if(fromEl)fromEl.value='';if(toEl)toEl.value='';if(totOnly)totOnly.checked=false;if(sparseEl)sparseEl.checked=false;cntClearPresetActive();apply();});
+  function cntClearPresetActive(){
+    sec.querySelectorAll('#count-date-presets-bar .count-preset-btn.active').forEach(function(b){b.classList.remove('active');});
+  }
+  function cntSyncPresetActiveFromInputs(){
+    var fromEl=document.getElementById('cnt-filter-from');
+    var toEl=document.getElementById('cnt-filter-to');
+    var fromV=(fromEl&&fromEl.value||'').trim();
+    var toV=(toEl&&toEl.value||'').trim();
+    var match=null;
+    sec.querySelectorAll('#count-date-presets-bar .count-preset-btn').forEach(function(btn){
+      var pk=btn.getAttribute('data-cnt-preset')||'';
+      var fromOnly=btn.getAttribute('data-cnt-from-only')==='1';
+      var expFrom=btn.getAttribute('data-cnt-from')||'';
+      var expTo=btn.getAttribute('data-cnt-to')||'';
+      if(fromOnly&&fromV===expFrom)match=btn;
+      else if(!fromOnly&&fromV===expFrom&&toV===expTo)match=btn;
+    });
+    cntClearPresetActive();
+    if(match)match.classList.add('active');
+  }
+  sec.querySelectorAll('#count-date-presets-bar .count-preset-btn').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      var fromEl=document.getElementById('cnt-filter-from');
+      var toEl=document.getElementById('cnt-filter-to');
+      var fromV=btn.getAttribute('data-cnt-from')||'';
+      var toV=btn.getAttribute('data-cnt-to')||'';
+      var fromOnly=btn.getAttribute('data-cnt-from-only')==='1';
+      if(btn.classList.contains('active')){
+        if(fromEl)fromEl.value='';
+        if(toEl)toEl.value='';
+        btn.classList.remove('active');
+      }else{
+        cntClearPresetActive();
+        if(fromEl&&fromV)fromEl.value=fromV;
+        if(!fromOnly&&toEl&&toV)toEl.value=toV;
+        btn.classList.add('active');
+      }
+      apply();
+    });
+  });
+  ['cnt-filter-from','cnt-filter-to'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(!el)return;
+    el.addEventListener('input',cntSyncPresetActiveFromInputs);
+    el.addEventListener('change',cntSyncPresetActiveFromInputs);
+  });
   apply();
 })();
 """
@@ -2161,15 +2335,30 @@ def build_report_tab_entries(df, description_map=None):
     )
     count_display_df, _, _, _, print_style_rows = build_count_report(
         count_df, description_map=description_map, show_count_totals_only=False,
+        force_insurance_type_subtotals=True,
     )
 
     show_complex_warning = False
     complex_modal_body_html = ""
     try:
-        n_agg, n_limits_25, n_unpaid = compute_complex_file_metrics(df)
-        show_complex_warning = should_show_complex_file_warning(n_agg, n_limits_25, n_unpaid)
+        _metrics = compute_complex_file_metrics(df)
+        if len(_metrics) >= 4:
+            n_agg, n_limits_25, n_unpaid, n_negative = _metrics[:4]
+        else:
+            n_agg, n_limits_25, n_unpaid = _metrics[:3]
+            _neg_df = find_negative_entries(df)
+            n_negative = len(_neg_df) if _neg_df is not None and not _neg_df.empty else 0
+        try:
+            show_complex_warning = should_show_complex_file_warning(
+                n_agg, n_limits_25, n_unpaid, n_negative
+            )
+        except TypeError:
+            show_complex_warning = (
+                should_show_complex_file_warning(n_agg, n_limits_25, n_unpaid)
+                or n_negative > 0
+            )
         if show_complex_warning:
-            _secs = _html_build_complex_file_modal_sections(n_agg, n_limits_25, n_unpaid)
+            _secs = _html_build_complex_file_modal_sections(n_agg, n_limits_25, n_unpaid, n_negative)
             complex_modal_body_html = _viewer_synopsis_blocks_html(_secs)
     except Exception:
         pass
@@ -2574,6 +2763,7 @@ def build_viewer_html_document(
 <div id="toast-container"></div>
 <div id="apodoxes-tooltip" class="apodoxes-tooltip" aria-hidden="true"></div>
 <div id="tl-paketo-tooltip" class="apodoxes-tooltip" aria-hidden="true"></div>
+{LITE_FILTER_MODAL_HTML}
 <script>
 var _apodoxesDescriptions = {apodoxes_js};
 var _printHtml = {print_js};
@@ -2583,6 +2773,9 @@ var _downloadFilename = {download_filename_js};
 var _printBrandSuffix = {print_brand_suffix_js};
 var _fullSaveSuffix = {full_save_suffix_js};
 {VIEWER_JS}
+</script>
+<script>
+{LITE_FILTER_MODAL_JS}
 </script>
 {SYNOPSIS_MODAL_HTML}
 <script>
@@ -2739,6 +2932,9 @@ table.print-table tbody tr.total-row td { background: #dbeafe !important; font-w
 #count-tables-wrapper table.print-table tbody tr[data-is-total="1"] td { background: #f5fafc !important; color: #000 !important; font-weight: 700 !important; border-top: 1px solid #c8dce8; }
 #count-tables-wrapper table.print-table tbody td.copy-target { transition: background-color 0.18s ease, box-shadow 0.18s ease; }
 #count-tables-wrapper table.print-table tbody td.copy-target:hover { background-color: rgba(99, 102, 241, 0.14) !important; box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.38); }
+/* Ομοιόμορφη/responsive κατανομή στηλών στην Καταμέτρηση (ίδια λογική με full screen): αγνόηση των fixed πλατών του colgroup */
+#count-tables-wrapper table.print-table { table-layout: auto; }
+#count-tables-wrapper table.print-table colgroup col { width: auto !important; }
 table.print-table tbody td:nth-last-child(2),
 table.print-table tbody td:nth-last-child(3) { font-weight: 700 !important; }
 table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { white-space: normal; word-break: break-word; }
@@ -2835,9 +3031,9 @@ body { overflow-x: hidden; }
 .main-content .totals-filters .filter-label,
 .main-content .count-filters .filter-label { color: #1e293b; }
 .main-content .totals-filters .filter-cb,
-.main-content .totals-filters .filter-dropdown-trigger,
+.main-content .totals-filters .filter-modal-trigger,
 .main-content .count-filters .filter-cb,
-.main-content .count-filters .filter-dropdown-trigger { color: #1e293b; }
+.main-content .count-filters .filter-modal-trigger { color: #1e293b; }
 .main-content .filter-selected-label { color: #1e293b; }
 .main-content .date-key-title { color: #111827; }
 .main-content .date-key-label { color: #334155; }
@@ -3134,7 +3330,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .table-fullscreen .count-layout { display: flex !important; flex-direction: column !important; height: 100% !important; }
 .table-fullscreen .count-layout-middle { flex: 1 !important; min-height: 0 !important; overflow: auto !important; }
 .table-fullscreen #count-section { display: flex !important; flex-direction: column !important; height: 100% !important; }
-#count-section h2, #count-section .print-description, #count-section .count-filters, #count-section .count-kind-metrics { flex-shrink: 0; }
+#count-section h2, #count-section .print-description, #count-section .count-filters, #count-section .count-date-presets-bar, #count-section .count-kind-metrics { flex-shrink: 0; }
 #count-section .count-kind-metrics { margin-top: 12px; }
 #count-tables-wrapper .year-section { margin-bottom: 20px; }
 #count-section.count-year-sparse #count-tables-wrapper .year-section { margin-bottom: 80px; }
@@ -3156,7 +3352,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .apodoxes-tooltip.visible { opacity: 1; visibility: visible; transform: translateY(0); }
 .has-apodoxes-tooltip { cursor: help; }
 .cell-description { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
-@media print { .section-actions { display: none !important; } .btn-fs { display: none !important; } .btn-print-tab { display: none !important; } .apodoxes-tooltip { display: none !important; } #tl-paketo-tooltip { display: none !important; } .complex-file-warning { display: none !important; } .atlas-tabinfo-btn { display: none !important; } .complex-file-readmore-btn { display: none !important; } .totals-info-bar { display: none !important; } .totals-exceeded-wrap, .totals-exceeded-modal-overlay { display: none !important; } .lite-exclusion-note { display: none !important; } .tl-zoom-controls { display: none !important; } #tl-zoom-inner, #tl-paketo-zoom-inner { transform: none !important; } .tl-zoom-wrapper, .tl-paketo-zoom-scroll { overflow-x: hidden !important; } .personal-form { display: none !important; } .personal-notes { display: none !important; } .synopsis-modal-overlay, .synopsis-expand-btn { display: none !important; } }
+@media print { .section-actions { display: none !important; } .btn-fs { display: none !important; } .btn-print-tab { display: none !important; } .apodoxes-tooltip { display: none !important; } #tl-paketo-tooltip { display: none !important; } .totals-filters { display: none !important; } .count-filters { display: none !important; } .count-date-presets-bar { display: none !important; } .totals-info-bar { display: none !important; } .totals-exceeded-wrap, .totals-exceeded-modal-overlay { display: none !important; } .lite-filter-modal-overlay { display: none !important; } .complex-file-warning { display: none !important; } .atlas-tabinfo-btn { display: none !important; } .complex-file-readmore-btn { display: none !important; } .lite-exclusion-note { display: none !important; } .tl-zoom-controls { display: none !important; } #tl-zoom-inner, #tl-paketo-zoom-inner { transform: none !important; } .tl-zoom-wrapper, .tl-paketo-zoom-scroll { overflow-x: hidden !important; } .personal-form { display: none !important; } .personal-notes { display: none !important; } .synopsis-modal-overlay, .synopsis-expand-btn { display: none !important; } }
 .year-section { margin-bottom: 20px; }
 .year-heading { font-size: 15px; font-weight: 800; color: #1e293b; padding: 8px 0 4px 0; border-bottom: 2px solid #6366f1; margin-bottom: 6px; }
 .print-disclaimer { font-size: 12px; color: #64748b; margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; line-height: 1.6; }
@@ -3336,18 +3532,30 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .totals-filters .filter-date:focus { border: 1px solid #6366f1 !important; outline: none !important; box-shadow: none !important; }
 .totals-filters input.filter-date:hover { border-color: #6366f1 !important; }
 .totals-filters input.filter-date:focus { border: 1px solid #6366f1 !important; outline: none !important; box-shadow: none !important; }
-.totals-filters .filter-dropdown { position: relative; }
-.totals-filters .filter-dropdown-trigger { display: inline-flex; align-items: center; min-width: 200px; padding: 10px 14px; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 16px; color: #334155; cursor: pointer; user-select: none; }
-.totals-filters .filter-dropdown-trigger:hover { border-color: #6366f1; }
-.totals-filters .filter-dropdown-trigger::after { content: ''; margin-left: auto; border: 6px solid transparent; border-top-color: #64748b; }
-.totals-filters .filter-dropdown-panel { display: none; position: absolute; top: 100%; left: 0; margin-top: 4px; min-width: 280px; max-height: 320px; overflow-y: auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.12); z-index: 100; }
-.totals-filters .filter-dropdown.open .filter-dropdown-panel { display: block; }
-.totals-filters .filter-dropdown.open .filter-dropdown-trigger { border-color: #6366f1; }
-.totals-filters .filter-dropdown .filter-options { max-height: 280px; flex-direction: column; flex-wrap: nowrap; padding: 10px 12px; gap: 12px; }
-.totals-filters .filter-dropdown .filter-cb { white-space: normal; padding: 6px 0; min-height: 2em; align-items: flex-start; }
-.count-filters { display: flex; flex-wrap: wrap; gap: 20px 22px; margin-bottom: 20px; padding: 16px 20px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; align-items: flex-start; align-content: center; }
+.totals-filters .filter-modal-group { min-width: 160px; flex: 1 1 180px; max-width: 320px; }
+.totals-filters .filter-modal-trigger { display: inline-flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; min-width: 0; padding: 10px 14px; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 16px; color: #334155; cursor: pointer; user-select: none; font-family: inherit; text-align: left; transition: border-color .15s, background .15s, color .15s; }
+.totals-filters .filter-modal-trigger:hover { border-color: #6366f1; color: #4f46e5; background: #eef2ff; }
+.totals-filters .filter-modal-group.has-selection .filter-modal-trigger { border-color: #6366f1; background: #eef2ff; color: #4338ca; }
+.totals-filters .filter-modal-trigger-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.totals-filters .filter-modal-badge { flex-shrink: 0; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; background: #6366f1; color: #fff; font-size: 12px; font-weight: 700; line-height: 22px; text-align: center; }
+.count-filters { margin-bottom: 20px; padding: 16px 20px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
+.count-filters-grid { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)) minmax(170px, 1.15fr) 118px 118px auto; grid-template-rows: auto auto; gap: 12px 14px; align-items: start; }
+.count-filters-grid > .filter-modal-group:nth-child(1) { grid-column: 1; grid-row: 1; }
+.count-filters-grid > .filter-modal-group:nth-child(2) { grid-column: 2; grid-row: 1; }
+.count-filters-grid > .filter-modal-group:nth-child(3) { grid-column: 3; grid-row: 1; }
+.count-filters-grid > .filter-modal-group:nth-child(4) { grid-column: 4; grid-row: 1; }
+.count-filters-grid > .cnt-grid-apodox { grid-column: 5; grid-row: 1; min-width: 0; }
+.count-filters-grid > .cnt-grid-from { grid-column: 6; grid-row: 1; min-width: 0; }
+.count-filters-grid > .cnt-grid-to { grid-column: 7; grid-row: 1; min-width: 0; }
+.count-filters-grid > .cnt-grid-reset { grid-column: 8; grid-row: 1; justify-self: end; align-self: center; }
+.count-filters-grid > .cnt-grid-cbs { grid-column: 1 / 5; grid-row: 2; display: flex; flex-direction: row; flex-wrap: wrap; gap: 16px 24px; align-items: center; align-self: center; }
+.count-filters-grid > .cnt-grid-preset { grid-column: 5 / 8; grid-row: 2; }
+.count-filters-grid .filter-modal-group { min-width: 0; }
+.count-filters-grid .filter-modal-trigger { min-width: 0; width: 100%; box-sizing: border-box; }
+.count-filters-grid .filter-date { width: 100%; box-sizing: border-box; min-width: 0; }
+.count-filters-grid .cnt-grid-reset .filter-reset-btn { margin-left: 0; }
 .count-filters .filter-group { display: flex; flex-direction: column; gap: 10px; }
-.count-filters .count-filter-cb-stack { gap: 4px; flex-shrink: 0; }
+.count-filters .count-filter-cb-stack { flex-shrink: 0; }
 .count-filters .count-filter-cb-stack .filter-cb { white-space: nowrap; line-height: 1.3; }
 .count-filters .filter-label { font-size: 13px; font-weight: 400; color: #1e293b; }
 .count-filters .filter-cb { display: flex; align-items: center; gap: 10px; font-size: 16px; color: #334155; cursor: pointer; white-space: nowrap; line-height: 1.4; }
@@ -3357,17 +3565,51 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .count-filters .filter-date:focus { border: 1px solid #6366f1 !important; outline: none !important; box-shadow: none !important; }
 .count-filters input.filter-date:hover { border-color: #6366f1 !important; }
 .count-filters input.filter-date:focus { border: 1px solid #6366f1 !important; outline: none !important; box-shadow: none !important; }
-.count-filters .filter-dropdown { position: relative; }
-.count-filters .filter-dropdown-trigger { display: inline-flex; align-items: center; min-width: 200px; padding: 10px 14px; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 16px; color: #334155; cursor: pointer; user-select: none; }
-.count-filters .filter-dropdown-trigger:hover { border-color: #6366f1; }
-.count-filters .filter-dropdown-trigger::after { content: ''; margin-left: auto; border: 6px solid transparent; border-top-color: #64748b; }
-.count-filters .filter-dropdown-panel { display: none; position: absolute; top: 100%; left: 0; margin-top: 4px; min-width: 280px; max-height: 320px; overflow-y: auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.12); z-index: 100; }
-.count-filters .filter-dropdown.open .filter-dropdown-panel { display: block; }
-.count-filters .filter-dropdown.open .filter-dropdown-trigger { border-color: #6366f1; }
-.count-filters .filter-dropdown .filter-options { max-height: 280px; flex-direction: column; flex-wrap: nowrap; padding: 10px 12px; gap: 12px; }
-.count-filters .filter-dropdown .filter-cb { white-space: normal; padding: 6px 0; min-height: 2em; align-items: flex-start; }
+.count-date-presets-bar { display: grid; grid-template-columns: 118px minmax(170px, 1.15fr) minmax(130px, 1fr); gap: 10px 14px; margin: 0; padding: 0; width: 100%; }
+.count-date-presets-bar .count-preset-btn { width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 13px; line-height: 1.25; border-radius: 6px; border: 1px solid #cbd5e1; background: #fff; color: #334155; cursor: pointer; font-family: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background .15s, border-color .15s, color .15s; }
+.count-date-presets-bar .count-preset-btn:hover { border-color: #6366f1; color: #4f46e5; background: #eef2ff; }
+.count-date-presets-bar .count-preset-btn.active { border-color: #6366f1; background: #6366f1; color: #fff; }
+.count-date-presets-bar .count-preset-btn.active:hover { border-color: #4f46e5; background: #4f46e5; color: #fff; }
+@media (max-width: 1280px) {
+.count-filters-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+.count-filters-grid > .filter-modal-group:nth-child(n) { grid-column: auto; grid-row: auto; }
+.count-filters-grid > .cnt-grid-apodox, .count-filters-grid > .cnt-grid-from, .count-filters-grid > .cnt-grid-to { grid-column: auto; grid-row: auto; }
+.count-filters-grid > .cnt-grid-reset { grid-column: auto; grid-row: auto; justify-self: end; }
+.count-filters-grid > .cnt-grid-cbs { grid-column: 1 / -1; grid-row: auto; }
+.count-filters-grid > .cnt-grid-preset { grid-column: 1 / -1; }
+.count-date-presets-bar { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
+}
+.count-filters .filter-modal-group { position: relative; }
+.count-filters .filter-modal-trigger { display: inline-flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 10px 14px; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 16px; color: #334155; cursor: pointer; user-select: none; font-family: inherit; text-align: left; transition: border-color .15s, background .15s, color .15s; }
+.count-filters .filter-modal-trigger:hover { border-color: #6366f1; color: #4f46e5; background: #eef2ff; }
+.count-filters .filter-modal-group.has-selection .filter-modal-trigger { border-color: #6366f1; background: #eef2ff; color: #4338ca; }
+.count-filters .filter-modal-trigger-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.count-filters .filter-modal-badge { flex-shrink: 0; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; background: #6366f1; color: #fff; font-size: 12px; font-weight: 700; line-height: 22px; text-align: center; }
 .filter-selected-label { font-size: 1.3em; font-weight: 700; color: #334155; margin-top: 6px; line-height: 1.3; min-height: 1.3em; display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; overflow-x: auto; }
-.filter-selected-chip { display: inline-block; padding: 4px 10px; background: #dc3545; border: none; border-radius: 5px; color: #fff; font-size: 12.6px; font-weight: 400; }
+.filter-selected-chip { display: inline-block; padding: 4px 10px; background: #dc3545; border: none; border-radius: 5px; color: #fff; font-size: 12.6px; font-weight: 400; cursor: pointer; font-family: inherit; transition: background .15s; }
+.filter-selected-chip:hover { background: #b02a37; }
+.filter-selected-chip::after { content: ' ×'; font-weight: 700; opacity: 0.9; }
+.lite-filter-modal-overlay { position: fixed; inset: 0; z-index: 99996; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: rgba(15, 23, 42, 0.55); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.25s ease, visibility 0.25s ease; }
+.lite-filter-modal-overlay.is-open { opacity: 1; visibility: visible; pointer-events: auto; }
+.lite-filter-modal-panel { width: min(720px, 100%); max-height: min(85vh, 880px); display: flex; flex-direction: column; background: #fff; border-radius: 16px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(148, 163, 184, 0.15); overflow: hidden; transform: scale(0.96) translateY(12px); transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.lite-filter-modal-overlay.is-open .lite-filter-modal-panel { transform: scale(1) translateY(0); }
+.lite-filter-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 22px 26px 18px; border-bottom: 1px solid #e2e8f0; background: linear-gradient(180deg, #eef2ff 0%, #fff 100%); flex-shrink: 0; }
+.lite-filter-modal-head h3 { margin: 0; font-size: 24px; font-weight: 800; color: #1e293b; line-height: 1.35; letter-spacing: -0.01em; }
+.lite-filter-modal-close { flex-shrink: 0; width: 44px; height: 44px; border: none; border-radius: 10px; background: #e0e7ff; color: #4338ca; font-size: 32px; line-height: 1; cursor: pointer; transition: background 0.2s, color 0.2s; }
+.lite-filter-modal-close:hover { background: #c7d2fe; color: #312e81; }
+.lite-filter-modal-toolbar { padding: 16px 26px 0; flex-shrink: 0; }
+.lite-filter-modal-search { width: 100%; box-sizing: border-box; padding: 12px 16px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 17px; font-family: inherit; color: #1e293b; }
+.lite-filter-modal-search:focus { border-color: #6366f1; outline: none; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15); }
+.lite-filter-modal-search::placeholder { color: #64748b; }
+.lite-filter-modal-body { flex: 1; min-height: 0; overflow: auto; padding: 18px 28px 22px; -webkit-overflow-scrolling: touch; }
+#lite-filter-modal-options-mount .filter-options { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 8px; padding: 0; max-height: none; }
+#lite-filter-modal-options-mount .filter-cb { display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 20px; align-items: center; white-space: normal; padding: 14px 16px; min-height: 3em; border-radius: 10px; transition: background .12s; font-size: 17px; line-height: 1.45; color: #1e293b; font-weight: 500; cursor: pointer; }
+#lite-filter-modal-options-mount .filter-cb:hover { background: #f1f5f9; }
+#lite-filter-modal-options-mount .filter-cb input[type="checkbox"] { width: 28px; height: 28px; min-width: 28px; min-height: 28px; margin: 0; padding: 0; cursor: pointer; accent-color: #6366f1; justify-self: center; align-self: center; }
+#lite-filter-modal-options-mount .filter-cb .lite-filter-opt-label { display: block; min-width: 0; line-height: 1.45; letter-spacing: 0.01em; }
+.lite-filter-modal-foot { display: flex; justify-content: flex-start; gap: 10px; padding: 16px 26px 22px; border-top: 1px solid #e2e8f0; background: #f8fafc; flex-shrink: 0; }
+.lite-filter-modal-btn { padding: 11px 20px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; color: #334155; font-size: 16px; font-weight: 600; cursor: pointer; font-family: inherit; transition: border-color .15s, background .15s, color .15s; }
+.lite-filter-modal-btn:hover { border-color: #6366f1; color: #4f46e5; background: #eef2ff; }
 .filter-reset-btn { margin-left: auto; padding: 9px 11px; font-size: 20px; line-height: 1; border-radius: 6px; border: 1px solid #cbd5e1; background: #fff; color: #6366f1; cursor: pointer; font-family: inherit; }
 .filter-reset-btn:hover { border-color: #6366f1; color: #4f46e5; background: #eef2ff; }
 #count-section { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
@@ -3392,6 +3634,9 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 #count-tables-wrapper table.print-table tbody td.copy-target:active {
   background-color: rgba(99, 102, 241, 0.24) !important;
 }
+/* Ομοιόμορφη/responsive κατανομή στηλών στην Καταμέτρηση (ίδια λογική με full screen): αγνόηση των fixed πλατών του colgroup */
+#count-tables-wrapper table.print-table { table-layout: auto; }
+#count-tables-wrapper table.print-table colgroup col { width: auto !important; }
 .date-key-panel { margin-top: 24px; padding: 20px 24px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; }
 .date-key-title { font-size: 16px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
 .date-key-desc { font-size: 12px; color: #64748b; margin-bottom: 16px; font-style: italic; }
@@ -3431,6 +3676,160 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .personal-notes textarea { padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 16px; font-family: inherit; color: #334155; background: #fff; min-height: 180px; resize: vertical; }
 .personal-notes textarea:hover, .personal-notes textarea:focus { border-color: #6366f1; outline: none; }
 @media (max-width: 768px) { .personal-section-wrap { flex-direction: column; } .personal-notes { flex: 1 1 auto; width: 100%; } }
+"""
+
+LITE_FILTER_MODAL_HTML = """
+<div id="lite-filter-modal-overlay" class="lite-filter-modal-overlay" aria-hidden="true">
+  <div class="lite-filter-modal-panel" role="dialog" aria-modal="true" aria-labelledby="lite-filter-modal-title">
+    <div class="lite-filter-modal-head">
+      <h3 id="lite-filter-modal-title"></h3>
+      <button type="button" class="lite-filter-modal-close" aria-label="Κλείσιμο">&times;</button>
+    </div>
+    <div class="lite-filter-modal-toolbar">
+      <input type="search" id="lite-filter-modal-search" class="lite-filter-modal-search" placeholder="Αναζήτηση..." autocomplete="off">
+    </div>
+    <div class="lite-filter-modal-body">
+      <div id="lite-filter-modal-options-mount"></div>
+    </div>
+    <div class="lite-filter-modal-foot">
+      <button type="button" class="lite-filter-modal-btn lite-filter-modal-clear">Καθαρισμός</button>
+    </div>
+  </div>
+</div>
+"""
+
+LITE_FILTER_MODAL_JS = r"""
+window._liteFilterModalApply = window._liteFilterModalApply || {};
+window._liteFilterModal = {
+  runApply: function(sectionEl) {
+    var id = sectionEl && sectionEl.id;
+    if (id && typeof window._liteFilterModalApply[id] === 'function') {
+      window._liteFilterModalApply[id]();
+    }
+  },
+  uncheckValue: function(sec, key, val) {
+    function visit(root) {
+      if (!root) return;
+      root.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
+        if (cb.getAttribute('data-attr') === key && cb.value === val) cb.checked = false;
+      });
+    }
+    if (sec) sec.querySelectorAll('.filter-modal-group[data-filter-key="' + key + '"]').forEach(visit);
+    visit(document.getElementById('lite-filter-modal-options-mount'));
+  }
+};
+(function () {
+  var ov = document.getElementById('lite-filter-modal-overlay');
+  if (!ov || ov._atlasLiteFilterInited) return;
+  ov._atlasLiteFilterInited = true;
+  var optsMount = document.getElementById('lite-filter-modal-options-mount');
+  var titleEl = document.getElementById('lite-filter-modal-title');
+  var searchEl = document.getElementById('lite-filter-modal-search');
+  var activeGroup = null;
+  var storeEl = null;
+  var activeSection = null;
+
+  function closeModal() {
+    var secBeforeClose = activeSection;
+    if (storeEl) {
+      var opts = optsMount.querySelector('.filter-options');
+      if (opts) storeEl.appendChild(opts);
+    }
+    activeGroup = null;
+    storeEl = null;
+    activeSection = null;
+    ov.classList.remove('is-open');
+    ov.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    if (searchEl) searchEl.value = '';
+    filterSearch('');
+    if (secBeforeClose) window._liteFilterModal.runApply(secBeforeClose);
+  }
+
+  function openModal(group, section) {
+    closeModal();
+    activeGroup = group;
+    activeSection = section;
+    storeEl = group.querySelector('.filter-modal-store');
+    var opts = storeEl && storeEl.querySelector('.filter-options');
+    if (opts) optsMount.appendChild(opts);
+    if (titleEl) titleEl.textContent = group.getAttribute('data-filter-name') || '';
+    ov.classList.add('is-open');
+    ov.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    if (searchEl) {
+      searchEl.value = '';
+      filterSearch('');
+      setTimeout(function () { searchEl.focus(); }, 60);
+    }
+  }
+
+  function filterSearch(q) {
+    var ql = (q || '').toLowerCase();
+    optsMount.querySelectorAll('.filter-cb').forEach(function (lab) {
+      var txt = (lab.textContent || '').toLowerCase();
+      lab.style.display = !ql || txt.indexOf(ql) !== -1 ? '' : 'none';
+    });
+  }
+
+  function findGroupByKey(section, key) {
+    var found = null;
+    section.querySelectorAll('.filter-modal-group').forEach(function (g) {
+      if (g.getAttribute('data-filter-key') === key) found = g;
+    });
+    return found;
+  }
+
+  document.addEventListener('click', function (e) {
+    var tr = e.target.closest('.filter-modal-trigger');
+    if (tr) {
+      var g = tr.closest('.filter-modal-group');
+      var sec = g && g.closest('#totals-section, #count-section');
+      if (g && sec) {
+        e.preventDefault();
+        openModal(g, sec);
+      }
+      return;
+    }
+    var chip = e.target.closest('.filter-selected-chip');
+    if (chip) {
+      e.preventDefault();
+      var val = chip.getAttribute('data-value');
+      var key = chip.getAttribute('data-filter-key');
+      var sec = chip.closest('#totals-section, #count-section');
+      if (!val || !key || !sec) return;
+      var g = findGroupByKey(sec, key);
+      if (!g) return;
+      window._liteFilterModal.uncheckValue(sec, key, val);
+      window._liteFilterModal.runApply(sec);
+    }
+  });
+
+  if (searchEl) {
+    searchEl.addEventListener('input', function () { filterSearch(searchEl.value); });
+  }
+
+  var closeBtn = ov.querySelector('.lite-filter-modal-close');
+  if (closeBtn) closeBtn.addEventListener('click', closeModal);
+  ov.addEventListener('click', function (e) { if (e.target === ov) closeModal(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && ov.classList.contains('is-open')) closeModal();
+  });
+
+  var clearBtn = ov.querySelector('.lite-filter-modal-clear');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', function () {
+      optsMount.querySelectorAll('input[type="checkbox"]').forEach(function (cb) { cb.checked = false; });
+      if (activeSection) window._liteFilterModal.runApply(activeSection);
+    });
+  }
+
+  optsMount.addEventListener('change', function (e) {
+    if (e.target && e.target.type === 'checkbox' && activeSection) {
+      window._liteFilterModal.runApply(activeSection);
+    }
+  });
+})();
 """
 
 SYNOPSIS_MODAL_HTML = """
