@@ -92,17 +92,22 @@ def parse_birthdate_and_age(birthdate_str: str) -> tuple[str, int | None]:
     return raw, None
 
 
-def _atlas_render_full_html_report_open_tab(df: pd.DataFrame) -> None:
-    """Παραγωγή πλήρους HTML viewer (html_viewer_builder) και άνοιγμα σε νέα καρτέλα."""
+def _atlas_render_full_html_report_open_tab(df: pd.DataFrame, edition: str = "lite") -> None:
+    """Παραγωγή πλήρους HTML viewer (html_viewer_builder) και άνοιγμα σε νέα καρτέλα.
+
+    edition: "lite" (προεπιλογή) ή "pro" (επιπλέον καρτέλες — υπό σταδιακή μεταφορά).
+    """
     from html_viewer_builder import generate_full_html_report
 
     client_name = st.session_state.get("client_name", "")
+    _app_title = "ATLAS Pro" if edition == "pro" else "ATLAS"
     with st.spinner("Παραγωγή της HTML αναφοράς — παρακαλώ περιμένετε…"):
         viewer_html, _ = generate_full_html_report(
             df,
             client_name=client_name,
-            app_title="ATLAS",
+            app_title=_app_title,
             app_subtitle="Ασφαλιστικό Βιογραφικό",
+            edition=edition,
         )
     js_content = json.dumps(viewer_html).replace("</script>", "<\\/script>")
     components.html(
@@ -200,7 +205,10 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
 .stApp [data-testid="stHeading"] h2,
 .stApp [data-testid="stHeading"] h3,
 .stApp [data-baseweb="tab"],
-.stApp .stButton > button {
+.stApp .stButton > button,
+.stApp [data-testid="stMetricLabel"],
+.stApp [data-testid="stMetricValue"],
+.stApp [data-testid="stMetricDelta"] {
   font-family: "Fira Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
 }
 .stApp pre, .stApp code, .stApp .stCodeBlock {
@@ -1837,7 +1845,7 @@ def find_gaps_in_insurance_data(df):
                 'Ημερολογιακές ημέρες': calendar_days,
                 'Ημέρες Ασφ.': insured_days_est,
                 'Μήνες': round((gap_end - gap_start).days / 30.44, 1),
-                'Έτη': round((gap_end - gap_start).days / 365.25, 1)
+                'Έτη': round((gap_end - gap_start).days / 365.25, 2)
             })
         
         # Ενημερώνουμε το current_end με το μεγαλύτερο από το τρέχον και το end
@@ -2198,6 +2206,7 @@ def compute_parallel_months(base_df: pd.DataFrame) -> list[tuple[int, int]]:
     p_c_df['is_oaee'] = p_c_df.apply(is_oaee_match, axis=1)
     p_c_df['is_tsm'] = p_c_df.apply(is_tsm_match, axis=1)
     p_c_df['is_oga'] = p_c_df.apply(is_oga_match, axis=1)
+    p_c_df['is_tsay'] = p_c_df.apply(_is_tsay_parallel_row, axis=1)
 
     month_groups = p_c_df.groupby(['ΕΤΟΣ', 'Μήνας_Num'])
     valid_months = []
@@ -2206,13 +2215,15 @@ def compute_parallel_months(base_df: pd.DataFrame) -> list[tuple[int, int]]:
         oaee_days = group.loc[group['is_oaee'], 'Ημέρες'].sum()
         tsm_days = group.loc[group['is_tsm'], 'Ημέρες'].sum()
         oga_days = group.loc[group['is_oga'], 'Ημέρες'].sum()
+        tsay_days = group.loc[group['is_tsay'], 'Ημέρες'].sum()
 
         has_ika = ika_days > 0
         has_oaee = oaee_days > 0
         has_tsm = tsm_days > 0
         has_oga = oga_days > 0
+        has_tsay = tsay_days > 0
 
-        if (has_ika and has_oaee) or (has_ika and has_tsm) or (has_oaee and has_tsm) or (has_oga and (has_ika or has_oaee)):
+        if _parallel_until_2016_month_match(has_ika, has_oaee, has_tsm, has_oga, has_tsay):
             if year <= 2016:
                 valid_months.append((year, month))
 
@@ -2328,6 +2339,241 @@ def compute_parallel_months_2017(base_df: pd.DataFrame) -> list[tuple[int, int]]
     return valid_months
 
 
+def _sum_parallel_overlap_days_until_2016(month_groups, valid_months: list[tuple[int, int]]) -> int:
+    total = 0
+    for (year, month) in valid_months:
+        try:
+            g = month_groups.get_group((year, month))
+        except KeyError:
+            continue
+        ika_days = g.loc[g['is_ika'], 'Ημέρες'].sum()
+        oaee_days = g.loc[g['is_oaee'], 'Ημέρες'].sum()
+        tsm_days = g.loc[g['is_tsm'], 'Ημέρες'].sum()
+        oga_days = g.loc[g['is_oga'], 'Ημέρες'].sum()
+        tsay_days = g.loc[g['is_tsay'], 'Ημέρες'].sum()
+        ika_cap = min(ika_days, 25)
+        oaee_cap = min(oaee_days, 25)
+        tsm_cap = min(tsm_days, 25)
+        oga_cap = min(oga_days, 25)
+        tsay_cap = min(tsay_days, 25)
+        candidates = []
+        if ika_cap > 0 and oaee_cap > 0:
+            candidates.append(max(ika_cap + oaee_cap - 25, 0))
+        if ika_cap > 0 and tsay_cap > 0:
+            candidates.append(max(ika_cap + tsay_cap - 25, 0))
+        if oaee_cap > 0 and tsm_cap > 0:
+            candidates.append(max(oaee_cap + tsm_cap - 25, 0))
+        if oga_cap > 0 and ika_cap > 0:
+            candidates.append(max(oga_cap + ika_cap - 25, 0))
+        if oga_cap > 0 and oaee_cap > 0:
+            candidates.append(max(oga_cap + oaee_cap - 25, 0))
+        total += max(candidates) if candidates else 0
+    return int(round(total))
+
+
+def _sum_parallel_overlap_days_2017(month_groups, valid_months: list[tuple[int, int]]) -> int:
+    total = 0
+    for (year, month) in valid_months:
+        try:
+            g = month_groups.get_group((year, month))
+        except KeyError:
+            continue
+        ika_cap = min(g.loc[g['is_ika'], 'Ημέρες'].sum(), 25)
+        efka_mis_cap = min(g.loc[g['is_efka_mis'], 'Ημέρες'].sum(), 25)
+        efka_non_cap = min(g.loc[g['is_efka_non'], 'Ημέρες'].sum(), 25)
+        cands = []
+        if ika_cap > 0 and efka_non_cap > 0:
+            cands.append(max(ika_cap + efka_non_cap - 25, 0))
+        if efka_mis_cap > 0 and efka_non_cap > 0:
+            cands.append(max(efka_mis_cap + efka_non_cap - 25, 0))
+        total += max(cands) if cands else 0
+    return int(round(total))
+
+
+def _parallel_month_groups_until_2016(base_df: pd.DataFrame):
+    """Μηνιαίο DataFrame + groupby για παράλληλη ασφάλιση έως 2016."""
+    if base_df.empty or not all(col in base_df.columns for col in ['Από', 'Έως']):
+        return None, None
+    work_df = base_df
+    if 'Κλάδος/Πακέτο Κάλυψης' in work_df.columns:
+        pkg = work_df['Κλάδος/Πακέτο Κάλυψης'].astype(str).str.strip()
+        work_df = work_df[~pkg.isin(EXCLUDED_PACKAGES_PARALLEL_UNTIL_2016)].copy()
+    if work_df.empty:
+        return None, None
+
+    parallel_rows = []
+    for _, row in work_df.iterrows():
+        try:
+            if pd.isna(row['Από']) or pd.isna(row['Έως']):
+                continue
+            start_dt = pd.to_datetime(row['Από'], format='%d/%m/%Y', errors='coerce')
+            end_dt = pd.to_datetime(row['Έως'], format='%d/%m/%Y', errors='coerce')
+            if pd.isna(start_dt) or pd.isna(end_dt):
+                continue
+            days_val = 0
+            if 'Ημέρες' in row and pd.notna(row['Ημέρες']) and str(row['Ημέρες']).strip() != '':
+                d = clean_numeric_value(row['Ημέρες'])
+                if d is not None and d != 0:
+                    days_val += d
+            if 'Έτη' in row and pd.notna(row['Έτη']):
+                y = clean_numeric_value(row['Έτη'])
+                if y is not None and y != 0:
+                    days_val += y * 300
+            if 'Μήνες' in row and pd.notna(row['Μήνες']):
+                m = clean_numeric_value(row['Μήνες'])
+                if m is not None and m != 0:
+                    days_val += m * 25
+            curr = start_dt.replace(day=1)
+            end_month_dt = end_dt.replace(day=1)
+            months_list = []
+            while curr <= end_month_dt:
+                months_list.append(curr)
+                if curr.month == 12:
+                    curr = curr.replace(year=curr.year + 1, month=1)
+                else:
+                    curr = curr.replace(month=curr.month + 1)
+            if not months_list:
+                continue
+            days_per_month = days_val / len(months_list)
+            for m_dt in months_list:
+                parallel_rows.append({
+                    'ΕΤΟΣ': m_dt.year,
+                    'Μήνας_Num': m_dt.month,
+                    'ΤΑΜΕΙΟ': str(row.get('Ταμείο', '')).strip(),
+                    'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ': str(row.get('Τύπος Ασφάλισης', '')).strip(),
+                    'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ': str(row.get('Κλάδος/Πακέτο Κάλυψης', '')).strip(),
+                    'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': str(row.get('Τύπος Αποδοχών', '')).strip(),
+                    'Ημέρες': days_per_month,
+                })
+        except Exception:
+            continue
+    if not parallel_rows:
+        return None, None
+
+    p_c_df = pd.DataFrame(parallel_rows)
+
+    def is_oaee_match(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        kl = str(row.get('ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', '')).strip().upper()
+        return ('OAEE' in t or 'ΟΑΕΕ' in t or 'TEBE' in t or 'ΤΕΒΕ' in t or 'TAE' in t or 'ΤΑΕ' in t) and kl in ['K', 'Κ']
+
+    def is_tsm_match(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        kl = str(row.get('ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', '')).strip().upper()
+        return ('ΤΣΜΕΔΕ' in t or 'TSMEDE' in t) and kl in ['ΚΣ', 'ΠΚΣ', 'KS', 'PKS']
+
+    def is_oga_match(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        kl = str(row.get('ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', '')).strip().upper()
+        return ('ΟΓΑ' in t or 'OGA' in t) and kl in ['K', 'Κ']
+
+    p_c_df['is_ika'] = p_c_df.apply(_is_ika_parallel_row, axis=1)
+    p_c_df['is_oaee'] = p_c_df.apply(is_oaee_match, axis=1)
+    p_c_df['is_tsm'] = p_c_df.apply(is_tsm_match, axis=1)
+    p_c_df['is_oga'] = p_c_df.apply(is_oga_match, axis=1)
+    p_c_df['is_tsay'] = p_c_df.apply(_is_tsay_parallel_row, axis=1)
+    return p_c_df, p_c_df.groupby(['ΕΤΟΣ', 'Μήνας_Num'])
+
+
+def _parallel_month_groups_2017(base_df: pd.DataFrame):
+    """Μηνιαίο DataFrame + groupby για παράλληλη απασχόληση 2017+."""
+    if base_df.empty or not all(col in base_df.columns for col in ['Από', 'Έως']):
+        return None, None
+
+    parallel_rows = []
+    for _, row in base_df.iterrows():
+        try:
+            if pd.isna(row['Από']) or pd.isna(row['Έως']):
+                continue
+            start_dt = pd.to_datetime(row['Από'], format='%d/%m/%Y', errors='coerce')
+            end_dt = pd.to_datetime(row['Έως'], format='%d/%m/%Y', errors='coerce')
+            if pd.isna(start_dt) or pd.isna(end_dt):
+                continue
+            days_val = 0
+            if 'Ημέρες' in row and pd.notna(row['Ημέρες']) and str(row['Ημέρες']).strip() != '':
+                d = clean_numeric_value(row['Ημέρες'])
+                if d is not None and d != 0:
+                    days_val += d
+            if 'Έτη' in row and pd.notna(row['Έτη']):
+                y = clean_numeric_value(row['Έτη'])
+                if y is not None and y != 0:
+                    days_val += y * 300
+            if 'Μήνες' in row and pd.notna(row['Μήνες']):
+                m = clean_numeric_value(row['Μήνες'])
+                if m is not None and m != 0:
+                    days_val += m * 25
+            curr = start_dt.replace(day=1)
+            end_month_dt = end_dt.replace(day=1)
+            months_list = []
+            while curr <= end_month_dt:
+                months_list.append(curr)
+                if curr.month == 12:
+                    curr = curr.replace(year=curr.year + 1, month=1)
+                else:
+                    curr = curr.replace(month=curr.month + 1)
+            if not months_list:
+                continue
+            days_per_month = days_val / len(months_list)
+            for m_dt in months_list:
+                parallel_rows.append({
+                    'ΕΤΟΣ': m_dt.year,
+                    'Μήνας_Num': m_dt.month,
+                    'ΤΑΜΕΙΟ': str(row.get('Ταμείο', '')).strip(),
+                    'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ': str(row.get('Τύπος Ασφάλισης', '')).strip(),
+                    'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': str(row.get('Τύπος Αποδοχών', '')).strip(),
+                    'Ημέρες': days_per_month,
+                })
+        except Exception:
+            continue
+    if not parallel_rows:
+        return None, None
+
+    p_df = pd.DataFrame(parallel_rows)
+
+    def _is_ika(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+        et = str(row.get('ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ', '')).strip()
+        return (('IKA' in t or 'ΙΚΑ' in t) or ('ΜΙΣΘΩΤΗ' in i_type and 'ΜΗ' not in i_type)) and et in ['01', '1', '16', '99']
+
+    def _is_efka_misthoti(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+        return ('ΕΦΚΑ' in t or 'EFKA' in t) and ('ΜΙΣΘΩΤΗ' in i_type and 'ΜΗ' not in i_type)
+
+    def _is_efka_non_misthoti(row):
+        t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+        i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+        return ('ΕΦΚΑ' in t or 'EFKA' in t) and (('ΜΗ' in i_type and 'ΜΙΣΘΩΤΗ' in i_type) or ('NON' in i_type and 'SAL' in i_type))
+
+    p_df['is_ika'] = p_df.apply(_is_ika, axis=1)
+    p_df['is_efka_mis'] = p_df.apply(_is_efka_misthoti, axis=1)
+    p_df['is_efka_non'] = p_df.apply(_is_efka_non_misthoti, axis=1)
+    return p_df, p_df.groupby(['ΕΤΟΣ', 'Μήνας_Num'])
+
+
+def compute_parallel_summary_metrics(base_df: pd.DataFrame) -> tuple[int, int]:
+    """Επιστρέφει (μήνες παράλληλης, ημέρες παράλληλης) έως 2016."""
+    valid_months = compute_parallel_months(base_df)
+    if not valid_months:
+        return 0, 0
+    _, month_groups = _parallel_month_groups_until_2016(base_df)
+    if month_groups is None:
+        return len(valid_months), 0
+    return len(valid_months), _sum_parallel_overlap_days_until_2016(month_groups, valid_months)
+
+
+def compute_parallel_2017_summary_metrics(base_df: pd.DataFrame) -> tuple[int, int]:
+    """Επιστρέφει (μήνες παράλληλης 2017+, ημέρες παράλληλης 2017+)."""
+    valid_months = compute_parallel_months_2017(base_df)
+    if not valid_months:
+        return 0, 0
+    _, month_groups = _parallel_month_groups_2017(base_df)
+    if month_groups is None:
+        return len(valid_months), 0
+    return len(valid_months), _sum_parallel_overlap_days_2017(month_groups, valid_months)
+
+
 EXCLUDED_PACKAGES_PARALLEL = {'Α', 'Λ', 'Υ', 'Ο', 'Χ', '026', '899'}
 
 # Για παράλληλη έως 2016: εξαιρούνται και 127, 131, 132, 133 (και 026) ακόμα κι αν έχουν τύπο αποδοχών 01 κτλ με ημέρες
@@ -2364,6 +2610,48 @@ def _is_ika_parallel_row(row) -> bool:
         except (TypeError, ValueError):
             pass
     return False
+
+
+def _is_tsay_fund_and_package(row) -> bool:
+    t = str(row.get('ΤΑΜΕΙΟ', '')).upper()
+    kl = str(row.get('ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', '')).strip().upper()
+    return ('ΤΣΑΥ' in t or 'TSAY' in t) and kl in ['ME', 'ΜΕ']
+
+
+def _is_tsay_misthoti_parallel_row(row) -> bool:
+    """ΤΣΑΥ με πακέτο ΜΕ, μισθωτική ασφάλιση — παράλληλη με ΙΚΑ έως 2016."""
+    if not _is_tsay_fund_and_package(row):
+        return False
+    i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+    return 'ΜΙΣΘΩΤΗ' in i_type and 'ΜΗ' not in i_type
+
+
+def _is_tsay_non_misthoti_parallel_row(row) -> bool:
+    """ΤΣΑΥ με πακέτο ΜΕ, μη μισθωτική ασφάλιση — παράλληλη με ΙΚΑ έως 2016."""
+    if not _is_tsay_fund_and_package(row):
+        return False
+    i_type = str(row.get('ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', '')).upper()
+    return ('ΜΗ' in i_type and 'ΜΙΣΘΩΤΗ' in i_type) or ('NON' in i_type and 'SAL' in i_type)
+
+
+def _is_tsay_parallel_row(row) -> bool:
+    return _is_tsay_misthoti_parallel_row(row) or _is_tsay_non_misthoti_parallel_row(row)
+
+
+def _parallel_until_2016_month_match(
+    has_ika: bool,
+    has_oaee: bool,
+    has_tsm: bool,
+    has_oga: bool,
+    has_tsay: bool,
+) -> bool:
+    return (
+        (has_ika and has_oaee)
+        or (has_ika and has_tsm)
+        or (has_ika and has_tsay)
+        or (has_oaee and has_tsm)
+        or (has_oga and (has_ika or has_oaee))
+    )
 
 
 def _build_monthly_rows_for_parallel(df: pd.DataFrame, description_map: dict | None = None) -> list[dict]:
@@ -2532,6 +2820,7 @@ def build_parallel_print_df(df: pd.DataFrame, description_map: dict | None = Non
     p_df['is_oaee'] = p_df.apply(_is_oaee_match, axis=1)
     p_df['is_tsm'] = p_df.apply(_is_tsm_match, axis=1)
     p_df['is_oga'] = p_df.apply(_is_oga_match, axis=1)
+    p_df['is_tsay'] = p_df.apply(_is_tsay_parallel_row, axis=1)
     p_df['is_ika_general'] = p_df.apply(_is_ika_general, axis=1)
 
     month_groups = p_df.groupby(['ΕΤΟΣ', 'Μήνας_Num'])
@@ -2543,7 +2832,8 @@ def build_parallel_print_df(df: pd.DataFrame, description_map: dict | None = Non
         oaee_d = min(group.loc[group['is_oaee'], 'Ημέρες'].sum(), 25)
         tsm_d = min(group.loc[group['is_tsm'], 'Ημέρες'].sum(), 25)
         oga_d = min(group.loc[group['is_oga'], 'Ημέρες'].sum(), 25)
-        if (ika_d > 0 and oaee_d > 0) or (ika_d > 0 and tsm_d > 0) or (oaee_d > 0 and tsm_d > 0) or (oga_d > 0 and (ika_d > 0 or oaee_d > 0)):
+        tsay_d = min(group.loc[group['is_tsay'], 'Ημέρες'].sum(), 25)
+        if _parallel_until_2016_month_match(ika_d > 0, oaee_d > 0, tsm_d > 0, oga_d > 0, tsay_d > 0):
             valid_months.append((year, month))
 
     if not valid_months:
@@ -2551,8 +2841,8 @@ def build_parallel_print_df(df: pd.DataFrame, description_map: dict | None = Non
 
     valid_df = pd.DataFrame(valid_months, columns=['ΕΤΟΣ', 'Μήνας_Num'])
     filtered = p_df.merge(valid_df, on=['ΕΤΟΣ', 'Μήνας_Num'], how='inner')
-    filtered = filtered[filtered['is_ika'] | filtered['is_oaee'] | filtered['is_tsm'] | filtered['is_oga']]
-    filtered = filtered.drop(columns=['is_ika', 'is_oaee', 'is_tsm', 'is_oga', 'is_ika_general'])
+    filtered = filtered[filtered['is_ika'] | filtered['is_oaee'] | filtered['is_tsm'] | filtered['is_oga'] | filtered['is_tsay']]
+    filtered = filtered.drop(columns=['is_ika', 'is_oaee', 'is_tsm', 'is_oga', 'is_tsay', 'is_ika_general'])
 
     if filtered.empty:
         return None
@@ -3869,7 +4159,7 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
             audit_rows.append({
                 'A/A': 5, 'Έλεγχος': 'Παράλληλη ασφάλιση',
                 'Εύρημα': 'Πιθανή',
-                'Λεπτομέρειες': 'Βρέθηκαν χρονικά επικαλυπτόμενα διαστήματα ΙΚΑ (αποδοχές 01, 16, ή 99· έως 2001 και κενός τύπος αποδοχών) & ΟΑΕΕ (Κ), ΙΚΑ & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ) ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.',
+                'Λεπτομέρειες': 'Βρέθηκαν χρονικά επικαλυπτόμενα διαστήματα ΙΚΑ (αποδοχές 01, 16, ή 99· έως 2001 και κενός τύπος αποδοχών) & ΟΑΕΕ (Κ), ΙΚΑ & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ΙΚΑ & ΤΣΑΥ μισθωτό (ΜΕ), ΙΚΑ & ΤΣΑΥ μη μισθωτό (ΜΕ) ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.',
                 'Ενέργειες': 'Ελέγξτε την καρτέλα "Παράλληλη Ασφάλιση"'
             })
         else:
@@ -6287,7 +6577,7 @@ def show_results_page(df, filename):
             f"{int(header_age)} ετών</div>"
         )
 
-    _hdr_title, _hdr_lite = st.columns([8, 1], vertical_alignment="center", gap="small")
+    _hdr_title, _hdr_lite, _hdr_pro = st.columns([7, 1, 1], vertical_alignment="center", gap="small")
     with _hdr_title:
         st.markdown(
             f"""<div class="professional-header">
@@ -6311,10 +6601,23 @@ def show_results_page(df, filename):
             help="Πλήρης HTML αναφορά σε νέα καρτέλα (επιτρέψτε pop-ups).",
         ):
             st.session_state["open_html_report"] = True
+    with _hdr_pro:
+        if st.button(
+            "Άνοιγμα ATLAS Pro",
+            type="secondary",
+            use_container_width=False,
+            key="atlas_results_float_html_report_pro",
+            help="HTML αναφορά Pro (με επιπλέον καρτέλες) σε νέα καρτέλα (επιτρέψτε pop-ups).",
+        ):
+            st.session_state["open_html_report_pro"] = True
 
     if st.session_state.get("open_html_report"):
         _atlas_render_full_html_report_open_tab(df)
         st.session_state["open_html_report"] = False
+
+    if st.session_state.get("open_html_report_pro"):
+        _atlas_render_full_html_report_open_tab(df, edition="pro")
+        st.session_state["open_html_report_pro"] = False
 
     components.html(
         r"""
@@ -6377,6 +6680,13 @@ def show_results_page(df, filename):
         background-color: #ffffff !important;
         border-color: #d0d7de !important;
         box-shadow: inset 0 1px 2px rgba(16,24,40,0.04) !important;
+    }
+    /* Αχνό ενδεικτικό κείμενο στα πεδία ημερομηνίας καταμέτρησης */
+    .stTextInput input[placeholder="01/01/1960"]::placeholder,
+    .stTextInput input[placeholder="31/12/2040"]::placeholder {
+        color: #94a3b8 !important;
+        opacity: 1 !important;
+        font-weight: 400 !important;
     }
     /* Βελτίωση αντίθεσης labels φίλτρων */
     label, .stMarkdown p {
@@ -7787,7 +8097,7 @@ def show_results_page(df, filename):
                     st.metric("Συνολικοί Μήνες", format_number_greek(total_months, decimals=1))
                 with col5:
                     total_years = gaps_df['Έτη'].sum()
-                    st.metric("Συνολικά Έτη", format_number_greek(total_years, decimals=1))
+                    st.metric("Συνολικά Έτη", format_number_greek(total_years, decimals=2))
                 
                 # Δημιουργούμε αντίγραφο για εμφάνιση με μορφοποίηση
                 display_gaps = gaps_df.copy()
@@ -7796,8 +8106,8 @@ def show_results_page(df, filename):
                 numeric_cols_gaps = ['Ημερολογιακές ημέρες', 'Ημέρες Ασφ.', 'Μήνες', 'Έτη']
                 for col in numeric_cols_gaps:
                     if col in display_gaps.columns:
-                        # Μήνες και Έτη με 1 δεκαδικό, ημέρες χωρίς δεκαδικά
-                        decimals = 1 if col in ['Μήνες', 'Έτη'] else 0
+                        # Μήνες με 1 δεκαδικό, Έτη με 2, ημέρες χωρίς δεκαδικά
+                        decimals = 2 if col == 'Έτη' else (1 if col == 'Μήνες' else 0)
                         display_gaps[col] = display_gaps[col].apply(lambda x: format_number_greek(x, decimals=decimals) if pd.notna(x) and x != '' else x)
                 
                 # Εμφάνιση πίνακα
@@ -8777,11 +9087,17 @@ def show_results_page(df, filename):
                         return
                     from_v = (st.session_state.get("cnt_filter_from") or "").strip()
                     to_v = (st.session_state.get("cnt_filter_to") or "").strip()
-                    if active == "from_2002" and from_v != "01/01/2002":
+                    if active == "from_2002" and (from_v != "01/01/2002" or to_v != "31/12/2050"):
                         st.session_state["cnt_date_preset_active"] = None
                     elif active == "range_2002_2014" and (from_v != "01/01/2002" or to_v != "31/12/2014"):
                         st.session_state["cnt_date_preset_active"] = None
                     elif active == "range_2009_2013" and (from_v != "01/01/2009" or to_v != "31/12/2013"):
+                        st.session_state["cnt_date_preset_active"] = None
+                    elif active == "until_2016" and (from_v != "01/01/1960" or to_v != "31/12/2016"):
+                        st.session_state["cnt_date_preset_active"] = None
+                    elif active == "range_2017_2019" and (from_v != "01/01/2017" or to_v != "31/12/2019"):
+                        st.session_state["cnt_date_preset_active"] = None
+                    elif active == "from_2020" and (from_v != "01/01/2020" or to_v != "31/12/2050"):
                         st.session_state["cnt_date_preset_active"] = None
 
                 with col5:
@@ -8802,28 +9118,34 @@ def show_results_page(df, filename):
                 with col6:
                     if "cnt_filter_from" not in st.session_state:
                         st.session_state["cnt_filter_from"] = ""
-                    st.text_input("Από (dd/mm/yyyy):", placeholder="01/01/2000", key="cnt_filter_from")
+                    st.text_input("Από (dd/mm/yyyy):", placeholder="01/01/1960", key="cnt_filter_from")
                     from_date_cnt = st.session_state.get("cnt_filter_from", "").strip()
                 with col7:
                     if "cnt_filter_to" not in st.session_state:
                         st.session_state["cnt_filter_to"] = ""
-                    st.text_input("Έως (dd/mm/yyyy):", placeholder="31/12/2020", key="cnt_filter_to")
+                    st.text_input("Έως (dd/mm/yyyy):", placeholder="31/12/2040", key="cnt_filter_to")
                     to_date_cnt = st.session_state.get("cnt_filter_to", "").strip()
 
                 _cnt_sync_date_preset_active()
                 _cnt_active = st.session_state.get("cnt_date_preset_active")
-                _, _, _, _, _cnt_btn5, _cnt_btn6, _cnt_btn7 = st.columns([1.1, 1.0, 1.2, 1.3, 1.1, 0.9, 0.9])
-                with _cnt_btn5:
+                _cnt_row2 = st.columns([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+                with _cnt_row2[0]:
+                    show_count_totals_only = st.toggle(
+                        "Ετήσια σύνολα",
+                        value=False,
+                        key="count_totals_only",
+                    )
+                with _cnt_row2[1]:
                     st.button(
                         "Από 1/1/2002",
                         key="cnt_btn_from_2002",
                         on_click=_cnt_toggle_date_preset,
-                        args=("from_2002", "01/01/2002", None, True),
+                        args=("from_2002", "01/01/2002", "31/12/2050"),
                         type="primary" if _cnt_active == "from_2002" else "secondary",
                         use_container_width=True,
-                        help="Συμπλήρωση «Από» με 01/01/2002 — ξανά κλικ για επαναφορά ημερομηνιών",
+                        help="Φίλτρο από 01/01/2002 έως 31/12/2050 (μέγιστο) — ξανά κλικ για επαναφορά ημερομηνιών",
                     )
-                with _cnt_btn6:
+                with _cnt_row2[2]:
                     st.button(
                         "1/1/2002 – 31/12/2014",
                         key="cnt_btn_range_2002_2014",
@@ -8833,7 +9155,7 @@ def show_results_page(df, filename):
                         use_container_width=True,
                         help="Φίλτρο 01/01/2002 – 31/12/2014 — ξανά κλικ για επαναφορά ημερομηνιών",
                     )
-                with _cnt_btn7:
+                with _cnt_row2[3]:
                     st.button(
                         "1/1/2009 – 31/12/2013",
                         key="cnt_btn_range_2009_2013",
@@ -8842,6 +9164,36 @@ def show_results_page(df, filename):
                         type="primary" if _cnt_active == "range_2009_2013" else "secondary",
                         use_container_width=True,
                         help="Φίλτρο 01/01/2009 – 31/12/2013 — ξανά κλικ για επαναφορά ημερομηνιών",
+                    )
+                with _cnt_row2[4]:
+                    st.button(
+                        "Έως 31/12/2016",
+                        key="cnt_btn_until_2016",
+                        on_click=_cnt_toggle_date_preset,
+                        args=("until_2016", "01/01/1960", "31/12/2016"),
+                        type="primary" if _cnt_active == "until_2016" else "secondary",
+                        use_container_width=True,
+                        help="Φίλτρο από 01/01/1960 έως 31/12/2016 — ξανά κλικ για επαναφορά ημερομηνιών",
+                    )
+                with _cnt_row2[5]:
+                    st.button(
+                        "1/1/2017 – 31/12/2019",
+                        key="cnt_btn_range_2017_2019",
+                        on_click=_cnt_toggle_date_preset,
+                        args=("range_2017_2019", "01/01/2017", "31/12/2019"),
+                        type="primary" if _cnt_active == "range_2017_2019" else "secondary",
+                        use_container_width=True,
+                        help="Φίλτρο 01/01/2017 – 31/12/2019 — ξανά κλικ για επαναφορά ημερομηνιών",
+                    )
+                with _cnt_row2[6]:
+                    st.button(
+                        "Από 1/1/2020",
+                        key="cnt_btn_from_2020",
+                        on_click=_cnt_toggle_date_preset,
+                        args=("from_2020", "01/01/2020", "31/12/2050"),
+                        type="primary" if _cnt_active == "from_2020" else "secondary",
+                        use_container_width=True,
+                        help="Φίλτρο από 01/01/2020 έως 31/12/2050 (μέγιστο) — ξανά κλικ για επαναφορά ημερομηνιών",
                     )
 
                 # Apply date filters
@@ -8860,12 +9212,6 @@ def show_results_page(df, filename):
             
             st.session_state['count_klados_selected'] = bool(sel_cnt_klados)
             st.session_state['count_work_df'] = count_df.copy()
-
-            show_count_totals_only = st.toggle(
-                "Μόνο γραμμές συνόλου ανά έτος",
-                value=False,
-                key="count_totals_only"
-            )
 
             counting_rows = []
             
@@ -10519,7 +10865,8 @@ def show_results_page(df, filename):
                             "info",
                             "Εμφάνιση διαστημάτων όπου συνυπάρχουν στον ίδιο μήνα: ΙΚΑ (Τύπος Αποδοχών 01, 16 ή 99· "
                             "έως 2001 και κενός τύπος αποδοχών) & ΟΑΕΕ (Κλάδος/Πακέτο Κ), ΙΚΑ & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), "
-                            "ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.",
+                            "ΟΑΕΕ (Κ) & ΤΣΜΕΔΕ (ΚΣ/ΠΚΣ), ΙΚΑ & ΤΣΑΥ μισθωτό (ΜΕ), ΙΚΑ & ΤΣΑΥ μη μισθωτό (ΜΕ), "
+                            "ή ΟΓΑ (Κ) & ΙΚΑ/ΟΑΕΕ.",
                         ),
                         (
                             "warning",
@@ -10531,7 +10878,7 @@ def show_results_page(df, filename):
                 height=58,
             )
         with _par_cl_t:
-            st.markdown("### Παράλληλη Ασφάλιση (ΙΚΑ & ΟΑΕΕ / ΙΚΑ & ΤΣΜΕΔΕ / ΟΑΕΕ & ΤΣΜΕΔΕ / ΟΓΑ & ΙΚΑ/ΟΑΕΕ)")
+            st.markdown("### Παράλληλη Ασφάλιση (ΙΚΑ & ΟΑΕΕ / ΙΚΑ & ΤΣΜΕΔΕ / ΙΚΑ & ΤΣΑΥ / ΟΑΕΕ & ΤΣΜΕΔΕ / ΟΓΑ & ΙΚΑ/ΟΑΕΕ)")
         parallel_df = exclude_unused_packages(df.copy())
         required_cols = ['Από', 'Έως', 'Ημέρες']
         
@@ -10677,6 +11024,7 @@ def show_results_page(df, filename):
                 p_c_df['is_oaee'] = p_c_df.apply(is_oaee_match, axis=1)
                 p_c_df['is_tsm'] = p_c_df.apply(is_tsm_match, axis=1)
                 p_c_df['is_oga'] = p_c_df.apply(is_oga_match, axis=1)
+                p_c_df['is_tsay'] = p_c_df.apply(_is_tsay_parallel_row, axis=1)
                 
                 # Ομαδοποίηση ανά μήνα για έλεγχο συνύπαρξης
                 month_groups = p_c_df.groupby(['ΕΤΟΣ', 'Μήνας_Num'])
@@ -10687,22 +11035,25 @@ def show_results_page(df, filename):
                     oaee_days_raw = group.loc[group['is_oaee'], 'Ημέρες'].sum()
                     tsm_days_raw = group.loc[group['is_tsm'], 'Ημέρες'].sum()
                     oga_days_raw = group.loc[group['is_oga'], 'Ημέρες'].sum()
+                    tsay_days_raw = group.loc[group['is_tsay'], 'Ημέρες'].sum()
                     # Cap 25/μήνα για μη-ΙΚΑ στην Παράλληλη (συνολικά ανά μήνα, ταμείο/κλάδο).
                     oaee_days = min(oaee_days_raw, 25)
                     tsm_days = min(tsm_days_raw, 25)
                     oga_days = min(oga_days_raw, 25)
+                    tsay_days = min(tsay_days_raw, 25)
 
                     has_ika = ika_days > 0
                     has_oaee = oaee_days > 0
                     has_tsm = tsm_days > 0
                     has_oga = oga_days > 0
+                    has_tsay = tsay_days > 0
 
-                    if (has_ika and has_oaee) or (has_ika and has_tsm) or (has_oaee and has_tsm) or (has_oga and (has_ika or has_oaee)):
+                    if _parallel_until_2016_month_match(has_ika, has_oaee, has_tsm, has_oga, has_tsay):
                         # Περιορισμός έως 31/12/2016
                         if year <= 2016:
                             valid_months.append((year, month))
 
-                # Υπολογισμός συνολικών παράλληλων ημερών (IKA+OAEE, OAEE+TSM, OGA+IKA, OGA+OAEE - 25)
+                # Υπολογισμός συνολικών παράλληλων ημερών (IKA+OAEE, IKA+TSAY, OAEE+TSM, OGA+IKA, OGA+OAEE - 25)
                 parallel_days_total = 0
                 for (year, month) in valid_months:
                     try:
@@ -10713,13 +11064,17 @@ def show_results_page(df, filename):
                     oaee_days = g.loc[g['is_oaee'], 'Ημέρες'].sum()
                     tsm_days = g.loc[g['is_tsm'], 'Ημέρες'].sum()
                     oga_days = g.loc[g['is_oga'], 'Ημέρες'].sum()
+                    tsay_days = g.loc[g['is_tsay'], 'Ημέρες'].sum()
                     ika_cap = min(ika_days, 25)
                     oaee_cap = min(oaee_days, 25)
                     tsm_cap = min(tsm_days, 25)
                     oga_cap = min(oga_days, 25)
+                    tsay_cap = min(tsay_days, 25)
                     candidates = []
                     if ika_cap > 0 and oaee_cap > 0:
                         candidates.append(max(ika_cap + oaee_cap - 25, 0))
+                    if ika_cap > 0 and tsay_cap > 0:
+                        candidates.append(max(ika_cap + tsay_cap - 25, 0))
                     if oaee_cap > 0 and tsm_cap > 0:
                         candidates.append(max(oaee_cap + tsm_cap - 25, 0))
                     if oga_cap > 0 and ika_cap > 0:
@@ -10735,17 +11090,17 @@ def show_results_page(df, filename):
                     st.metric("Μήνες Παράλληλης", format_number_greek(len(valid_months), decimals=0))
                 with met_col2:
                     st.metric("Ημέρες Παράλληλης", format_number_greek(parallel_days_total, decimals=0))
-                st.caption("Κριτήρια: ΙΚΑ (αποδοχές 01, 16, ή 99· έως 2001 και κενός τύπος αποδοχών) & ΟΑΕΕ Κ, ΙΚΑ & ΤΣΜΕΔΕ ΚΣ/ΠΚΣ, ΟΑΕΕ Κ & ΤΣΜΕΔΕ ΚΣ/ΠΚΣ, ή ΟΓΑ Κ & ΙΚΑ/ΟΑΕΕ (έως 31/12/2016).")
+                st.caption("Κριτήρια: ΙΚΑ (αποδοχές 01, 16, ή 99· έως 2001 και κενός τύπος αποδοχών) & ΟΑΕΕ Κ, ΙΚΑ & ΤΣΜΕΔΕ ΚΣ/ΠΚΣ, ΟΑΕΕ Κ & ΤΣΜΕΔΕ ΚΣ/ΠΚΣ, ΙΚΑ & ΤΣΑΥ μισθωτό (ΜΕ), ΙΚΑ & ΤΣΑΥ μη μισθωτό (ΜΕ), ή ΟΓΑ Κ & ΙΚΑ/ΟΑΕΕ (έως 31/12/2016).")
 
                 if valid_months:
                     valid_months_df = pd.DataFrame(valid_months, columns=['ΕΤΟΣ', 'Μήνας_Num'])
                     p_c_df_filtered = p_c_df.merge(valid_months_df, on=['ΕΤΟΣ', 'Μήνας_Num'], how='inner')
                     
-                    # Strict Filtering: Κρατάμε IKA ή OAEE K ή TSMEDE KS/PKS ή OGA K
-                    p_c_df_filtered = p_c_df_filtered[p_c_df_filtered['is_ika'] | p_c_df_filtered['is_oaee'] | p_c_df_filtered['is_tsm'] | p_c_df_filtered['is_oga']]
+                    # Strict Filtering: Κρατάμε IKA ή OAEE K ή TSMEDE KS/PKS ή OGA K ή ΤΣΑΥ ΜΕ
+                    p_c_df_filtered = p_c_df_filtered[p_c_df_filtered['is_ika'] | p_c_df_filtered['is_oaee'] | p_c_df_filtered['is_tsm'] | p_c_df_filtered['is_oga'] | p_c_df_filtered['is_tsay']]
 
                     # Καθαρισμός helper columns
-                    p_c_df_filtered = p_c_df_filtered.drop(columns=['is_ika', 'is_oaee', 'is_tsm', 'is_oga', 'is_ika_general', 'ΦΟΡΕΑΣ'])
+                    p_c_df_filtered = p_c_df_filtered.drop(columns=['is_ika', 'is_oaee', 'is_tsm', 'is_oga', 'is_tsay', 'is_ika_general', 'ΦΟΡΕΑΣ'])
                     
                     # Υπολογισμός Ετήσιων Συνόλων
                     annual_totals_p = p_c_df_filtered.groupby(['ΕΤΟΣ', 'ΤΑΜΕΙΟ', 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ', 'ΕΡΓΟΔΟΤΗΣ', 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ', 'ΠΕΡΙΓΡΑΦΗ', 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ'])[['Ημέρες', 'Μικτές_Part', 'Εισφορές_Part']].sum().reset_index()
@@ -10977,7 +11332,7 @@ def show_results_page(df, filename):
                         "print_parallel",
                         "Παράλληλη Ασφάλιση",
                         display_final_df,
-                        description="Πίνακας Παράλληλης Ασφάλισης (ΙΚΑ & ΟΑΕΕ / ΙΚΑ & ΤΣΜΕΔΕ / ΟΑΕΕ & ΤΣΜΕΔΕ / ΟΓΑ & ΙΚΑ/ΟΑΕΕ)",
+                        description="Πίνακας Παράλληλης Ασφάλισης (ΙΚΑ & ΟΑΕΕ / ΙΚΑ & ΤΣΜΕΔΕ / ΙΚΑ & ΤΣΑΥ / ΟΑΕΕ & ΤΣΜΕΔΕ / ΟΓΑ & ΙΚΑ/ΟΑΕΕ)",
                         yearly=True,
                         year_column='Έτος'
                     )
