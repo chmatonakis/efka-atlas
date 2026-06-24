@@ -98,18 +98,26 @@ def _atlas_render_full_html_report_open_tab(df: pd.DataFrame, edition: str = "li
 
     edition: "lite" (προεπιλογή) ή "pro" (επιπλέον καρτέλες — υπό σταδιακή μεταφορά).
     """
-    from html_viewer_builder import generate_full_html_report
+    import importlib
+    import inspect
+
+    import html_viewer_builder as _hvb_mod
+    generate_full_html_report = _hvb_mod.generate_full_html_report
+    if "edition" not in inspect.signature(generate_full_html_report).parameters:
+        _hvb_mod = importlib.reload(_hvb_mod)
+        generate_full_html_report = _hvb_mod.generate_full_html_report
 
     client_name = st.session_state.get("client_name", "")
     _app_title = "ATLAS Pro" if edition == "pro" else "ATLAS"
+    _report_kwargs = {
+        "client_name": client_name,
+        "app_title": _app_title,
+        "app_subtitle": "Ασφαλιστικό Βιογραφικό",
+    }
+    if "edition" in inspect.signature(generate_full_html_report).parameters:
+        _report_kwargs["edition"] = edition
     with st.spinner("Παραγωγή της HTML αναφοράς — παρακαλώ περιμένετε…"):
-        viewer_html, _ = generate_full_html_report(
-            df,
-            client_name=client_name,
-            app_title=_app_title,
-            app_subtitle="Ασφαλιστικό Βιογραφικό",
-            edition=edition,
-        )
+        viewer_html, _ = generate_full_html_report(df, **_report_kwargs)
     js_content = json.dumps(viewer_html).replace("</script>", "<\\/script>")
     components.html(
         f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
