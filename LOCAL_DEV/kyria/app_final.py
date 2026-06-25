@@ -4521,6 +4521,8 @@ def build_summary_grouped_display(summary_df: pd.DataFrame, source_df: pd.DataFr
     summary_df['Από_dt'] = pd.to_datetime(summary_df.get('Από'), format='%d/%m/%Y', errors='coerce')
     summary_df['Έως_dt'] = pd.to_datetime(summary_df.get('Έως'), format='%d/%m/%Y', errors='coerce')
     summary_df = summary_df.dropna(subset=['Από_dt'])
+    if summary_df.empty:
+        return pd.DataFrame()
 
     numeric_columns = ['Έτη', 'Μήνες', 'Ημέρες']
     currency_columns = ['Μικτές αποδοχές', 'Συνολικές εισφορές']
@@ -4563,11 +4565,15 @@ def build_summary_grouped_display(summary_df: pd.DataFrame, source_df: pd.DataFr
     if not agg_dict:
         return pd.DataFrame()
     grouped = summary_df.groupby(group_keys).agg(agg_dict).reset_index()
+    if grouped.empty:
+        return pd.DataFrame()
 
     # Βεβαιωθείτε ότι υπάρχουν οι στήλες που χρησιμοποιεί το υπόλοιπο κώδικα
     for col in ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές']:
         if col not in grouped.columns:
             grouped[col] = 0
+        else:
+            grouped[col] = pd.to_numeric(grouped[col], errors='coerce').fillna(0)
 
     # Cap μήνα-μήνα πάνω στο ισοδύναμο ημερών (Έτη/Μήνες/Ημέρες), χωρίς διάκριση Τύπου Αποδοχών.
     raw_total_days = (
@@ -4579,12 +4585,15 @@ def build_summary_grouped_display(summary_df: pd.DataFrame, source_df: pd.DataFr
     if not capped_days.empty:
         merge_keys = [k for k in group_keys if k in capped_days.columns]
         grouped = grouped.merge(capped_days, on=merge_keys, how='left')
-        total_days = grouped['Συνολικές_Ημέρες_cap'].fillna(raw_total_days)
+        cap_series = pd.to_numeric(grouped['Συνολικές_Ημέρες_cap'], errors='coerce')
+        total_days = cap_series.fillna(raw_total_days)
         grouped = grouped.drop(columns=['Συνολικές_Ημέρες_cap'])
     else:
         total_days = raw_total_days
 
-    grouped['Συνολικές ημέρες'] = total_days.round(0).astype(int)
+    grouped['Συνολικές ημέρες'] = (
+        pd.to_numeric(total_days, errors='coerce').fillna(0).round(0).astype(int)
+    )
     years_series = (grouped['Συνολικές ημέρες'].astype(float) // year_days)
     remaining_after_years = grouped['Συνολικές ημέρες'].astype(float) - (years_series * year_days)
     months_series = (remaining_after_years // month_days)
@@ -6156,6 +6165,12 @@ def render_totals_tab(
             st.warning("Μη έγκυρη ημερομηνία στο πεδίο Έως για τη Συνολα.")
 
     summary_df = summary_df.dropna(subset=['Από_dt'])
+    if summary_df.empty:
+        st.info(
+            "Δεν βρέθηκαν εγγραφές με τους επιλεγμένους συνδυασμούς φίλτρων "
+            "(π.χ. το πακέτο καλύψεως δεν αντιστοιχεί στο επιλεγμένο ταμείο)."
+        )
+        return
     summary_df_for_dk = summary_df.copy()
 
     numeric_columns = ['Έτη', 'Μήνες', 'Ημέρες']
@@ -6190,9 +6205,17 @@ def render_totals_tab(
         st.warning("Δεν βρέθηκαν στήλες για ομαδοποίηση στη Συνοπτική Αναφορά.")
         return
     grouped = summary_df.groupby(group_keys).agg(agg_dict).reset_index()
+    if grouped.empty:
+        st.info(
+            "Δεν βρέθηκαν εγγραφές με τους επιλεγμένους συνδυασμούς φίλτρων "
+            "(π.χ. το πακέτο καλύψεως δεν αντιστοιχεί στο επιλεγμένο ταμείο)."
+        )
+        return
     for col in ['Έτη', 'Μήνες', 'Ημέρες', 'Μικτές αποδοχές', 'Συνολικές εισφορές']:
         if col not in grouped.columns:
             grouped[col] = 0
+        else:
+            grouped[col] = pd.to_numeric(grouped[col], errors='coerce').fillna(0)
 
     basis_label = st.session_state.get('ins_days_basis', 'Μήνας = 25, Έτος = 300')
     if str(basis_label).startswith('Μήνας = 30'):
@@ -6212,12 +6235,15 @@ def render_totals_tab(
     if not capped_days.empty:
         merge_keys = [k for k in group_keys if k in capped_days.columns]
         grouped = grouped.merge(capped_days, on=merge_keys, how='left')
-        total_days = grouped['Συνολικές_Ημέρες_cap'].fillna(raw_total_days)
+        cap_series = pd.to_numeric(grouped['Συνολικές_Ημέρες_cap'], errors='coerce')
+        total_days = cap_series.fillna(raw_total_days)
         grouped = grouped.drop(columns=['Συνολικές_Ημέρες_cap'])
     else:
         total_days = raw_total_days
 
-    grouped['Συνολικές ημέρες'] = total_days.round(0).astype(int)
+    grouped['Συνολικές ημέρες'] = (
+        pd.to_numeric(total_days, errors='coerce').fillna(0).round(0).astype(int)
+    )
     years_series = (grouped['Συνολικές ημέρες'].astype(float) // year_days)
     remaining_after_years = grouped['Συνολικές ημέρες'].astype(float) - (years_series * year_days)
     months_series = (remaining_after_years // month_days)

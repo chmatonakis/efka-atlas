@@ -4406,8 +4406,8 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .table-fullscreen .fs-body #count-tables-wrapper table.print-table.count-unified colgroup col:nth-child(5) { width: 14% !important; }
 #count-tables-wrapper table.print-table.count-unified tbody tr.count-year-band td { background: #eef2ff; color: #1e293b; font-weight: 800; font-size: 14px; padding: 7px 12px; border-top: 2px solid #6366f1; border-bottom: 1px solid #c7d2fe; }
 #count-tables-wrapper table.print-table.count-unified tbody tr.count-year-band td:first-child { color: #1e293b; }
-#count-tables-wrapper table.print-table.count-unified tbody tr.count-year-gap td { height: 14px; padding: 0; background: transparent; border: 0; }
-#count-section.count-year-sparse #count-tables-wrapper table.print-table.count-unified tbody tr.count-year-gap td { height: 60px; }
+#count-tables-wrapper table.print-table.count-unified tbody tr.count-year-gap td { height: 36px; padding: 0; background: transparent; border: 0; }
+#count-section.count-year-sparse #count-tables-wrapper table.print-table.count-unified tbody tr.count-year-gap td { height: 100px; }
 .date-key-panel { margin-top: 24px; padding: 20px 24px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; }
 .date-key-title { font-size: 16px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
 .date-key-desc { font-size: 12px; color: #64748b; margin-bottom: 16px; font-style: italic; }
