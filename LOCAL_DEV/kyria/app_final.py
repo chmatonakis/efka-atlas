@@ -4760,6 +4760,147 @@ def insurance_kind_classify_count(typos) -> str | None:
     return None
 
 
+def _syntaksi_selected_klados_codes(klados_map: dict | None = None) -> set[str]:
+    """Κωδικοί πακέτων από την τρέχουσα επιλογή cnt_filter_klados."""
+    labels = st.session_state.get("cnt_filter_klados") or []
+    m = klados_map if isinstance(klados_map, dict) else (st.session_state.get("_cnt_klados_map") or {})
+    out: set[str] = set()
+    for lbl in labels:
+        code = str(m.get(lbl, lbl)).strip()
+        if code:
+            out.add(code)
+    return out
+
+
+def _syntaksi_is_misthoti_typos(typos) -> bool:
+    s = str(typos).strip().upper()
+    return "ΜΙΣΘΩΤΗ" in s and "ΜΗ ΜΙΣΘΩΤΗ" not in s and not s.startswith("ΜΗ ")
+
+
+def _syntaksi_sum_column(df_slice: pd.DataFrame, column: str, exclude_drx: bool = False) -> float | None:
+    if column not in df_slice.columns:
+        return None
+    total = 0.0
+    has_value = False
+    for value in df_slice[column]:
+        if isinstance(value, (int, float)) and not pd.isna(value):
+            numeric_val = float(value)
+        else:
+            numeric_val = clean_numeric_value(value, exclude_drx=exclude_drx)
+        if numeric_val is None:
+            continue
+        total += numeric_val
+        has_value = True
+    return total if has_value else None
+
+
+def _compute_apd_yearly_for_syntaksi_packages(
+    source_df: pd.DataFrame,
+    selected_klados: set[str],
+) -> tuple[dict[int, float], dict[int, float], dict[int, float]]:
+    """Ετήσια σύνολα μισθωτή (2002+) από ΑΠΔ μόνο για επιλεγμένα πακέτα — όχι ολόκληρη την ΑΠΔ."""
+    im: dict[int, float] = {}
+    mk: dict[int, float] = {}
+    sy: dict[int, float] = {}
+    if source_df is None or getattr(source_df, "empty", True) or not selected_klados:
+        return im, mk, sy
+    if "Κλάδος/Πακέτο Κάλυψης" not in source_df.columns or "Από" not in source_df.columns:
+        return im, mk, sy
+
+    sub = source_df.copy()
+    if "Τύπος Ασφάλισης" in sub.columns:
+        sub = sub[sub["Τύπος Ασφάλισης"].apply(_syntaksi_is_misthoti_typos)]
+    kl = sub["Κλάδος/Πακέτο Κάλυψης"].astype(str).str.strip()
+    sub = sub[kl.isin(selected_klados)]
+    if sub.empty:
+        return im, mk, sy
+
+    sub["_y"] = pd.to_datetime(sub["Από"], format="%d/%m/%Y", errors="coerce").dt.year
+    for year_raw in sub["_y"].dropna().unique():
+        y = int(year_raw)
+        if y < 2002:
+            continue
+        ys = sub[sub["_y"] == y]
+        days_total = 0.0
+        has_days = False
+        for _, row in ys.iterrows():
+            d = clean_numeric_value(row.get("Ημέρες", 0)) or 0.0
+            m = clean_numeric_value(row.get("Μήνες", 0)) or 0.0
+            yr = clean_numeric_value(row.get("Έτη", 0)) or 0.0
+            days_total += float(d) + float(m) * 25.0 + float(yr) * 300.0
+            has_days = True
+        if has_days:
+            im[y] = days_total
+        gross_sum = _syntaksi_sum_column(ys, "Μικτές αποδοχές", exclude_drx=True)
+        synt_sum = _syntaksi_sum_column(ys, "Συντ. Αποδοχές", exclude_drx=True)
+        if gross_sum is not None:
+            mk[y] = float(gross_sum)
+        if synt_sum is not None:
+            sy[y] = float(synt_sum)
+    return im, mk, sy
+
+
+def _syntaksi_year_int(val) -> int | None:
+    if pd.isna(val):
+        return None
+    if isinstance(val, str) and str(val).strip() in ("", "ΣΥΝΟΛΟ", "ΕΞΑΓΟΡΑ"):
+        return None
+    try:
+        return int(float(val))
+    except (TypeError, ValueError):
+        return None
+
+
+def _syntaksi_period_id(year: int) -> int:
+    """1 = έως 2016, 2 = 2017–2019, 3 = από 2020."""
+    if year <= 2016:
+        return 1
+    if year <= 2019:
+        return 2
+    return 3
+
+
+def _syntaksi_ensure_all_years_in_range(syn_f: pd.DataFrame, lo: int, hi: int) -> pd.DataFrame:
+    """Συμπληρώνει κάθε έτος στο εύρος — κενή γραμμή αν δεν υπάρχουν δεδομένα."""
+    cols = [c for c in SYN_TAXI_COLUMN_ORDER if c in syn_f.columns] if not syn_f.empty else list(SYN_TAXI_COLUMN_ORDER)
+    by_year: dict[int, dict] = {}
+    if not syn_f.empty:
+        for _, row in syn_f.iterrows():
+            y = _syntaksi_year_int(row.get("Έτος"))
+            if y is not None:
+                by_year[y] = {c: row.get(c, pd.NA) for c in cols}
+    rows: list[dict] = []
+    for y in range(int(lo), int(hi) + 1):
+        if y in by_year:
+            rows.append(by_year[y])
+        else:
+            empty = {c: pd.NA for c in cols}
+            empty["Έτος"] = y
+            rows.append(empty)
+    return pd.DataFrame(rows, columns=cols)
+
+
+def _syntaksi_insert_period_separator_rows(syn_f: pd.DataFrame) -> pd.DataFrame:
+    """Κενή γραμμή ανάμεσα σε περιόδους: έως 2016 | 2017–2019 | από 2020."""
+    if syn_f is None or syn_f.empty:
+        return syn_f
+    cols = list(syn_f.columns)
+    empty_row = {c: pd.NA for c in cols}
+    out: list[dict] = []
+    prev_period: int | None = None
+    for _, row in syn_f.iterrows():
+        y = _syntaksi_year_int(row.get("Έτος"))
+        if y is None:
+            out.append(row.to_dict())
+            continue
+        p = _syntaksi_period_id(y)
+        if prev_period is not None and p != prev_period:
+            out.append(dict(empty_row))
+        out.append(row.to_dict())
+        prev_period = p
+    return pd.DataFrame(out, columns=cols).reset_index(drop=True)
+
+
 def df_has_tsmede_misthoti_insurance(df: pd.DataFrame) -> bool:
     """True αν υπάρχει γραμμή με Ταμείο ΤΣΜΕΔΕ και τύπο μισθωτής ασφάλισης (όχι μη μισθωτή)."""
     if df is None or getattr(df, 'empty', True):
@@ -4802,8 +4943,8 @@ def compute_kind_monthly_capped_from_c_df(c_df_src: pd.DataFrame, year: int, kin
 
 
 def build_syntaksi_annual_table(c_df: pd.DataFrame) -> pd.DataFrame:
-    """Πίνακας ανά έτος: ημέρες μισθωτή/μη μισθωτή (με πλαφόν), μικτές μόνο μισθωτή, εισφορές μόνο μη μισθωτή, τεκμαρτές (εισφορές μη μισθωτή×5).
-    Το πεδίο «Συνολικές αποδοχές» εδώ είναι προσωρινό (μικτές+τεκμαρτές)· στην καρτέλα Συντάξιμες επανυπολογίζεται ως Συντ. αποδοχές (μικτές μισθωτή από καταμέτρηση)+τεκμαρτές (με κοιν. πόρους) πριν το ΔΤΚ."""
+    """Πίνακας ανά έτος: ημέρες μισθωτή/μη μισθωτή (με πλαφόν), μικτές μόνο μισθωτή, εισφορές μόνο μη μισθωτή, τεκμαρτές (προσωρινά ÷0,20).
+    Το πεδίο «Συνολικές αποδοχές» εδώ είναι προσωρινό (μικτές+τεκμαρτές)· στην καρτέλα Συντάξιμες επανυπολογίζεται ως Συντ. αποδοχές (μικτές μισθωτή από καταμέτρηση)+τεκμαρτές (με κοιν. πόρους και επιλεγμένο %) πριν το ΔΤΚ."""
     if c_df is None or c_df.empty:
         return pd.DataFrame()
     years = sorted({int(y) for y in c_df['ΕΤΟΣ'].dropna().unique()})
@@ -4821,7 +4962,7 @@ def build_syntaksi_annual_table(c_df: pd.DataFrame) -> pd.DataFrame:
             if 'Εισφορές_Part' in sub.columns
             else 0.0
         )
-        tekmark = contrib_t * 5.0
+        tekmark = _syntaksi_eisfores_to_tekmark(contrib_t, 0.20)
         rows.append({
             'Έτος': y,
             'Σύνολο ημερών (μισθωτή)': days_m,
@@ -4883,6 +5024,64 @@ koinwnikoi_table: dict[int, dict[str, float]] = {
 }
 
 KOINWNIKOI_TIPO_OPTIONS = ("ΟΧΙ", "ΔΙΚΗΓΟΡΟΙ", "ΟΑΕΕ", "ΤΣΜΕΔΕ")
+
+SYN_TEKMARK_RATE_LABELS = (
+    "20% — Κυρία σύνταξη",
+    "4% — Εφάπαξ",
+    "6% — Επικουρική",
+    "7%-20% — ΟΓΑ",
+)
+SYN_TEKMARK_RATE_DEFAULT = "20% — Κυρία σύνταξη"
+SYN_TEKMARK_OGA_LABEL = "7%-20% — ΟΓΑ"
+_SYN_TEKMARK_RATE_MAP: dict[str, float] = {
+    "20% — Κυρία σύνταξη": 0.20,
+    "4% — Εφάπαξ": 0.04,
+    "6% — Επικουρική": 0.06,
+}
+
+
+def _syntaksi_oga_tekmark_rate_decimal(year: int) -> float:
+    """Ποσοστό αναγωγής ΟΓΑ ανά έτος (τεκμαρτές = εισφορές ÷ ποσοστό)."""
+    y = int(year)
+    if y <= 2014:
+        return 0.07
+    if y == 2015:
+        return 0.085
+    if y == 2016:
+        return 0.10
+    if y == 2017:
+        return 0.14
+    if y == 2018:
+        return 0.16
+    if y == 2019:
+        return 0.18
+    if y == 2020:
+        return 0.19
+    if y == 2021:
+        return 0.195
+    return 0.20
+
+
+def _syntaksi_tekmark_rate_decimal(label: str) -> float:
+    """Ποσοστό αναγωγής εισφορών σε τεκμαρτές (0,20 = κύρια σύνταξη, ισοδύναμο ÷0,20)."""
+    key = unicodedata.normalize("NFC", str(label or "").strip())
+    return _SYN_TEKMARK_RATE_MAP.get(key, 0.20)
+
+
+def _syntaksi_tekmark_rate_decimal_for_year(label: str, year: int) -> float:
+    """Ποσοστό αναγωγής για συγκεκριμένο έτος (ΟΓΑ: κλιμακούμενο, αλλιώς σταθερό)."""
+    key = unicodedata.normalize("NFC", str(label or "").strip())
+    if key == SYN_TEKMARK_OGA_LABEL:
+        return _syntaksi_oga_tekmark_rate_decimal(year)
+    return _syntaksi_tekmark_rate_decimal(key)
+
+
+def _syntaksi_eisfores_to_tekmark(amount: float, rate_decimal: float) -> float:
+    """Τεκμαρτές από εισφορές (+ κοιν. πόροι): ποσό ÷ ποσοστό (0,20 ≡ παλιό ×5)."""
+    r = float(rate_decimal)
+    if r <= 0:
+        return 0.0
+    return float(amount) / r
 
 
 def _compute_koinwnikoi_poroi_column(syn_f: pd.DataFrame, tipo_sel: str) -> pd.Series:
@@ -4982,8 +5181,9 @@ def _append_exagora_footer_rows(
     poso_raw: str,
     imeres_raw: str,
     etos_ex_str: str,
+    tekmark_rate_label: str = SYN_TEKMARK_RATE_DEFAULT,
 ) -> pd.DataFrame:
-    """Κενή γραμμή + γραμμή «ΕΞΑΓΟΡΑ» με ποσό/ημέρες εξαγοράς, ΔΤΚ(έτος εξαγοράς), τεκμαρτές×5, τελικές×ΔΤΚ."""
+    """Κενή γραμμή + γραμμή «ΕΞΑΓΟΡΑ» με ποσό/ημέρες εξαγοράς, ΔΤΚ(έτος εξαγοράς), τεκμαρτές (÷ποσοστό), τελικές×ΔΤΚ."""
     syn_f = syn_f.copy() if syn_f is not None else pd.DataFrame()
     cols = [c for c in SYN_TAXI_COLUMN_ORDER if c in syn_f.columns]
     if not cols:
@@ -5019,7 +5219,8 @@ def _append_exagora_footer_rows(
     syn_ap_total = None
     telikes = None
     if poso_f is not None:
-        tek = poso_f * 5.0
+        _ex_tek_rate = _syntaksi_tekmark_rate_decimal_for_year(tekmark_rate_label, etos_ex)
+        tek = _syntaksi_eisfores_to_tekmark(poso_f, _ex_tek_rate)
         syn_ap_total = 0.0 + tek
         if dtk_v is not None:
             telikes = float(syn_ap_total) * float(dtk_v)
@@ -5039,12 +5240,12 @@ def _append_exagora_footer_rows(
 
 
 def _append_syntaksi_grand_total_row(syn_f: pd.DataFrame) -> pd.DataFrame:
-    """Τελευταία γραμμή ΣΥΝΟΛΟ: αθροίσματα στηλών (ίδιο εύρος με την Καταμέτρηση για αριθμούς), χωρίς άθροισμα ΔΤΚ."""
+    """Τελευταία γραμμή ΣΥΝΟΛΟ: αθροίσματα στηλών (μόνο αριθμητικά έτη), χωρίς άθροισμα ΔΤΚ."""
     if syn_f is None or syn_f.empty:
         return syn_f
     syn_f = syn_f.copy()
     cols = list(syn_f.columns)
-    sub = syn_f[syn_f['Έτος'].notna()].copy()
+    sub = syn_f[syn_f['Έτος'].apply(lambda v: _syntaksi_year_int(v) is not None)].copy()
     total_row = {c: pd.NA for c in cols}
     total_row['Έτος'] = 'ΣΥΝΟΛΟ'
     _sum_cols = [
@@ -5104,12 +5305,13 @@ def build_syntaksi_pro_json_str(
     poso_raw: str,
     imeres_raw: str,
     etos_ex_str: str,
+    tekmark_rate_label: str = SYN_TEKMARK_RATE_DEFAULT,
 ) -> str:
     """
     JSON για εισαγωγή σε Syntaksi Pro (βλ. ΟΔΗΓΙΕΣ_JSON_EXPORT_STREAMLIT.txt).
     ika_YYYY = ημέρες μισθωτή, apodoxes_YYYY = Συντ. αποδοχές (ετήσιες μικτές μισθωτή από καταμέτρηση)· αν κενό → 0.
     elep_YYYY = ceil(ημέρες μη μισθωτή / 25) ως κείμενο, eisfores_YYYY = συνολικές εισφορές.
-    kerdi_YYYY: μόνο για 2017, 2018, 2019 — συνολικές εισφορές × 5 (πάντα ακριβώς τρία κλειδιά kerdi_*).
+    kerdi_YYYY: μόνο για 2017, 2018, 2019 — τεκμαρτές από πίνακα (ή εισφορές ÷ ποσοστό).
     """
     json_data: dict[str, dict[str, str | float | int]] = {}
     _kerdi_years = (2017, 2018, 2019)
@@ -5117,6 +5319,8 @@ def build_syntaksi_pro_json_str(
     col_days_nm = "Σύνολο ημερών (μη μισθωτή)"
     col_apodoxes_json = "Συντ. αποδοχές"
     col_eis = "Συνολικές εισφορές"
+    col_tek = "Τεκμαρτές αποδοχές"
+    _tek_lbl = unicodedata.normalize("NFC", str(tekmark_rate_label or SYN_TEKMARK_RATE_DEFAULT).strip())
     if syn_f_core is not None and not syn_f_core.empty and "Έτος" in syn_f_core.columns:
         for _, row in syn_f_core.iterrows():
             ey_raw = row.get("Έτος")
@@ -5146,7 +5350,17 @@ def build_syntaksi_pro_json_str(
             eis_val = round(eis_raw, 2)
             json_data[f"eisfores_{year_str}"] = _syntaksi_pro_num_field(eis_val)
             if y in _kerdi_years:
-                json_data[f"kerdi_{year_str}"] = _syntaksi_pro_num_field(round(eis_raw * 5.0, 2))
+                tek_v = pd.to_numeric(row.get(col_tek), errors="coerce")
+                if pd.notna(tek_v):
+                    kerdi_val = round(float(tek_v), 2)
+                else:
+                    kerdi_val = round(
+                        _syntaksi_eisfores_to_tekmark(
+                            eis_raw, _syntaksi_tekmark_rate_decimal_for_year(_tek_lbl, y)
+                        ),
+                        2,
+                    )
+                json_data[f"kerdi_{year_str}"] = _syntaksi_pro_num_field(kerdi_val)
 
     for _ky in _kerdi_years:
         _ks = str(_ky)
@@ -10152,7 +10366,7 @@ def show_results_page(df, filename):
                         # Θέση για σύνολα (πακέτα + metrics) πάνω από τα φίλτρα — γεμίζει μετά τον υπολογισμό syn_f
                         _syn_header_ph = st.empty()
 
-                        fy_col, ty_col, dtk_col, ex_pos_col, ex_days_col, ex_year_col, koin_col = st.columns(7)
+                        fy_col, ty_col, dtk_col, ex_pos_col, ex_days_col, ex_year_col, koin_col, tek_col = st.columns(8)
                         with fy_col:
                             st.text_input(
                                 "Από (έτος):",
@@ -10200,6 +10414,21 @@ def show_results_page(df, filename):
                                 key="_kp_wgt",
                                 on_change=_kp_cb,
                             )
+                        with tek_col:
+                            _tek_opts = list(SYN_TEKMARK_RATE_LABELS)
+                            if "_tek_rate_choice" not in st.session_state:
+                                st.session_state["_tek_rate_choice"] = SYN_TEKMARK_RATE_DEFAULT
+                            def _tek_rate_cb():
+                                st.session_state["_tek_rate_choice"] = st.session_state["_tek_rate_wgt"]
+                            st.selectbox(
+                                "Αναγωγή εισφορών:",
+                                options=_tek_opts,
+                                index=_tek_opts.index(st.session_state["_tek_rate_choice"])
+                                if st.session_state["_tek_rate_choice"] in _tek_opts
+                                else 0,
+                                key="_tek_rate_wgt",
+                                on_change=_tek_rate_cb,
+                            )
 
                         def _parse_syn_year(s, fallback: int):
                             t = str(s or "").strip()
@@ -10218,12 +10447,18 @@ def show_results_page(df, filename):
                         else:
                             _lo, _hi = min(_yf, _yt), max(_yf, _yt)
                             syn_f = syn_df[(syn_df['Έτος'] >= _lo) & (syn_df['Έτος'] <= _hi)].copy()
+                            _years_with_data = (
+                                {y for y in syn_f['Έτος'].map(_syntaksi_year_int) if y is not None}
+                                if 'Έτος' in syn_f.columns
+                                else set()
+                            )
+                            syn_f = _syntaksi_ensure_all_years_in_range(syn_f, _lo, _hi)
+                            _src_mask = syn_f['Έτος'].apply(
+                                lambda e: _syntaksi_year_int(e) in _years_with_data
+                            )
 
-                            # Αντικατάσταση στηλών μισθωτή από ΑΠΔ (αν υπάρχουν ετήσια σύνολα στο session)
-                            _apd_im = st.session_state.get('_apd_yearly_imeres') or {}
-                            _apd_mk = st.session_state.get('_apd_yearly_miktes') or {}
-                            _apd_sy = st.session_state.get('_apd_yearly_synt') or {}
-                            _has_apd = bool(_apd_im or _apd_mk or _apd_sy)
+                            # Μόνο επιλεγμένα πακέτα Καταμέτρησης (χωρίς διάκριση τύπου ασφάλισης)
+                            _sel_klados = _syntaksi_selected_klados_codes()
 
                             def _apd_lookup(mapping, ey_raw):
                                 if not mapping:
@@ -10235,20 +10470,37 @@ def show_results_page(df, filename):
                                 v = mapping.get(iy)
                                 return pd.NA if v is None else v
 
+                            _is_2002_plus = syn_f['Έτος'].apply(
+                                lambda e: int(float(e)) >= 2002 if pd.notna(e) else False
+                            )
+
+                            # Από 2002+: στήλες μισθωτή από ΑΠΔ μόνο για τα επιλεγμένα πακέτα
+                            _apd_im: dict[int, float] = {}
+                            _apd_mk: dict[int, float] = {}
+                            _apd_sy: dict[int, float] = {}
+                            try:
+                                _apd_src = df
+                            except NameError:
+                                _apd_src = None
+                            if _apd_src is not None and not getattr(_apd_src, "empty", True):
+                                _apd_im, _apd_mk, _apd_sy = _compute_apd_yearly_for_syntaksi_packages(
+                                    _apd_src, _sel_klados
+                                )
+                            _has_apd = bool(_apd_im or _apd_mk or _apd_sy)
+
                             if _has_apd:
-                                # Πριν 2002: ημέρες μισθωτής από Καταμέτρηση (ήδη στο syn_df)
-                                # Από 2002+: ημέρες μισθωτής, μικτές, Συντ. αποδοχές από ΑΠΔ
                                 _apd_im_vals = syn_f['Έτος'].apply(lambda e: _apd_lookup(_apd_im, e))
                                 _apd_mk_vals = syn_f['Έτος'].apply(lambda e: _apd_lookup(_apd_mk, e))
                                 _apd_sy_vals = syn_f['Έτος'].apply(lambda e: _apd_lookup(_apd_sy, e))
-                                _is_2002_plus = syn_f['Έτος'].apply(lambda e: int(float(e)) >= 2002 if pd.notna(e) else False)
-                                syn_f['Σύνολο ημερών (μισθωτή)'] = syn_f['Σύνολο ημερών (μισθωτή)'].where(~_is_2002_plus, _apd_im_vals)
-                                syn_f['Συνολικές μικτές αποδοχές'] = syn_f['Συνολικές μικτές αποδοχές'].where(~_is_2002_plus, _apd_mk_vals)
+                                syn_f['Σύνολο ημερών (μισθωτή)'] = syn_f['Σύνολο ημερών (μισθωτή)'].where(
+                                    ~_is_2002_plus, _apd_im_vals
+                                )
+                                syn_f['Συνολικές μικτές αποδοχές'] = syn_f['Συνολικές μικτές αποδοχές'].where(
+                                    ~_is_2002_plus, _apd_mk_vals
+                                )
                                 syn_f['Συντ. αποδοχές'] = pd.NA
                                 syn_f.loc[_is_2002_plus, 'Συντ. αποδοχές'] = _apd_sy_vals[_is_2002_plus]
                             else:
-                                # Χωρίς ΑΠΔ: ημέρες μισθωτής/μικτές πριν 2002 μένουν από Καταμέτρηση, 2002+ κενές
-                                _is_2002_plus = syn_f['Έτος'].apply(lambda e: int(float(e)) >= 2002 if pd.notna(e) else False)
                                 syn_f.loc[_is_2002_plus, 'Σύνολο ημερών (μισθωτή)'] = pd.NA
                                 syn_f.loc[_is_2002_plus, 'Συνολικές μικτές αποδοχές'] = pd.NA
                                 syn_f['Συντ. αποδοχές'] = pd.NA
@@ -10260,19 +10512,44 @@ def show_results_page(df, filename):
                             _koin_series = _compute_koinwnikoi_poroi_column(syn_f, _kp_val)
                             syn_f['Κοινωνικοί Πόροι'] = _koin_series
 
-                            _contrib_n = pd.to_numeric(syn_f['Συνολικές εισφορές'], errors='coerce').fillna(0.0)
-                            _kp_n = pd.to_numeric(syn_f['Κοινωνικοί Πόροι'], errors='coerce').fillna(0.0)
-                            syn_f['Τεκμαρτές αποδοχές'] = (_contrib_n + _kp_n) * 5.0
-                            _synt_miktes_n = pd.to_numeric(syn_f['Συντ. αποδοχές'], errors='coerce').fillna(0.0)
-                            _tek_n = pd.to_numeric(syn_f['Τεκμαρτές αποδοχές'], errors='coerce').fillna(0.0)
-                            syn_f['Συνολικές αποδοχές'] = _synt_miktes_n + _tek_n
+                            _tek_label = str(
+                                st.session_state.get("_tek_rate_choice", SYN_TEKMARK_RATE_DEFAULT)
+                            )
+                            _tek_lbl_nfc = unicodedata.normalize("NFC", _tek_label.strip())
+                            _contrib_n = pd.to_numeric(syn_f['Συνολικές εισφορές'], errors='coerce')
+                            _kp_n = pd.to_numeric(syn_f['Κοινωνικοί Πόροι'], errors='coerce')
+                            _tek_base = _contrib_n.fillna(0.0) + _kp_n.fillna(0.0)
+                            syn_f['Τεκμαρτές αποδοχές'] = pd.NA
+                            if _tek_lbl_nfc == SYN_TEKMARK_OGA_LABEL:
+                                _oga_rates = syn_f.loc[_src_mask, 'Έτος'].apply(
+                                    lambda e: _syntaksi_oga_tekmark_rate_decimal(int(float(e)))
+                                )
+                                syn_f.loc[_src_mask, 'Τεκμαρτές αποδοχές'] = (
+                                    _tek_base.loc[_src_mask].values / _oga_rates.values
+                                )
+                            else:
+                                _tek_rate_dec = _syntaksi_tekmark_rate_decimal(_tek_label)
+                                syn_f.loc[_src_mask, 'Τεκμαρτές αποδοχές'] = (
+                                    _tek_base.loc[_src_mask] / _tek_rate_dec
+                                )
+                            _synt_miktes_n = pd.to_numeric(syn_f['Συντ. αποδοχές'], errors='coerce')
+                            _tek_n = pd.to_numeric(syn_f['Τεκμαρτές αποδοχές'], errors='coerce')
+                            syn_f['Συνολικές αποδοχές'] = pd.NA
+                            _has_apodoxes = _src_mask & (_synt_miktes_n.notna() | _tek_n.notna())
+                            syn_f.loc[_has_apodoxes, 'Συνολικές αποδοχές'] = (
+                                _synt_miktes_n.fillna(0.0) + _tek_n.fillna(0.0)
+                            ).loc[_has_apodoxes]
                             _g = pd.to_numeric(syn_f['Συνολικές αποδοχές'], errors='coerce')
                             _d = pd.to_numeric(syn_f['ΔΤΚ'], errors='coerce')
-                            syn_f['Τελικές Συντ. Αποδοχές'] = _g * _d
+                            syn_f['Τελικές Συντ. Αποδοχές'] = pd.NA
+                            syn_f.loc[_has_apodoxes, 'Τελικές Συντ. Αποδοχές'] = (
+                                _g * _d
+                            ).loc[_has_apodoxes]
                             syn_f = syn_f[[c for c in SYN_TAXI_COLUMN_ORDER if c in syn_f.columns]]
 
                             _syn_pro_json_core = syn_f.copy()
                             _n_rows_before = len(syn_f)
+                            syn_f = _syntaksi_insert_period_separator_rows(syn_f)
                             syn_f = _append_exagora_footer_rows(
                                 syn_f,
                                 dtk_doc,
@@ -10280,6 +10557,7 @@ def show_results_page(df, filename):
                                 st.session_state.get("syntaksi_exagora_poso", ""),
                                 st.session_state.get("syntaksi_exagora_imres", ""),
                                 st.session_state.get("syntaksi_exagora_etos", "2026"),
+                                tekmark_rate_label=_tek_label,
                             )
                             syn_f = _append_syntaksi_grand_total_row(syn_f)
 
@@ -10401,11 +10679,19 @@ def show_results_page(df, filename):
                             except Exception:
                                 _syn_disp_show = disp_syn
 
+                            _tek_rate_lbl = _tek_label
+                            _tek_caption_extra = (
+                                " (7% έως 2014, 8,5%→2015, 10%→2016, 14%→2017, 16%→2018, "
+                                "18%→2019, 19%→2020, 19,5%→2021, 20% από 2022)"
+                                if _tek_lbl_nfc == SYN_TEKMARK_OGA_LABEL
+                                else ""
+                            )
                             st.caption(
+                                "**Μόνο** τα επιλεγμένα πακέτα Καταμέτρησης (ανεξάρτητα από τύπο ασφάλισης). "
                                 "**Πριν 2002**: **ημέρες μισθωτή** & **μικτές** από **Καταμέτρηση**. "
-                                "**Από 2002+**: **ημέρες μισθωτή**, **μικτές**, **Συντ. αποδοχές** από ετήσια **σύνολα ΑΠΔ** (αν έχει τρέξει)· αλλιώς κενά. "
-                                "**Σύνολο ημερών (μη μισθωτή)** / **Εισφορές** πάντα από **Καταμέτρηση**. "
-                                "**Συνολικές αποδοχές** = Συντ. αποδοχές + τεκμαρτές ((εισφορές μη μισθωτή + κοιν. πόροι)×5)."
+                                "**Από 2002+**: **μισθωτής** από **ΑΠΔ** μόνο για τα ίδια πακέτα· **μη μισθωτής** / **εισφορές** από **Καταμέτρηση**. "
+                                f"**Τεκμαρτές** = (εισφορές + κοιν. πόροι) ÷ ποσοστό (**{_tek_rate_lbl}**{_tek_caption_extra}). "
+                                "**Συνολικές αποδοχές** = Συντ. αποδοχές + τεκμαρτές."
                             )
                             try:
                                 st.dataframe(_syn_disp_show, width="stretch", hide_index=True)
@@ -10429,6 +10715,7 @@ def show_results_page(df, filename):
                                 st.session_state.get("syntaksi_exagora_poso", ""),
                                 st.session_state.get("syntaksi_exagora_imres", ""),
                                 st.session_state.get("syntaksi_exagora_etos", "2026"),
+                                tekmark_rate_label=_tek_label,
                             )
                             _sm_pr, _sm_tr, _sm_sr = _syntaksi_summary_metrics_from_syn_f(syn_f)
                             _mv_pr = (
