@@ -8736,7 +8736,6 @@ def show_results_page(df, filename):
                 # Masking logic
                 prev_month = None
                 prev_tameio = None
-                prev_ins_type = None
                 
                 processed_rows = []
                 for idx, row in year_slice.iterrows():
@@ -8781,13 +8780,6 @@ def show_results_page(df, filename):
                     else:
                         prev_tameio = curr_tameio
                     
-                    # Τύπος Ασφάλισης
-                    curr_ins_type = row.get('Τύπος Ασφάλισης')
-                    if idx > 0 and curr_ins_type == prev_ins_type:
-                        new_row['Τύπος Ασφάλισης'] = ''
-                    else:
-                        prev_ins_type = curr_ins_type
-                    
                     processed_rows.append(new_row)
                 
                 # Cleanup
@@ -8816,6 +8808,7 @@ def show_results_page(df, filename):
                     # Υπολογισμός αθροισμάτων (από το masked dataframe)
                     days_total = _sum_column(proc_df, 'Ημέρες Ασφ.')
                     gross_sum = _sum_column(proc_df, 'Μικτές αποδοχές', exclude_drx=True)
+                    contrib_sum = _sum_column(proc_df, 'Συνολικές εισφορές', exclude_drx=True)
                     adjusted_sum = _sum_column(proc_df, 'Συντ. Αποδοχές', exclude_drx=True)
                     cut_sum = _sum_column(proc_df, 'Περικοπή', exclude_drx=True)
                     
@@ -8826,6 +8819,8 @@ def show_results_page(df, filename):
                         totals_row['Μικτές αποδοχές'] = gross_sum
                         totals_row['Συν. μήνα'] = gross_sum
                         _apd_yearly_miktes[year_int] = float(gross_sum)
+                    if contrib_sum is not None:
+                        totals_row['Συνολικές εισφορές'] = contrib_sum
                     if adjusted_sum is not None:
                         totals_row['Συντ. Αποδοχές'] = adjusted_sum
                         _apd_yearly_synt[year_int] = float(adjusted_sum)
@@ -8833,7 +8828,12 @@ def show_results_page(df, filename):
                         totals_row['Περικοπή'] = cut_sum
 
                     if 'Συν. % κράτησης' in totals_row:
-                        totals_row['Συν. % κράτησης'] = ''
+                        if contrib_sum is not None and adjusted_sum:
+                            totals_row['Συν. % κράτησης'] = contrib_sum / adjusted_sum
+                        elif contrib_sum is not None and adjusted_sum == 0:
+                            totals_row['Συν. % κράτησης'] = 0.0
+                        else:
+                            totals_row['Συν. % κράτησης'] = ''
 
                     final_frames.append(pd.DataFrame([totals_row], columns=all_columns))
                 
@@ -8854,6 +8854,12 @@ def show_results_page(df, filename):
                 display_apd_df = pd.concat(final_frames, ignore_index=True)
             else:
                 display_apd_df = working_df[all_columns].reset_index(drop=True)
+
+        # Κατάργηση περιττών στηλών «Από»/«Έως»/«Τύπος Ασφάλισης» από κάθε εμφάνιση/εξαγωγή της ΑΠΔ
+        # (οι υπολογισμοί έχουν ήδη ολοκληρωθεί παραπάνω — η ετικέτα «Σύνολο» μπαίνει στη στήλη «Μήνας»)
+        _apd_drop_cols = [c for c in ['Από', 'Έως', 'Τύπος Ασφάλισης'] if c in display_apd_df.columns]
+        if _apd_drop_cols:
+            display_apd_df = display_apd_df.drop(columns=_apd_drop_cols)
 
         # Αν ο διακόπτης είναι ενεργός, κρατάμε μόνο τις γραμμές «Σύνολο <Έτος>»
         if st.session_state.get('apd_year_totals_only', False):
@@ -8989,9 +8995,8 @@ def show_results_page(df, filename):
         except Exception:
             st.dataframe(display_apd_df, width="stretch", hide_index=True)
         # Κουμπί εκτύπωσης για Ανάλυση ΑΠΔ
-        # Αφαιρούμε τις στήλες 'Από' και 'Έως' για την εκτύπωση
         print_df = display_apd_df.copy()
-        cols_to_drop = [c for c in ['Από', 'Έως'] if c in print_df.columns]
+        cols_to_drop = [c for c in ['Από', 'Έως', 'Τύπος Ασφάλισης'] if c in print_df.columns]
         if cols_to_drop:
             print_df = print_df.drop(columns=cols_to_drop)
 

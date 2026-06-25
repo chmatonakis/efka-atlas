@@ -49,6 +49,7 @@ from app_final import (
     apply_negative_time_sign,
     insurance_kind_classify_count,
     format_number_greek,
+    format_currency,
     APODOXES_DESCRIPTIONS,
     compute_parallel_summary_metrics,
     compute_parallel_2017_summary_metrics,
@@ -2446,6 +2447,11 @@ def _build_count_filter_js():
     ['tameio','typos','employer','klados','apodoxes'].forEach(function(attr){
       f[attr]=liteCollectChecked(sec,attr);
     });
+    var klKey=(f.klados||[]).slice().sort().join('\u0001');
+    if(klKey!==apply._prevCntKlados){
+      apply._prevCntKlados=klKey;
+      try{window.dispatchEvent(new CustomEvent('atlas-count-klados-change',{detail:{codes:(f.klados||[]).slice()}}));}catch(e){}
+    }
     sec.querySelectorAll('.count-filters .filter-modal-group').forEach(function(dd){
       var key=dd.getAttribute('data-filter-key');
       if(!key)return;
@@ -2802,8 +2808,1068 @@ def _build_annex_df(df):
     return extra_df
 
 
+# ---------------------------------------------------------------------------
+# ΑΠΔ / Πλαφόν (Pro) — port από την Κυρία (live φίλτρα σε JS + στατικό fallback)
+# ---------------------------------------------------------------------------
+
+# Πλαφόν εισφορών (ίδιοι πίνακες με LOCAL_DEV/kyria/app_final.PLAFOND_*)
+PLAFOND_PALIOS = {
+    "2002": 1884.75, "2003": 1960.25, "2004": 2058.25, "2005": 2140.50,
+    "2006": 2226.00, "2007": 2315.00, "2008": 2384.50, "2009": 2432.25,
+    "2010": 2432.25, "2011": 2432.25, "2012": 2432.25, "2013": 5546.80,
+    "2014": 5546.80, "2015": 5546.80, "2016": 5861.00, "2017": 5861.00,
+    "2018": 5861.00, "2019": 6500.00, "2020": 6500.00, "2021": 6500.00,
+    "2022": 6500.00, "2023": 7126.94, "2024": 7126.94, "2025": 7572.62,
+    "2026": 7761.94, "2027": 7917.18, "2028": 8075.52, "2029": 8237.03, "2030": 8401.77,
+}
+PLAFOND_NEOS = {
+    "2002": 4693.52, "2003": 4693.52, "2004": 4693.52, "2005": 4881.26,
+    "2006": 5076.51, "2007": 5279.57, "2008": 5437.96, "2009": 5543.55,
+    "2010": 5543.55, "2011": 5543.55, "2012": 5546.80, "2013": 5546.80,
+    "2014": 5546.80, "2015": 5546.80, "2016": 5861.00, "2017": 5861.00,
+    "2018": 5861.00, "2019": 6500.00, "2020": 6500.00, "2021": 6500.00,
+    "2022": 6500.00, "2023": 7126.94, "2024": 7126.94, "2025": 7572.62,
+    "2026": 7761.94, "2027": 7917.18, "2028": 8075.52, "2029": 8237.03, "2030": 8401.77,
+}
+
+_APD_DROP_COLUMNS = {
+    "Φορέας", "Κωδικός Κλάδων / Πακέτων Κάλυψης", "Περιγραφή",
+    "Κωδικός Τύπου Αποδοχών", "Σελίδα",
+}
+# Στήλες που υπολογίζονται στον αγωγό (δεν είναι «passthrough» από την εγγραφή)
+_APD_COMPUTED_COLS = {
+    "Έτος", "Μήνας", "Ημέρες Ασφ.", "Μικτές αποδοχές", "Συν. μήνα",
+    "Εισφ. πλαφόν", "Συντ. Αποδοχές", "Περικοπή", "Συνολικές εισφορές",
+    "Συν. % κράτησης",
+}
+_APD_SPECIAL_CODES = ("03", "04", "05")
+
+
+def _apd_is_palios(df) -> bool:
+    if "Από" not in df.columns:
+        return False
+    try:
+        d = pd.to_datetime(df["Από"], format="%d/%m/%Y", errors="coerce")
+        return (not d.isnull().all()) and d.min() < pd.Timestamp("1993-01-01")
+    except Exception:
+        return False
+
+
+def _apd_is_misthoti_typos(typos) -> bool:
+    s = str(typos).strip().upper()
+    return "ΜΙΣΘΩΤΗ" in s and "ΜΗ ΜΙΣΘΩΤΗ" not in s and not s.startswith("ΜΗ ")
+
+
+def _apd_clean_code(val) -> str:
+    return str(val if val is not None else "").strip().split(" ")[0].strip()
+
+
+def _apd_is_special_code(clean_code: str) -> bool:
+    return (clean_code in _APD_SPECIAL_CODES) or (
+        len(clean_code) >= 2 and clean_code[:2] in _APD_SPECIAL_CODES
+    )
+
+
+def _apd_date_to_int(s) -> int:
+    """dd/mm/yyyy → yyyymmdd (0 αν άκυρο)."""
+    if s is None:
+        return 0
+    txt = str(s).strip()
+    if not txt:
+        return 0
+    dt = pd.to_datetime(txt, format="%d/%m/%Y", errors="coerce")
+    if pd.isna(dt):
+        return 0
+    return int(dt.year) * 10000 + int(dt.month) * 100 + int(dt.day)
+
+
+def _build_apd_base_df(df):
+    """Βάση ΑΠΔ: ίδια λογική με την Κυρία (drop βοηθητικών, εξαίρεση πακέτων, μόνο μισθωτή)."""
+    apd_cols = [c for c in df.columns if c not in _APD_DROP_COLUMNS]
+    apd_df = df[apd_cols].copy() if apd_cols else df.copy()
+    if "Σελίδα" in apd_df.columns:
+        apd_df = apd_df.drop(columns=["Σελίδα"])
+    pkg_col = next(
+        (c for c in ["Κλάδος/Πακέτο Κάλυψης", "Κλάδος/Πακέτο", "ΚΛΑΔΟΣ/ΠΑΚΕΤΟ"] if c in apd_df.columns),
+        None,
+    )
+    if pkg_col is not None:
+        s = apd_df[pkg_col].astype(str).str.strip()
+        apd_df = apd_df[~s.isin(EXCLUDED_PACKAGES)]
+    if "Τύπος Ασφάλισης" in apd_df.columns:
+        apd_df = apd_df[apd_df["Τύπος Ασφάλισης"].apply(_apd_is_misthoti_typos)]
+    return apd_df.reset_index(drop=True)
+
+
+def _apd_earnings_col(apd_df):
+    return next((c for c in apd_df.columns if "Τύπος Αποδοχών" in c), None)
+
+
+def _apd_column_order(apd_df, earnings_col):
+    """Τελική σειρά στηλών εμφάνισης (ίδια με την Κυρία), ανεξάρτητη από τα φίλτρα."""
+    cols = [c for c in apd_df.columns if c not in ("Έτη", "Μήνες", "Ημέρες", "Τύπος Ασφάλισης")]
+
+    def ins_after(lst, anchor, name):
+        if name in lst:
+            lst.remove(name)
+        if anchor in lst:
+            lst.insert(lst.index(anchor) + 1, name)
+        else:
+            lst.append(name)
+
+    if "Κλάδος/Πακέτο Κάλυψης" in cols:
+        ins_after(cols, "Κλάδος/Πακέτο Κάλυψης", "Περιγραφή Κλάδου")
+    if earnings_col:
+        ins_after(cols, earnings_col, "Περιγραφή Τύπου Αποδοχών")
+    if "Μικτές αποδοχές" in cols:
+        ins_after(cols, "Μικτές αποδοχές", "Εισφ. πλαφόν")
+        ins_after(cols, "Εισφ. πλαφόν", "Περικοπή")
+        ins_after(cols, "Εισφ. πλαφόν", "Συντ. Αποδοχές")
+    if "Συνολικές εισφορές" in cols:
+        ins_after(cols, "Συνολικές εισφορές", "Συν. % κράτησης")
+    # Έτος πρώτο
+    cols = ["Έτος"] + cols
+    # Μήνας πριν το Από
+    if "Μήνας" in cols:
+        cols.remove("Μήνας")
+    cols.insert(cols.index("Από") if "Από" in cols else 1, "Μήνας")
+    # Ημέρες Ασφ. μετά το Έως
+    if "Ημέρες Ασφ." in cols:
+        cols.remove("Ημέρες Ασφ.")
+    if "Έως" in cols:
+        cols.insert(cols.index("Έως") + 1, "Ημέρες Ασφ.")
+    else:
+        cols.append("Ημέρες Ασφ.")
+    # Συν. μήνα μετά τις Μικτές αποδοχές
+    if "Συν. μήνα" in cols:
+        cols.remove("Συν. μήνα")
+    if "Μικτές αποδοχές" in cols:
+        cols.insert(cols.index("Μικτές αποδοχές") + 1, "Συν. μήνα")
+    else:
+        cols.append("Συν. μήνα")
+    # Κατάργηση περιττών στηλών «Από»/«Έως»/«Τύπος Ασφάλισης» (μόνο μισθωτής — η στήλη δεν εμφανίζεται)
+    cols = [c for c in cols if c not in ("Από", "Έως", "Τύπος Ασφάλισης")]
+    return cols
+
+
+def _apd_build_records(apd_df, earnings_col, description_map):
+    """Λίστα εγγραφών (passthrough κελιά + raw αριθμοί) για τον αγωγό (Python & JS)."""
+    desc_map = description_map or {}
+    pass_cols = [
+        c for c in apd_df.columns
+        if c not in _APD_COMPUTED_COLS and c not in ("Έτη", "Μήνες", "Ημέρες")
+    ]
+    records = []
+    for _, r in apd_df.iterrows():
+        row_cells = {}
+        for c in pass_cols:
+            v = r.get(c)
+            row_cells[c] = "" if (v is None or (isinstance(v, float) and pd.isna(v))) else str(v)
+        klados = str(r.get("Κλάδος/Πακέτο Κάλυψης", "") or "").strip()
+        row_cells["Περιγραφή Κλάδου"] = desc_map.get(klados, "") if klados else ""
+        code_raw = str(r.get(earnings_col, "") or "").strip() if earnings_col else ""
+        clean_code = _apd_clean_code(code_raw)
+        ap_desc = APODOXES_DESCRIPTIONS.get(clean_code, "") if clean_code else ""
+        row_cells["Περιγραφή Τύπου Αποδοχών"] = ap_desc
+        days = (clean_numeric_value(r.get("Ημέρες", 0)) or 0) \
+            + (clean_numeric_value(r.get("Μήνες", 0)) or 0) * 25 \
+            + (clean_numeric_value(r.get("Έτη", 0)) or 0) * 300
+        records.append({
+            "row": row_cells,
+            "g": clean_numeric_value(r.get("Μικτές αποδοχές", 0), exclude_drx=True) or 0.0,
+            "c": clean_numeric_value(r.get("Συνολικές εισφορές", 0), exclude_drx=True) or 0.0,
+            "days": float(days),
+            "code": clean_code,
+            "klados": klados,
+            "tameio": str(r.get("Ταμείο", "") or "").strip(),
+            "apodox": clean_code,
+            "ai": _apd_date_to_int(r.get("Από")),
+            "ei": _apd_date_to_int(r.get("Έως")),
+        })
+    return records
+
+
+def _apd_fmt_days(n):
+    if n is None:
+        return ""
+    try:
+        v = float(n)
+    except (TypeError, ValueError):
+        return ""
+    if v == 0:
+        return ""
+    return format_number_greek(v, decimals=0)
+
+
+def _apd_fmt_pct(val):
+    if val is None or val == "":
+        return ""
+    try:
+        return f"{float(val):.1%}".replace(".", ",")
+    except (TypeError, ValueError):
+        return ""
+
+
+def _apd_compute_display_rows(records, col_order, params):
+    """Πλήρης αγωγός ΑΠΔ (ίδιος με την Κυρία) → λίστα γραμμών εμφάνισης.
+
+    params: dict με κλειδιά plafond ('palios'|'neos'|'none'), from_i, to_i (yyyymmdd),
+            ret_mode ('all'|'ge'|'lt'), ret_thr (%), highlight (%), totals_only (bool).
+    Επιστρέφει λίστα από dict: {kind, cells, low, cut} όπου kind ∈ data|total|empty.
+    """
+    plafond = params.get("plafond", "neos")
+    plafond_map = PLAFOND_PALIOS if plafond == "palios" else (PLAFOND_NEOS if plafond == "neos" else None)
+    from_i = params.get("from_i", 0)
+    to_i = params.get("to_i", 0)
+    sel_tameio = set(params.get("tameio") or [])
+    sel_klados = set(params.get("klados") or [])
+    sel_apodox = set(params.get("apodox") or [])
+    ret_mode = params.get("ret_mode", "all")
+    ret_thr = (params.get("ret_thr", 0.0) or 0.0) / 100.0
+    highlight = params.get("highlight", 21.0) or 0.0
+    totals_only = bool(params.get("totals_only", False))
+
+    # 1) Φίλτρα (ταμείο/κλάδος/αποδοχές + ημερομηνίες στο «Από»)
+    flt = []
+    for rec in records:
+        if sel_tameio and rec["tameio"] not in sel_tameio:
+            continue
+        if sel_klados and rec["klados"] not in sel_klados:
+            continue
+        if sel_apodox and rec["apodox"] not in sel_apodox:
+            continue
+        ai = rec["ai"]
+        if from_i and (not ai or ai < from_i):
+            continue
+        if to_i and (not ai or ai > to_i):
+            continue
+        flt.append(rec)
+
+    # 2)/3) Per-row βάση πλαφόν + per-row % (για το ΦΙΛΤΡΟ %) + φίλτρο %
+    kept = []
+    for rec in flt:
+        year = (rec["ai"] // 10000) if rec["ai"] else None
+        if plafond_map is None:
+            base_plaf = None
+        else:
+            base_plaf = plafond_map.get(str(year), 0) if year else 0
+            if rec["code"] in ("04", "05"):
+                base_plaf = base_plaf / 2
+        gross = rec["g"]
+        if base_plaf is None or base_plaf == 0:
+            adj_row = gross
+        else:
+            adj_row = min(gross, base_plaf)
+        ret_row = (rec["c"] / adj_row) if adj_row else 0.0
+        if ret_mode == "ge" and not (ret_row >= ret_thr):
+            continue
+        if ret_mode == "lt" and not (ret_row < ret_thr):
+            continue
+        rec2 = dict(rec)
+        rec2["_year"] = year
+        rec2["_base_plaf"] = base_plaf
+        kept.append(rec2)
+
+    pass_cols = [c for c in col_order if c not in _APD_COMPUTED_COLS]
+
+    def base_cells(rec):
+        cells = {c: rec["row"].get(c, "") for c in pass_cols}
+        cells["Μικτές αποδοχές"] = format_currency(rec["g"])
+        cells["Συνολικές εισφορές"] = format_currency(rec["c"])
+        cells["Ημέρες Ασφ."] = _apd_fmt_days(rec["days"])
+        return cells
+
+    years = sorted({r["_year"] for r in kept if r["_year"] is not None})
+    out = []
+
+    for year in years:
+        yr_rows = [r for r in kept if r["_year"] == year]
+
+        # month info + sort priority
+        for r in yr_rows:
+            di = r["ei"] if r["ei"] else r["ai"]
+            month_num = (di // 100) % 100 if di else 13
+            special = _apd_is_special_code(r["code"])
+            r["_sm"] = 20 if special else month_num
+            r["_mlabel"] = "" if special else f"{month_num}ος"
+            code = r["code"]
+            if not special:
+                r["_sp"] = -1 if code == "01" else 0
+            elif code.startswith("03"):
+                r["_sp"] = 1
+            elif code.startswith("04"):
+                r["_sp"] = 2
+            elif code.startswith("05"):
+                r["_sp"] = 3
+            else:
+                r["_sp"] = 4
+
+        # monthly sums (μόνο μη-κενοί μήνες)
+        msum, mcontrib, days01 = {}, {}, {}
+        for r in yr_rows:
+            m = r["_mlabel"]
+            if m:
+                msum[m] = msum.get(m, 0.0) + r["g"]
+                mcontrib[m] = mcontrib.get(m, 0.0) + r["c"]
+                if r["code"] == "01":
+                    days01[m] = days01.get(m, 0.0) + r["days"]
+
+        # δυναμικό πλαφόν + οικονομικά ανά γραμμή
+        for r in yr_rows:
+            m = r["_mlabel"]
+            monthly_gross = msum.get(m, 0.0) if m else r["g"]
+            monthly_contrib = mcontrib.get(m, 0.0) if m else r["c"]
+            r["_synmina"] = monthly_gross
+            base = r["_base_plaf"]
+            if base is None:
+                r["_plaf"] = None
+                r["_adj"] = monthly_gross
+                r["_cut"] = None
+                r["_pct"] = (monthly_contrib / monthly_gross) if monthly_gross else 0.0
+            else:
+                final_plaf = base
+                if m:
+                    d01 = days01.get(m, 0.0)
+                    if d01 > 0:
+                        final_plaf = (base / 25.0) * min(d01, 25)
+                if monthly_gross > final_plaf:
+                    r["_cut"] = monthly_gross - final_plaf
+                    r["_adj"] = final_plaf
+                else:
+                    r["_cut"] = None
+                    r["_adj"] = monthly_gross
+                r["_plaf"] = final_plaf
+                r["_pct"] = (monthly_contrib / r["_adj"]) if r["_adj"] and r["_adj"] > 0 else 0.0
+
+        yr_rows.sort(key=lambda r: (r["_sm"], r["_sp"], r["tameio"], r["ai"]))
+
+        prev_month = prev_tameio = None
+        days_total = gross_sum = adj_sum = cut_sum = contrib_sum = 0.0
+        for idx, r in enumerate(yr_rows):
+            cells = base_cells(r)
+            cells["Έτος"] = str(int(year)) if idx == 0 else ""
+            cells["Μήνας"] = r["_mlabel"]
+            cells["Συν. μήνα"] = format_currency(r["_synmina"])
+            cells["Εισφ. πλαφόν"] = format_currency(r["_plaf"]) if r["_plaf"] is not None else ""
+            cells["Συντ. Αποδοχές"] = format_currency(r["_adj"])
+            cells["Περικοπή"] = format_currency(r["_cut"]) if r["_cut"] is not None else ""
+            cells["Συν. % κράτησης"] = _apd_fmt_pct(r["_pct"])
+
+            curr_month = r["_mlabel"]
+            month_hidden = False
+            if curr_month:
+                if idx > 0 and curr_month == prev_month:
+                    cells["Μήνας"] = ""
+                    month_hidden = True
+                else:
+                    prev_month = curr_month
+            if month_hidden:
+                cells["Συν. μήνα"] = ""
+                cells["Περικοπή"] = ""
+                cells["Συντ. Αποδοχές"] = ""
+                cells["Συν. % κράτησης"] = ""
+                cells["Εισφ. πλαφόν"] = ""
+
+            curr_tameio = r["tameio"]
+            if idx > 0 and curr_tameio == prev_tameio:
+                cells["Ταμείο"] = ""
+            else:
+                prev_tameio = curr_tameio
+
+            low = False
+            if cells.get("Συν. % κράτησης"):
+                try:
+                    pv = float(cells["Συν. % κράτησης"].replace("%", "").replace(",", ".").strip())
+                    low = pv < highlight
+                except ValueError:
+                    low = False
+            out.append({
+                "kind": "data",
+                "cells": cells,
+                "low": low,
+                "cut": bool(cells.get("Περικοπή")),
+            })
+
+            # Σύνολα: μικτές/ημέρες ανά γραμμή· συντ.αποδοχές/περικοπή μόνο από ορατές
+            # (μη-masked) γραμμές μήνα — όπως η Κυρία αθροίζει το masked dataframe.
+            days_total += r["days"]
+            gross_sum += r["g"]
+            contrib_sum += r["c"]
+            if not month_hidden:
+                adj_sum += (r["_adj"] or 0.0)
+                cut_sum += (r["_cut"] or 0.0)
+
+        # γραμμή συνόλου (έτη ≥ 2002)
+        if int(year) >= 2002:
+            tcells = {c: "" for c in col_order}
+            tcells["Μήνας"] = f"Σύνολο {int(year)}"
+            tcells["Ημέρες Ασφ."] = _apd_fmt_days(days_total)
+            tcells["Μικτές αποδοχές"] = format_currency(gross_sum)
+            tcells["Συν. μήνα"] = format_currency(gross_sum)
+            tcells["Συνολικές εισφορές"] = format_currency(contrib_sum)
+            tcells["Συντ. Αποδοχές"] = format_currency(adj_sum)
+            tcells["Περικοπή"] = format_currency(cut_sum) if cut_sum else ""
+            pct_total = (contrib_sum / adj_sum) if adj_sum else 0.0
+            tcells["Συν. % κράτησης"] = _apd_fmt_pct(pct_total)
+            low_total = (pct_total * 100.0) < highlight if adj_sum else False
+            out.append({"kind": "total", "cells": tcells, "low": low_total, "cut": bool(cut_sum)})
+
+        out.append({"kind": "empty", "cells": {}, "low": False, "cut": False})
+
+    if totals_only:
+        out = [r for r in out if r["kind"] == "total"]
+    return out
+
+
+def _apd_norm_col_name(name):
+    """Κεφαλαία χωρίς τόνους — ίδιο pattern με Καταμέτρηση (_wt)."""
+    up = str(name).upper().strip()
+    return "".join(
+        ch for ch in unicodedata.normalize("NFD", up)
+        if unicodedata.category(ch) != "Mn"
+    )
+
+
+def _apd_col_weight(col):
+    """Αναλογικά βάρη ανά τύπο στήλης → ποσοστά στο colgroup (όπως count-unified)."""
+    u = _apd_norm_col_name(col)
+    if u in ("A/A", "AA"):
+        return 1.2
+    if u == "ΕΤΟΣ":
+        return 1.5
+    if u == "ΜΗΝΑΣ":
+        return 2.0
+    if u == "ΤΑΜΕΙΟ":
+        return 2.6
+    if "ΚΛΑΔΟΣ" in u or "ΠΑΚΕΤΟ" in u:
+        return 2.0
+    if "ΠΕΡΙΓΡΑΦΗ" in u:
+        return 5.0
+    if "ΑΠΟΔΟΧΩΝ" in u and "ΤΥΠΟΣ" in u:
+        return 2.4
+    if "ΗΜΕΡΕΣ" in u:
+        return 1.8
+    if "%" in u or "ΠΟΣΟΣΤΟ" in u or "ΚΡΑΤΗΣΗΣ" in u:
+        return 2.0
+    if u == "ΕΡΓΟΔΟΤΗΣ" or "ΕΡΓΟΔΟΤΗ" in u:
+        return 2.8
+    if u in (
+        "ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ", "ΣΥΝ. ΜΗΝΑ", "ΕΙΣΦ. ΠΛΑΦΟΝ",
+        "ΣΥΝΤ. ΑΠΟΔΟΧΕΣ", "ΠΕΡΙΚΟΠΗ", "ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ",
+    ):
+        return 3.8
+    return 2.4
+
+
+def _apd_col_col_class(col):
+    """Κλάση στο <col> για στοχευμένα overrides (π.χ. full screen)."""
+    cc = _apd_col_class(col)
+    return cc.replace("apd-c-", "apd-col-") if cc else ""
+
+
+def _apd_colgroup(col_order):
+    weights = [_apd_col_weight(c) for c in col_order]
+    total_w = sum(weights) or 1.0
+    parts = ["<colgroup>"]
+    for col, w in zip(col_order, weights):
+        pct = round(w / total_w * 100, 3)
+        cc = _apd_col_col_class(col)
+        cls_attr = f' class="{cc}"' if cc else ""
+        parts.append(f'<col{cls_attr} style="width:{pct}%">')
+    parts.append("</colgroup>")
+    return "".join(parts)
+
+
+_APD_MONEY_COLS = {
+    "Μικτές αποδοχές", "Συν. μήνα", "Εισφ. πλαφόν",
+    "Συντ. Αποδοχές", "Περικοπή", "Συνολικές εισφορές",
+}
+
+
+def _apd_col_class(col):
+    """Κλάση στήλης για στόχευση πλατών/αναδίπλωσης (νομισματικές, ποσοστό, πακέτο, περιγραφές)."""
+    c = str(col)
+    if c in _APD_MONEY_COLS:
+        return "apd-c-money"
+    if c == "Συν. % κράτησης":
+        return "apd-c-pct"
+    if "Κλάδος/Πακέτο" in c:
+        return "apd-c-pkg"
+    if c.startswith("Περιγραφή"):
+        return "apd-c-desc"
+    return ""
+
+
+_APD_TOTAL_MERGE_COLS = ("Μήνας", "Ταμείο")
+
+
+def _apd_total_merge_range(col_order):
+    """Εύρος στηλών για συγχωνευμένο «Σύνολο YYYY» (Μήνας → Ταμείο)."""
+    indices = [col_order.index(c) for c in _APD_TOTAL_MERGE_COLS if c in col_order]
+    if not indices:
+        if "Μήνας" in col_order:
+            i = col_order.index("Μήνας")
+            return i, 1
+        return None, 0
+    start, end = min(indices), max(indices)
+    return start, end - start + 1
+
+
+def _apd_render_total_tds(col_order, col_cls, cells):
+    """Κελιά γραμμής συνόλου με colspan στο εύρος Μήνας–Ταμείο."""
+    merge_start, merge_span = _apd_total_merge_range(col_order)
+    label = str(cells.get("Μήνας") or cells.get("Ταμείο") or "").strip()
+    parts = []
+    i = 0
+    while i < len(col_order):
+        if merge_start is not None and i == merge_start and merge_span > 0:
+            parts.append(
+                f'<td colspan="{merge_span}" class="apd-total-label">'
+                f'{html_mod.escape(label)}</td>'
+            )
+            i += merge_span
+            continue
+        c, cc = col_order[i], col_cls[i]
+        val = html_mod.escape(str(cells.get(c, "")))
+        parts.append(f'<td class="{cc}">{val}</td>' if cc else f"<td>{val}</td>")
+        i += 1
+    return "".join(parts)
+
+
+def _apd_render_static_table(col_order, display_rows):
+    """Στατικός πίνακας ΑΠΔ (προεπιλεγμένη κατάσταση) — για εκτύπωση/no-JS."""
+    ncols = len(col_order)
+    col_cls = [_apd_col_class(c) for c in col_order]
+    thead = "<thead><tr>" + "".join(
+        f'<th class="{cc}">{html_mod.escape(str(c))}</th>' if cc else f"<th>{html_mod.escape(str(c))}</th>"
+        for c, cc in zip(col_order, col_cls)
+    ) + "</tr></thead>"
+    body = []
+    for r in display_rows:
+        if r["kind"] == "empty":
+            body.append(
+                f'<tr class="apd-year-gap" data-apd-kind="empty" aria-hidden="true">'
+                f'<td colspan="{ncols}"></td></tr>'
+            )
+            continue
+        if r["kind"] == "total":
+            tds = _apd_render_total_tds(col_order, col_cls, r["cells"])
+            body.append(f'<tr class="apd-total-row" data-apd-kind="total">{tds}</tr>')
+            continue
+        cls = "apd-data-row" + (" apd-low" if r.get("low") else "")
+        tds = []
+        for c, cc in zip(col_order, col_cls):
+            val = html_mod.escape(str(r["cells"].get(c, "")))
+            classes = cc
+            if c == "Περικοπή" and r.get("cut"):
+                classes = (cc + " apd-cut").strip()
+            tds.append(f'<td class="{classes}">{val}</td>' if classes else f"<td>{val}</td>")
+        body.append(f'<tr class="{cls}" data-apd-kind="data">{"".join(tds)}</tr>')
+    table = (
+        '<table class="print-table apd-table">'
+        f"{_apd_colgroup(col_order)}{thead}<tbody>{''.join(body)}</tbody></table>"
+    )
+    return f'<div class="apd-table-scroll" id="apd-tables-wrapper">{table}</div>'
+
+
+def build_apd_with_filters(df, description_map=None):
+    """Καρτέλα ΑΠΔ/Πλαφόν (Pro): live φίλτρα σε JS + στατικός πίνακας (προεπιλογή)."""
+    apd_df = _build_apd_base_df(df)
+    if apd_df is None or apd_df.empty:
+        return ""
+    earnings_col = _apd_earnings_col(apd_df)
+    col_order = _apd_column_order(apd_df, earnings_col)
+    records = _apd_build_records(apd_df, earnings_col, description_map)
+    if not records:
+        return ""
+
+    is_palios = _apd_is_palios(df)
+    default_plafond = "palios" if is_palios else "neos"
+    status_msg = (
+        "Παλιός Ασφαλισμένος (εγγραφή πριν από 1/1/1993)" if is_palios
+        else "Νέος Ασφαλισμένος (χωρίς εγγραφή πριν από 1/1/1993)"
+    )
+
+    default_params = {
+        "plafond": default_plafond,
+        "from_i": 20020101, "to_i": 0,
+        "tameio": [], "klados": [], "apodox": [],
+        "ret_mode": "all", "ret_thr": 18.0, "highlight": 21.0,
+        "totals_only": False,
+    }
+    static_rows = _apd_compute_display_rows(records, col_order, default_params)
+    static_table = _apd_render_static_table(col_order, static_rows)
+
+    # Φίλτρα (modals ίδια με Σύνολα/Καταμέτρηση)
+    def _vals(col):
+        if col in apd_df.columns:
+            return sorted(apd_df[col].dropna().astype(str).str.strip().unique().tolist())
+        return []
+
+    tameio_vals = _vals("Ταμείο")
+    klados_vals = _vals("Κλάδος/Πακέτο Κάλυψης")
+    apodox_vals = _vals(earnings_col) if earnings_col else []
+
+    dd_tameio = _lite_filter_modal_group("Ταμείο", tameio_vals, "tameio", checkbox_name="apd-tameio")
+    dd_klados = _lite_filter_modal_group(
+        "Κλάδος/Πακέτο", klados_vals, "klados", checkbox_name="apd-klados",
+        with_desc=True, desc_map=description_map or {},
+    )
+    dd_apodox = _lite_filter_modal_group(
+        "Τύπος Αποδοχών", _apodoxes_option_pairs(apodox_vals), "apodox", checkbox_name="apd-apodox",
+    )
+
+    reset_btn = (
+        '<button type="button" class="filter-reset-btn" id="apd-filter-reset" '
+        'title="Επαναφορά φίλτρων" aria-label="Επαναφορά φίλτρων">&#x21bb;</button>'
+    )
+    plafond_select = (
+        '<select id="apd-plafond" class="apd-filter-input apd-select" title="Πλαφόν">'
+        f'<option value="palios"{" selected" if default_plafond == "palios" else ""}>Πλαφόν Παλιού</option>'
+        f'<option value="neos"{" selected" if default_plafond == "neos" else ""}>Πλαφόν Νέου</option>'
+        '<option value="none">Χωρίς πλαφόν (καμία περικοπή)</option>'
+        '</select>'
+    )
+    retmode_select = (
+        '<select id="apd-retmode" class="apd-filter-input apd-select" title="Τύπος Φίλτρου %">'
+        '<option value="all">Όλα</option>'
+        '<option value="ge">Μεγαλύτερο ή ίσο</option>'
+        '<option value="lt">Μικρότερο από</option>'
+        '</select>'
+    )
+    filter_bar = (
+        '<div class="count-filters apd-filters" id="apd-filters-bar">'
+        '<div class="apd-filters-grid">'
+        f'<div class="apd-grid-tameio">{dd_tameio}</div>'
+        f'<div class="apd-grid-klados">{dd_klados}</div>'
+        f'<div class="apd-grid-apodox">{dd_apodox}</div>'
+        '<div class="apd-grid-from">'
+        '<input type="text" id="apd-filter-from" class="filter-date" '
+        'placeholder="01/01/2002" aria-label="Από (dd/mm/yyyy)" autocomplete="off" value="01/01/2002">'
+        '</div>'
+        '<div class="apd-grid-to">'
+        '<input type="text" id="apd-filter-to" class="filter-date" '
+        'placeholder="31/12/2040" aria-label="Έως (dd/mm/yyyy)" autocomplete="off">'
+        '</div>'
+        '<div class="apd-grid-pct"><label class="apd-filter-field">'
+        '<span class="apd-filter-field-label">Φίλτρο %</span>'
+        '<input type="number" id="apd-filter-pct" class="apd-filter-input" min="0" max="100" step="0.1" value="18">'
+        '</label></div>'
+        '<div class="apd-grid-retmode"><label class="apd-filter-field">'
+        '<span class="apd-filter-field-label">Τύπος Φίλτρου</span>'
+        f'{retmode_select}'
+        '</label></div>'
+        '<div class="apd-grid-high"><label class="apd-filter-field">'
+        '<span class="apd-filter-field-label">Επισήμανση &lt;</span>'
+        '<input type="number" id="apd-filter-high" class="apd-filter-input" min="0" max="100" step="0.1" value="21">'
+        '</label></div>'
+        '<div class="apd-grid-plafond"><label class="apd-filter-field">'
+        '<span class="apd-filter-field-label">Πλαφόν</span>'
+        f'{plafond_select}'
+        '</label></div>'
+        '<div class="apd-grid-cbs"><label class="filter-cb">'
+        '<input type="checkbox" id="apd-totals-only"> Μόνο ετήσιες γραμμές συνόλου</label></div>'
+        f'<div class="apd-grid-reset">{reset_btn}</div>'
+        '</div>'
+        '</div>'
+    )
+
+    payload = {
+        "cols": col_order,
+        "computed": sorted(_APD_COMPUTED_COLS),
+        "colgroup": _apd_colgroup(col_order),
+        "records": records,
+        "plafondPalios": PLAFOND_PALIOS,
+        "plafondNeos": PLAFOND_NEOS,
+        "defaultPlafond": default_plafond,
+    }
+    payload_json = json.dumps(payload, ensure_ascii=False).replace("<", "\\u003c")
+    payload_html = (
+        f'<script type="application/json" id="atlas-apd-data-json">{payload_json}</script>'
+    )
+
+    info_sections = [
+        ("info", "Ανάλυση εγγραφών ΑΠΔ μόνο μισθωτής ασφάλισης με υπολογισμό εισφ. πλαφόν, "
+                 "περικοπής λόγω πλαφόν και ποσοστού κράτησης."),
+        ("info", f"Καθεστώς: {status_msg}"),
+        ("info", f"Εξαιρούνται: {EXCLUDED_PACKAGES_LABEL}"),
+    ]
+    heading = _atlas_html_tab_heading_row_info(
+        "Ανάλυση ΑΠΔ / Πλαφόν",
+        "Πληροφορίες — ΑΠΔ / Πλαφόν",
+        info_sections,
+        "atlas-info-store-apd",
+    )
+
+    js = _build_apd_filter_js()
+
+    return _build_tab_page(
+        section_id="apd-section",
+        extra_section_classes="apd-layout",
+        heading_html=heading,
+        description_html=(
+            '<p class="print-description">Ανάλυση ΑΠΔ με χρονολογική σειρά, εισφ. πλαφόν ΙΚΑ, '
+            'περικοπή λόγω πλαφόν και ποσοστό κράτησης.</p>'
+        ),
+        metrics_html=payload_html,
+        filters_html=filter_bar,
+        body_html=f'<div id="apd-tables-mount">{static_table}</div>',
+        scripts_html=f"<script>{js}</script>",
+    )
+
+
+def _build_apd_filter_js():
+    """JS: πλήρης αγωγός ΑΠΔ (φίλτρα + δυναμικό πλαφόν + μηνιαία σύνολα) + συγχρονισμός Καταμέτρησης."""
+    return r"""
+(function(){
+  var sec=document.getElementById('apd-section');
+  if(!sec)return;
+  var dataEl=document.getElementById('atlas-apd-data-json');
+  if(!dataEl)return;
+  var DATA={};
+  try{DATA=JSON.parse(dataEl.textContent||'{}');}catch(e){return;}
+  var COLS=DATA.cols||[];
+  var COMPUTED={};(DATA.computed||[]).forEach(function(c){COMPUTED[c]=1;});
+  var RECS=DATA.records||[];
+  var PAL=DATA.plafondPalios||{}, NEO=DATA.plafondNeos||{};
+  var SPECIAL=['03','04','05'];
+  var mount=document.getElementById('apd-tables-mount');
+  if(!mount)return;
+
+  function isSpecial(code){return SPECIAL.indexOf(code)!==-1||(code.length>=2&&SPECIAL.indexOf(code.substr(0,2))!==-1);}
+  function fmtCurr(n){
+    if(n===null||n===undefined||isNaN(n)||n===0)return '';
+    var s=Math.abs(n).toFixed(2);
+    if(s.slice(-3)==='.00')s=s.slice(0,-3);
+    var p=s.split('.');
+    p[0]=p[0].replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+    var out=(p.length>1?p[0]+','+p[1]:p[0]);
+    return (n<0?'-':'')+out+' €';
+  }
+  function fmtDays(n){
+    if(n===null||n===undefined||isNaN(n)||n===0)return '';
+    var r=Math.round(n);
+    return String(r).replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+  }
+  function fmtPct(v){
+    if(v===null||v===undefined||v==='')return '';
+    var n=v*100;
+    return n.toFixed(1).replace('.',',')+'%';
+  }
+  function esc(s){var d=document.createElement('div');d.textContent=(s==null?'':s);return d.innerHTML;}
+  function escA(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');}
+
+  function parseDateInt(s){
+    if(!s)return 0;
+    var t=String(s).trim();
+    var m=t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if(m)return parseInt(m[3],10)*10000+parseInt(m[2],10)*100+parseInt(m[1],10);
+    var y=parseInt(t,10);
+    if(!isNaN(y)&&y>=1000&&y<=9999)return y*10000+101;
+    return 0;
+  }
+
+  function collectChecked(key){
+    var out=[],seen={};
+    function add(cb){
+      if(!cb||cb.type!=='checkbox'||!cb.checked)return;
+      if((cb.getAttribute('data-attr')||'')!==key)return;
+      if(seen[cb.value])return;seen[cb.value]=1;out.push(cb.value);
+    }
+    sec.querySelectorAll('.filter-modal-group[data-filter-key="'+key+'"] input[type="checkbox"]').forEach(add);
+    var m=document.getElementById('lite-filter-modal-options-mount');
+    if(m)m.querySelectorAll('input[type="checkbox"]').forEach(add);
+    return out;
+  }
+
+  function readParams(){
+    var plEl=document.getElementById('apd-plafond');
+    var rmEl=document.getElementById('apd-retmode');
+    var pctEl=document.getElementById('apd-filter-pct');
+    var hiEl=document.getElementById('apd-filter-high');
+    var toEl=document.getElementById('apd-totals-only');
+    var klados=collectChecked('klados').map(function(v){return String(v).split(/\s*[\u2013-]\s+/)[0].trim();});
+    return {
+      plafond:(plEl&&plEl.value)||'neos',
+      from_i:parseDateInt((document.getElementById('apd-filter-from')||{}).value),
+      to_i:parseDateInt((document.getElementById('apd-filter-to')||{}).value),
+      tameio:collectChecked('tameio'),
+      klados:klados,
+      apodox:collectChecked('apodox'),
+      ret_mode:(rmEl&&rmEl.value)||'all',
+      ret_thr:parseFloat((pctEl&&pctEl.value)||'0')||0,
+      highlight:parseFloat((hiEl&&hiEl.value)||'0')||0,
+      totals_only:!!(toEl&&toEl.checked)
+    };
+  }
+
+  function computeRows(P){
+    var plMap=P.plafond==='palios'?PAL:(P.plafond==='neos'?NEO:null);
+    var thr=(P.ret_thr||0)/100.0;
+    var st={}, sk={}, sa={};
+    (P.tameio||[]).forEach(function(v){st[v]=1;});
+    (P.klados||[]).forEach(function(v){sk[v]=1;});
+    (P.apodox||[]).forEach(function(v){sa[v]=1;});
+    var hasT=P.tameio&&P.tameio.length, hasK=P.klados&&P.klados.length, hasA=P.apodox&&P.apodox.length;
+
+    var kept=[];
+    for(var i=0;i<RECS.length;i++){
+      var r=RECS[i];
+      if(hasT&&!st[r.tameio])continue;
+      if(hasK&&!sk[r.klados])continue;
+      if(hasA&&!sa[r.apodox])continue;
+      var ai=r.ai||0;
+      if(P.from_i&&(!ai||ai<P.from_i))continue;
+      if(P.to_i&&(!ai||ai>P.to_i))continue;
+      var year=ai?Math.floor(ai/10000):null;
+      var basePlaf;
+      if(plMap===null)basePlaf=null;
+      else{basePlaf=year?(plMap[String(year)]||0):0;if(r.code==='04'||r.code==='05')basePlaf=basePlaf/2;}
+      var gross=r.g||0;
+      var adjRow=(basePlaf===null||basePlaf===0)?gross:Math.min(gross,basePlaf);
+      var retRow=adjRow?(r.c||0)/adjRow:0;
+      if(P.ret_mode==='ge'&&!(retRow>=thr))continue;
+      if(P.ret_mode==='lt'&&!(retRow<thr))continue;
+      kept.push({rec:r,year:year,base:basePlaf});
+    }
+
+    var passCols=COLS.filter(function(c){return !COMPUTED[c];});
+    function baseCells(o){
+      var c={};passCols.forEach(function(col){c[col]=(o.rec.row&&o.rec.row[col])||'';});
+      c['Μικτές αποδοχές']=fmtCurr(o.rec.g);
+      c['Συνολικές εισφορές']=fmtCurr(o.rec.c);
+      c['Ημέρες Ασφ.']=fmtDays(o.rec.days);
+      return c;
+    }
+
+    var ySet={};kept.forEach(function(o){if(o.year!==null)ySet[o.year]=1;});
+    var years=Object.keys(ySet).map(function(x){return parseInt(x,10);}).sort(function(a,b){return a-b;});
+    var out=[];
+
+    years.forEach(function(year){
+      var yr=kept.filter(function(o){return o.year===year;});
+      yr.forEach(function(o){
+        var r=o.rec;
+        var di=r.ei||r.ai||0;
+        var monthNum=di?Math.floor(di/100)%100:13;
+        var sp=isSpecial(r.code);
+        o.sm=sp?20:monthNum;
+        o.ml=sp?'':(monthNum+'ος');
+        var code=r.code;
+        if(!sp)o.sp=(code==='01')?-1:0;
+        else if(code.indexOf('03')===0)o.sp=1;
+        else if(code.indexOf('04')===0)o.sp=2;
+        else if(code.indexOf('05')===0)o.sp=3;
+        else o.sp=4;
+      });
+      var msum={},mc={},d01={};
+      yr.forEach(function(o){
+        var m=o.ml;if(!m)return;
+        msum[m]=(msum[m]||0)+(o.rec.g||0);
+        mc[m]=(mc[m]||0)+(o.rec.c||0);
+        if(o.rec.code==='01')d01[m]=(d01[m]||0)+(o.rec.days||0);
+      });
+      yr.forEach(function(o){
+        var m=o.ml;
+        var mg=m?(msum[m]||0):(o.rec.g||0);
+        var mcv=m?(mc[m]||0):(o.rec.c||0);
+        o.synmina=mg;
+        if(o.base===null){o.plaf=null;o.adj=mg;o.cut=null;o.pct=mg?mcv/mg:0;}
+        else{
+          var fp=o.base;
+          if(m){var dd=d01[m]||0;if(dd>0)fp=(o.base/25.0)*Math.min(dd,25);}
+          if(mg>fp){o.cut=mg-fp;o.adj=fp;}else{o.cut=null;o.adj=mg;}
+          o.plaf=fp;o.pct=(o.adj&&o.adj>0)?mcv/o.adj:0;
+        }
+      });
+      yr.sort(function(a,b){return a.sm-b.sm||a.sp-b.sp||(a.rec.tameio<b.rec.tameio?-1:a.rec.tameio>b.rec.tameio?1:0)||(a.rec.ai-b.rec.ai);});
+
+      var prevM=null,prevT=null;
+      var dT=0,gS=0,aS=0,cS=0,contribS=0;
+      yr.forEach(function(o,idx){
+        var cells=baseCells(o);
+        cells['Έτος']=(idx===0)?String(year):'';
+        cells['Μήνας']=o.ml;
+        cells['Συν. μήνα']=fmtCurr(o.synmina);
+        cells['Εισφ. πλαφόν']=(o.plaf!==null)?fmtCurr(o.plaf):'';
+        cells['Συντ. Αποδοχές']=fmtCurr(o.adj);
+        cells['Περικοπή']=(o.cut!==null)?fmtCurr(o.cut):'';
+        cells['Συν. % κράτησης']=fmtPct(o.pct);
+        var hidden=false;
+        if(o.ml){if(idx>0&&o.ml===prevM){cells['Μήνας']='';hidden=true;}else prevM=o.ml;}
+        if(hidden){cells['Συν. μήνα']='';cells['Περικοπή']='';cells['Συντ. Αποδοχές']='';cells['Συν. % κράτησης']='';cells['Εισφ. πλαφόν']='';}
+        var ct=o.rec.tameio;
+        if(idx>0&&ct===prevT)cells['Ταμείο']='';else prevT=ct;
+        var low=false;
+        if(cells['Συν. % κράτησης']){
+          var pv=parseFloat(cells['Συν. % κράτησης'].replace('%','').replace(',','.'));
+          if(!isNaN(pv))low=pv<P.highlight;
+        }
+        out.push({kind:'data',cells:cells,low:low,cut:!!cells['Περικοπή']});
+        dT+=(o.rec.days||0);gS+=(o.rec.g||0);contribS+=(o.rec.c||0);
+        if(!hidden){aS+=(o.adj||0);cS+=(o.cut||0);}
+      });
+
+      if(year>=2002){
+        var tc={};COLS.forEach(function(c){tc[c]='';});
+        tc['Μήνας']='Σύνολο '+year;
+        tc['Ημέρες Ασφ.']=fmtDays(dT);
+        tc['Μικτές αποδοχές']=fmtCurr(gS);
+        tc['Συν. μήνα']=fmtCurr(gS);
+        tc['Συνολικές εισφορές']=fmtCurr(contribS);
+        tc['Συντ. Αποδοχές']=fmtCurr(aS);
+        tc['Περικοπή']=cS?fmtCurr(cS):'';
+        var pctT=aS?(contribS/aS):0;
+        tc['Συν. % κράτησης']=fmtPct(pctT);
+        var lowT=aS?((pctT*100)<P.highlight):false;
+        out.push({kind:'total',cells:tc,low:lowT,cut:!!cS});
+      }
+      out.push({kind:'empty',cells:{},low:false,cut:false});
+    });
+
+    if(P.totals_only)out=out.filter(function(r){return r.kind==='total';});
+    return out;
+  }
+
+  var MONEYCOLS={'Μικτές αποδοχές':1,'Συν. μήνα':1,'Εισφ. πλαφόν':1,'Συντ. Αποδοχές':1,'Περικοπή':1,'Συνολικές εισφορές':1};
+  function colClass(c){
+    if(MONEYCOLS[c])return 'apd-c-money';
+    if(c==='Συν. % κράτησης')return 'apd-c-pct';
+    if(String(c).indexOf('Κλάδος/Πακέτο')>=0)return 'apd-c-pkg';
+    if(String(c).indexOf('Περιγραφή')===0)return 'apd-c-desc';
+    return '';
+  }
+  var COLCLS=COLS.map(colClass);
+  var TOTAL_MERGE_COLS=['Μήνας','Ταμείο'];
+  function totalMergeRange(){
+    var idx=[];
+    TOTAL_MERGE_COLS.forEach(function(c){var i=COLS.indexOf(c);if(i>=0)idx.push(i);});
+    if(!idx.length){
+      var m=COLS.indexOf('Μήνας');
+      return m>=0?[m,1]:[null,0];
+    }
+    var s=Math.min.apply(null,idx),e=Math.max.apply(null,idx);
+    return [s,e-s+1];
+  }
+  function renderTotalTds(cells){
+    var mr=totalMergeRange(),ms=mr[0],span=mr[1];
+    var label=String(cells['Μήνας']||cells['Ταμείο']||'').trim();
+    var html='',i=0;
+    while(i<COLS.length){
+      if(ms!==null&&i===ms&&span>0){
+        html+='<td colspan="'+span+'" class="apd-total-label">'+esc(label)+'</td>';
+        i+=span;continue;
+      }
+      var cc=COLCLS[i];
+      html+=cc?'<td class="'+cc+'">'+esc(cells[COLS[i]]||'')+'</td>':'<td>'+esc(cells[COLS[i]]||'')+'</td>';
+      i++;
+    }
+    return html;
+  }
+  function render(rows){
+    var ncols=COLS.length;
+    var html='<table class="print-table apd-table">';
+    html+=(DATA.colgroup||'');
+    html+='<thead><tr>'+COLS.map(function(c,i){var cc=COLCLS[i];return cc?'<th class="'+cc+'">'+esc(c)+'</th>':'<th>'+esc(c)+'</th>';}).join('')+'</tr></thead><tbody>';
+    rows.forEach(function(r){
+      if(r.kind==='empty'){html+='<tr class="apd-year-gap" data-apd-kind="empty" aria-hidden="true"><td colspan="'+ncols+'"></td></tr>';return;}
+      if(r.kind==='total'){
+        html+='<tr class="apd-total-row" data-apd-kind="total">'+renderTotalTds(r.cells)+'</tr>';
+        return;
+      }
+      var cls='apd-data-row'+(r.low?' apd-low':'');
+      var tds=COLS.map(function(c,i){
+        var cc=COLCLS[i];
+        if(c==='Περικοπή'&&r.cut)cc=(cc+' apd-cut').replace(/^ /,'');
+        return cc?'<td class="'+cc+'">'+esc(r.cells[c]||'')+'</td>':'<td>'+esc(r.cells[c]||'')+'</td>';
+      }).join('');
+      html+='<tr class="'+cls+'" data-apd-kind="data">'+tds+'</tr>';
+    });
+    html+='</tbody></table>';
+    var wrap=mount.querySelector('.apd-table-scroll');
+    if(!wrap){wrap=document.createElement('div');wrap.className='apd-table-scroll';wrap.id='apd-tables-wrapper';mount.innerHTML='';mount.appendChild(wrap);}
+    wrap.innerHTML=html;
+  }
+
+  function updateChips(){
+    sec.querySelectorAll('.apd-filters .filter-modal-group').forEach(function(dd){
+      var key=dd.getAttribute('data-filter-key');if(!key)return;
+      var vals=collectChecked(key);
+      var badge=dd.querySelector('.filter-modal-badge');
+      var label=dd.querySelector('.filter-selected-label');
+      if(badge){if(vals.length){badge.textContent=vals.length;badge.hidden=false;dd.classList.add('has-selection');}else{badge.hidden=true;badge.textContent='';dd.classList.remove('has-selection');}}
+      if(label){
+        if(!vals.length)label.textContent='';
+        else label.innerHTML=vals.map(function(v){return '<button type="button" class="filter-selected-chip" data-value="'+escA(v)+'" data-filter-key="'+escA(key)+'" title="Αφαίρεση">'+esc(v)+'</button>';}).join('');
+      }
+    });
+  }
+
+  var _suppressSync=false;
+  function apply(){
+    updateChips();
+    var P=readParams();
+    render(computeRows(P));
+  }
+
+  window._liteFilterModalApply=window._liteFilterModalApply||{};
+  window._liteFilterModalApply['apd-section']=apply;
+
+  // Συγχρονισμός Κλάδος/Πακέτο από την Καταμέτρηση (ίδια λογική με _sync_cnt_klados_to_apd)
+  var apdKladosCodes={};
+  sec.querySelectorAll('.filter-modal-group[data-filter-key="klados"] input[type="checkbox"]').forEach(function(cb){
+    apdKladosCodes[String(cb.value).split(/\s*[\u2013-]\s+/)[0].trim()]=cb.value;
+  });
+  function setApdKladosFromCount(codes){
+    _suppressSync=true;
+    var want={};(codes||[]).forEach(function(c){var cc=String(c).split(/\s*[\u2013-]\s+/)[0].trim();if(apdKladosCodes.hasOwnProperty(cc))want[apdKladosCodes[cc]]=1;});
+    sec.querySelectorAll('.filter-modal-group[data-filter-key="klados"] input[type="checkbox"]').forEach(function(cb){cb.checked=!!want[cb.value];});
+    var m=document.getElementById('lite-filter-modal-options-mount');
+    if(m)m.querySelectorAll('input[type="checkbox"][data-attr="klados"]').forEach(function(cb){cb.checked=!!want[cb.value];});
+    _suppressSync=false;
+    apply();
+  }
+  window.addEventListener('atlas-count-klados-change',function(e){
+    if(_suppressSync)return;
+    setApdKladosFromCount((e&&e.detail&&e.detail.codes)||[]);
+  });
+
+  // Listeners φίλτρων
+  ['apd-plafond','apd-retmode','apd-filter-pct','apd-filter-high','apd-filter-from','apd-filter-to','apd-totals-only'].forEach(function(id){
+    var el=document.getElementById(id);if(!el)return;
+    el.addEventListener('input',apply);el.addEventListener('change',apply);
+  });
+  var rb=document.getElementById('apd-filter-reset');
+  if(rb)rb.addEventListener('click',function(){
+    sec.querySelectorAll('.apd-filters input[type="checkbox"]').forEach(function(cb){cb.checked=false;});
+    var m=document.getElementById('lite-filter-modal-options-mount');
+    if(m)m.querySelectorAll('input[type="checkbox"]').forEach(function(cb){cb.checked=false;});
+    var f=document.getElementById('apd-filter-from');if(f)f.value='01/01/2002';
+    var t=document.getElementById('apd-filter-to');if(t)t.value='';
+    var pct=document.getElementById('apd-filter-pct');if(pct)pct.value='18';
+    var hi=document.getElementById('apd-filter-high');if(hi)hi.value='21';
+    var rm=document.getElementById('apd-retmode');if(rm)rm.value='all';
+    var pl=document.getElementById('apd-plafond');if(pl)pl.value=DATA.defaultPlafond||'neos';
+    var to=document.getElementById('apd-totals-only');if(to)to.checked=false;
+    apply();
+  });
+
+  apply();
+  window._atlasApdApply=apply;
+})();
+"""
+
+
 def _append_pro_tab_entries(df, description_map, tab_entries):
     """Προσθέτει τις Pro-only καρτέλες στο tab_entries (σταδιακή μεταφορά από την Κυρία)."""
+    # -- ΑΠΔ / Πλαφόν --
+    try:
+        apd_html = build_apd_with_filters(df, description_map)
+        if apd_html:
+            tab_entries.append(("apd", "ΑΠΔ/Πλαφόν", apd_html))
+    except Exception:
+        pass
+
     # -- Κύρια Δεδομένα --
     try:
         main_df = _build_maindata_df(df)
@@ -3492,6 +4558,16 @@ table.print-table tbody tr.total-row td { background: #dbeafe !important; font-w
 /* Ομοιόμορφη/responsive κατανομή στηλών στην Καταμέτρηση (ίδια λογική με full screen): αγνόηση των fixed πλατών του colgroup */
 #count-tables-wrapper table.print-table { table-layout: auto; }
 #count-tables-wrapper table.print-table colgroup col { width: auto !important; }
+#apd-tables-wrapper table.print-table.apd-table { table-layout: fixed; width: 100%; }
+#apd-tables-wrapper table.print-table.apd-table colgroup col.apd-col-desc { width: 12% !important; max-width: 12%; }
+#apd-tables-wrapper table.print-table.apd-table th.apd-c-desc,
+#apd-tables-wrapper table.print-table.apd-table td.apd-c-desc { max-width: 12%; white-space: normal; word-break: break-word; }
+#apd-tables-wrapper .apd-table-scroll { overflow: visible !important; }
+table.print-table.apd-table tbody tr.apd-total-row td { background: #f5fafc !important; color: #000 !important; font-weight: 700 !important; border-top: 1px solid #c8dce8; }
+table.print-table.apd-table tbody tr.apd-total-row td.apd-total-label { text-align: left; white-space: nowrap; }
+table.print-table.apd-table tbody tr.apd-year-gap td { background: transparent !important; border: 0 !important; height: 10px; padding: 0; }
+table.print-table.apd-table tbody tr.apd-data-row td.apd-cut { color: #d9534f; font-weight: 700; }
+.apd-print-plafond { font-style: normal; font-weight: 600; color: #334155; }
 table.print-table tbody td:nth-last-child(2),
 table.print-table tbody td:nth-last-child(3) { font-weight: 700 !important; }
 table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { white-space: normal; word-break: break-word; }
@@ -4081,6 +5157,84 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .table-fullscreen .maindata-table-scroll table.print-table { border-collapse: separate; border-spacing: 0; overflow: visible; box-shadow: none; border-radius: 0; }
 .table-fullscreen .maindata-table-scroll table.print-table thead th { position: sticky; top: 0; z-index: 3; background: #f8fafc; border-bottom: 2px solid #cbd5e1; }
 .table-fullscreen .atlas-tab-layout { display: flex !important; flex-direction: column !important; height: 100% !important; }
+
+/* ΑΠΔ / Πλαφόν (Pro) */
+.atlas-tab-layout-body:has(.apd-table-scroll) { overflow: hidden; display: flex; flex-direction: column; padding: 0; }
+#apd-tables-mount { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.apd-table-scroll { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; background: #fff; padding: 0 2px; }
+.apd-table-scroll table.print-table { border-collapse: separate; border-spacing: 0; overflow: visible; box-shadow: none; border-radius: 0; font-size: 13px; }
+/* ΑΠΔ: ποσοστιαία πλάτη + fixed layout — ίδια λογική με count-unified */
+#apd-tables-wrapper table.print-table.apd-table,
+.apd-table-scroll table.print-table.apd-table { table-layout: fixed; width: 100%; }
+.apd-table-scroll table.print-table thead th { position: sticky; top: 0; z-index: 6; background: #f8fafc; border-bottom: 2px solid #cbd5e1; box-shadow: 0 1px 0 #cbd5e1; white-space: normal; padding: 5px 6px; font-size: 12px; line-height: 1.2; vertical-align: bottom; font-weight: 400 !important; }
+.apd-table-scroll table.print-table tbody td { font-size: 13px; padding: 5px 6px; word-break: break-word; }
+.apd-table-scroll table.print-table tbody tr.apd-year-gap td { height: 36px; padding: 0; background: transparent; border: 0 !important; }
+.apd-table-scroll table.print-table tbody tr.apd-total-row td { background: #f5fafc !important; color: #000 !important; font-weight: 700 !important; border-top: 1px solid #c8dce8; }
+.apd-table-scroll table.print-table tbody tr.apd-data-row.apd-low td { background: #fff8e1; }
+.apd-table-scroll table.print-table tbody tr.apd-data-row td.apd-cut { color: #d9534f; font-weight: 700; }
+.apd-table-scroll table.print-table tbody tr.apd-total-row td.apd-total-label { text-align: left; white-space: nowrap; }
+.table-fullscreen .apd-table-scroll { flex: 1 !important; min-height: 0 !important; overflow: auto !important; }
+.table-fullscreen .apd-table-scroll table.print-table { border-collapse: separate; border-spacing: 0; overflow: visible; box-shadow: none; border-radius: 0; }
+.table-fullscreen .apd-table-scroll table.print-table thead th { position: sticky; top: 0; z-index: 6; background: #f8fafc; border-bottom: 2px solid #cbd5e1; box-shadow: 0 1px 0 #cbd5e1; }
+.table-fullscreen .apd-table-scroll table.print-table tbody tr.apd-total-row td { background: #f5fafc !important; color: #000 !important; font-weight: 700 !important; border-top: 1px solid #c8dce8; }
+.table-fullscreen .apd-table-scroll table.print-table tbody tr.apd-data-row td.apd-cut { color: #d9534f; font-weight: 700; }
+/* Στήλες ΑΠΔ: νομισματικές/ποσοστό δεξιά χωρίς αναδίπλωση· περιγραφές αναδιπλώνονται */
+.apd-table-scroll table.print-table th.apd-c-money, .apd-table-scroll table.print-table td.apd-c-money,
+.apd-table-scroll table.print-table th.apd-c-pct, .apd-table-scroll table.print-table td.apd-c-pct { text-align: right; white-space: nowrap; }
+.apd-table-scroll table.print-table th.apd-c-pkg, .apd-table-scroll table.print-table td.apd-c-pkg { white-space: nowrap; }
+.apd-table-scroll table.print-table th.apd-c-desc, .apd-table-scroll table.print-table td.apd-c-desc { white-space: normal; word-break: break-word; }
+/* Full screen: περισσότερο πλάτος στις περιγραφές (όπως ΠΕΡΙΓΡΑΦΗ στην Καταμέτρηση) */
+.table-fullscreen .fs-body #apd-tables-wrapper table.print-table.apd-table colgroup col.apd-col-desc { width: 12% !important; }
+#apd-section h2, #apd-section .atlas-tab-layout-top h2,
+#apd-section .print-description, #apd-section .atlas-tab-layout-top .print-description,
+#apd-section .apd-filters { flex-shrink: 0; }
+/* ΑΠΔ φίλτρα — ίδιο grid pattern με Καταμέτρηση (ομοιόμορφες στήλες + στοίχιση) */
+.apd-filters-grid { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)) 118px 118px minmax(200px, 1.1fr) auto; grid-template-rows: auto auto; gap: 12px 14px; align-items: start; }
+.apd-filters-grid > div { min-width: 0; }
+.apd-filters-grid > .apd-grid-tameio { grid-column: 1; grid-row: 1; }
+.apd-filters-grid > .apd-grid-klados { grid-column: 2; grid-row: 1; }
+.apd-filters-grid > .apd-grid-apodox { grid-column: 3; grid-row: 1; }
+.apd-filters-grid > .apd-grid-from { grid-column: 4; grid-row: 1; }
+.apd-filters-grid > .apd-grid-to { grid-column: 5; grid-row: 1; }
+.apd-filters-grid > .apd-grid-pct { grid-column: 1; grid-row: 2; align-self: end; }
+.apd-filters-grid > .apd-grid-retmode { grid-column: 2; grid-row: 2; align-self: end; }
+.apd-filters-grid > .apd-grid-high { grid-column: 3; grid-row: 2; align-self: end; }
+.apd-filters-grid > .apd-grid-plafond { grid-column: 4 / 6; grid-row: 2; align-self: end; }
+.apd-filters-grid > .apd-grid-cbs { grid-column: 6; grid-row: 2; display: flex; align-items: flex-end; align-self: end; min-height: 0; }
+.apd-filters-grid > .apd-grid-reset { grid-column: 7; grid-row: 2; justify-self: end; align-self: center; }
+.apd-filters-grid .filter-modal-group { min-width: 0; }
+.apd-filters-grid .filter-modal-trigger { min-width: 0; width: 100%; box-sizing: border-box; }
+.apd-filters-grid .filter-date { width: 100%; box-sizing: border-box; min-width: 0; }
+.apd-filters-grid .apd-grid-reset .filter-reset-btn { margin-left: 0; }
+.apd-filter-field { display: flex; flex-direction: column; gap: 10px; width: 100%; min-width: 0; box-sizing: border-box; }
+.apd-filter-field-label { font-size: 13px; font-weight: 400; color: #1e293b; line-height: 1.2; }
+.apd-filter-input, .apd-filters .apd-select { width: 100%; box-sizing: border-box; padding: 10px 14px; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 16px; color: #334155; font-family: inherit; min-height: 44px; }
+.apd-filters .apd-select { appearance: auto; cursor: pointer; }
+.apd-filter-input:hover, .apd-filters .apd-select:hover { border-color: #6366f1; }
+.apd-filter-input:focus, .apd-filters .apd-select:focus { border: 1px solid #6366f1 !important; outline: none !important; box-shadow: none !important; }
+.apd-filters .filter-date { padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 16px; font-family: inherit; color: #334155; background: #fff; min-height: 44px; }
+.apd-filters .filter-date:hover { border-color: #6366f1; }
+.apd-filters .filter-date:focus { border: 1px solid #6366f1 !important; outline: none !important; box-shadow: none !important; }
+.apd-filters .filter-date::placeholder { color: #94a3b8; opacity: 1; font-weight: 400; }
+.apd-filters-grid > .apd-grid-cbs .filter-cb { margin: 0; padding-bottom: 10px; white-space: nowrap; }
+@media (max-width: 1100px) {
+.apd-filters-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+.apd-filters-grid > .apd-grid-tameio,
+.apd-filters-grid > .apd-grid-klados,
+.apd-filters-grid > .apd-grid-apodox,
+.apd-filters-grid > .apd-grid-from,
+.apd-filters-grid > .apd-grid-to,
+.apd-filters-grid > .apd-grid-pct,
+.apd-filters-grid > .apd-grid-retmode,
+.apd-filters-grid > .apd-grid-high,
+.apd-filters-grid > .apd-grid-plafond,
+.apd-filters-grid > .apd-grid-cbs,
+.apd-filters-grid > .apd-grid-reset { grid-column: auto; grid-row: auto; align-self: stretch; }
+.apd-filters-grid > .apd-grid-from,
+.apd-filters-grid > .apd-grid-to { grid-column: span 1; }
+.apd-filters-grid > .apd-grid-plafond { grid-column: 1 / -1; }
+.apd-filters-grid > .apd-grid-reset { justify-self: end; }
+}
 #count-section h2, #count-section .atlas-tab-layout-top h2,
 #count-section .print-description, #count-section .atlas-tab-layout-top .print-description,
 #count-section .count-filters, #count-section .count-date-presets-bar,
@@ -4555,7 +5709,7 @@ window._liteFilterModal = {
     var tr = e.target.closest('.filter-modal-trigger');
     if (tr) {
       var g = tr.closest('.filter-modal-group');
-      var sec = g && g.closest('#totals-section, #count-section');
+      var sec = g && g.closest('#totals-section, #count-section, #apd-section');
       if (g && sec) {
         e.preventDefault();
         openModal(g, sec);
@@ -4567,7 +5721,7 @@ window._liteFilterModal = {
       e.preventDefault();
       var val = chip.getAttribute('data-value');
       var key = chip.getAttribute('data-filter-key');
-      var sec = chip.closest('#totals-section, #count-section');
+      var sec = chip.closest('#totals-section, #count-section, #apd-section');
       if (!val || !key || !sec) return;
       var g = findGroupByKey(sec, key);
       if (!g) return;
@@ -4785,11 +5939,14 @@ function showTab(tabId){document.querySelectorAll('.tab-pane').forEach(function(
 document.addEventListener('DOMContentLoaded',function(){applyApodoxesTooltips();applyDescriptionColumn();initPersonalForm();buildPaketoTimeline();});
 function buildSinglePrintDoc(title,bodyContent){var styles=typeof _printStyles==='string'?_printStyles:'';var name=(typeof _clientName==='string'?_clientName:'').trim();var fullTitle=(name?name+' - '+(title||'')+' - ':(title||'ATLAS')+' - ')+(typeof _printBrandSuffix==='string'?_printBrandSuffix:'Atlas');var safeTitle=fullTitle.replace(/</g,'&lt;').replace(/"/g,'&quot;');var safeName=name.replace(/</g,'&lt;').replace(/&/g,'&amp;');var nameBlock=name?'<div class="prt-name">'+safeName+'</div>':'';return'<!DOCTYPE html><html lang="el"><head><meta charset="utf-8"><title>'+safeTitle+'</title><link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,200..900;1,200..900&display=swap" rel="stylesheet"><link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700;800&display=swap" rel="stylesheet"><style>'+styles+'</style></head><body>'+nameBlock+'<div class="prt-title">Ασφαλιστικό Βιογραφικό '+(typeof _printBrandSuffix==='string'?_printBrandSuffix:'Atlas')+'</div>'+bodyContent+'<div style="margin-top:12px;font-size:9px;color:#888;text-align:left;">© Syntaksi Pro - my advisor</div></body></html>';}
 function _stripHiddenCountForPrint(root){if(!root||!root.querySelectorAll)return;var sec=root.id==='count-section'?root:root.querySelector('#count-section');if(!sec||!sec.querySelector('#count-tables-wrapper'))return;sec.querySelectorAll('script').forEach(function(s){s.remove();});sec.querySelectorAll('#count-tables-wrapper tbody tr').forEach(function(tr){if(tr.style.display==='none')tr.remove();});var wrap=sec.querySelector('#count-tables-wrapper');var uni=wrap&&wrap.querySelector('table.count-unified');if(uni){var thead=uni.querySelector('thead');var theadHTML=thead?thead.outerHTML:'';var groups=[];var cur=null;Array.prototype.forEach.call(uni.querySelectorAll('tbody > tr'),function(tr){if(tr.getAttribute('data-is-band')==='1'){cur={year:(tr.getAttribute('data-c-year')||(tr.textContent||'').trim()),rows:[]};groups.push(cur);return;}if(tr.getAttribute('data-is-sep')==='1')return;if(!cur){cur={year:(tr.getAttribute('data-c-year')||''),rows:[]};groups.push(cur);}cur.rows.push(tr.outerHTML);});var out='';groups.forEach(function(g){if(!g.rows.length)return;out+='<div class="year-section"><div class="year-heading">'+(g.year||'')+'</div><table class="print-table">'+theadHTML+'<tbody>'+g.rows.join('')+'</tbody></table></div>';});if(out)wrap.innerHTML=out;}}
-function printSection(el){if(typeof updatePersonalTitle==='function')updatePersonalTitle();var source=el.classList&&el.classList.contains('print-section')?el:(el.closest&&el.closest('.print-section')||el);var clone=source.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var title=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'ATLAS';var bodyContent;var totalsTable=clone.querySelector('#totals-filter-table');if(totalsTable){var h2Text=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'Σύνολα';bodyContent='<div class="print-section"><h2>'+h2Text.replace(/</g,'&lt;')+'</h2>'+totalsTable.outerHTML+'</div>';}else{bodyContent=clone.outerHTML;}var printDoc=buildSinglePrintDoc(title,bodyContent);var w=window.open('','_blank');w.document.write(printDoc);w.document.close();w.focus();setTimeout(function(){w.print();w.close();},400);}
-function openTableFs(el){var overlay=document.createElement('div');overlay.className='table-fullscreen';overlay.id='fs-overlay';var section=el.classList.contains('print-section')?el:el.closest('.print-section');var source=section||el;var heading=source.querySelector?source.querySelector('h2'):null;var titleText=heading?heading.textContent:'Πίνακας';var hasInteractive=source.querySelector&&source.querySelector('script');var toolbar=document.createElement('div');toolbar.className='fs-toolbar';toolbar.innerHTML='<span class="fs-title">'+titleText+'</span>';var actions=document.createElement('div');actions.className='fs-toolbar-actions';var printBtn=document.createElement('button');printBtn.className='fs-print-btn';printBtn.innerHTML='🖨 Εκτύπωση';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(){var bodyEl=overlay.querySelector('.fs-body');if(bodyEl){var clone=bodyEl.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var totalsTable=clone.querySelector('#totals-filter-table');var bodyContent=totalsTable?'<div class="print-section"><h2>'+(titleText.replace(/</g,'&lt;')||'Σύνολα')+'</h2>'+totalsTable.outerHTML+'</div>':clone.innerHTML;var printDoc=buildSinglePrintDoc(titleText,bodyContent);var w=window.open('','_blank');w.document.write(printDoc);w.document.close();w.focus();setTimeout(function(){w.print();w.close();},400);}};actions.appendChild(printBtn);var closeBtn=document.createElement('button');closeBtn.className='fs-close';closeBtn.innerHTML='✕';closeBtn.title='Κλείσιμο (Esc)';closeBtn.onclick=closeTableFs;actions.appendChild(closeBtn);toolbar.appendChild(actions);var body=document.createElement('div');body.className='fs-body';if(hasInteractive){var placeholder=document.createElement('div');placeholder.id='fs-placeholder';placeholder.style.display='none';source.parentNode.insertBefore(placeholder,source);body.appendChild(source);overlay._fsSource=source;overlay._fsPlaceholder=placeholder;}else{body.appendChild(source.cloneNode(true));}overlay.appendChild(toolbar);overlay.appendChild(body);document.body.appendChild(overlay);document.body.style.overflow='hidden';}
+function _apdPrintSectionContent(sec){if(!sec)return'';if(typeof window._atlasApdApply==='function')window._atlasApdApply();var h2=sec.querySelector('h2');var desc=sec.querySelector('.print-description');var mount=sec.querySelector('#apd-tables-mount');var notes='';var plEl=document.getElementById('apd-plafond');if(plEl&&plEl.options&&plEl.options.length){var opt=plEl.options[plEl.selectedIndex];if(opt)notes+='<p class="print-description apd-print-plafond">Πλαφόν: '+String(opt.textContent||'').replace(/</g,'&lt;')+'</p>';}var toEl=document.getElementById('apd-totals-only');if(toEl&&toEl.checked)notes+='<p class="print-description">Μόνο ετήσιες γραμμές συνόλου</p>';return'<div class="print-section apd-layout">'+(h2?h2.outerHTML:'')+(desc?desc.outerHTML:'')+notes+(mount?'<div id="apd-tables-mount">'+mount.innerHTML+'</div>':'')+'</div>';}
+function _patchApdInPrintHtml(html){var live=document.getElementById('apd-section');if(!live||typeof html!=='string'||!html)return html||'';if(typeof window._atlasApdApply==='function')window._atlasApdApply();var liveMount=live.querySelector('#apd-tables-mount');if(!liveMount)return html;try{var doc=new DOMParser().parseFromString(html,'text/html');var printMount=doc.getElementById('apd-tables-mount');if(!printMount)return html;printMount.innerHTML=liveMount.innerHTML;var livePl=document.getElementById('apd-plafond');var printPl=doc.getElementById('apd-plafond');if(livePl&&printPl){printPl.value=livePl.value;Array.from(printPl.options).forEach(function(o){if(o.value===livePl.value)o.setAttribute('selected','selected');else o.removeAttribute('selected');});}return'<!DOCTYPE html>\n'+doc.documentElement.outerHTML;}catch(e){return html;}}
+function _openPrintWindow(printDoc){var w=window.open('','_blank');w.document.write(printDoc);w.document.close();w.focus();setTimeout(function(){w.print();w.close();},400);}
+function printSection(el){if(typeof updatePersonalTitle==='function')updatePersonalTitle();var source=el.classList&&el.classList.contains('print-section')?el:(el.closest&&el.closest('.print-section')||el);var apdSec=(source&&source.id==='apd-section')?source:(source&&source.querySelector?source.querySelector('#apd-section'):null)||(source&&source.closest?source.closest('#apd-section'):null);if(apdSec){var apdTitle=(apdSec.querySelector('h2')&&apdSec.querySelector('h2').textContent)||'ΑΠΔ/Πλαφόν';_openPrintWindow(buildSinglePrintDoc(apdTitle,_apdPrintSectionContent(apdSec)));return;}if(typeof persistInteractiveValues==='function')persistInteractiveValues(source);var clone=source.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var title=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'ATLAS';var bodyContent;var totalsTable=clone.querySelector('#totals-filter-table');if(totalsTable){var h2Text=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'Σύνολα';bodyContent='<div class="print-section"><h2>'+h2Text.replace(/</g,'&lt;')+'</h2>'+totalsTable.outerHTML+'</div>';}else{bodyContent=clone.outerHTML;}_openPrintWindow(buildSinglePrintDoc(title,bodyContent));}
+function openTableFs(el){var overlay=document.createElement('div');overlay.className='table-fullscreen';overlay.id='fs-overlay';var section=el.classList.contains('print-section')?el:el.closest('.print-section');var source=section||el;var heading=source.querySelector?source.querySelector('h2'):null;var titleText=heading?heading.textContent:'Πίνακας';var hasInteractive=source.querySelector&&source.querySelector('script');var toolbar=document.createElement('div');toolbar.className='fs-toolbar';toolbar.innerHTML='<span class="fs-title">'+titleText+'</span>';var actions=document.createElement('div');actions.className='fs-toolbar-actions';var printBtn=document.createElement('button');printBtn.className='fs-print-btn';printBtn.innerHTML='🖨 Εκτύπωση';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(){var bodyEl=overlay.querySelector('.fs-body');if(bodyEl){var apdSec=bodyEl.querySelector('#apd-section');if(apdSec){_openPrintWindow(buildSinglePrintDoc(titleText,_apdPrintSectionContent(apdSec)));return;}if(typeof persistInteractiveValues==='function')persistInteractiveValues(bodyEl);var clone=bodyEl.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var totalsTable=clone.querySelector('#totals-filter-table');var bodyContent=totalsTable?'<div class="print-section"><h2>'+(titleText.replace(/</g,'&lt;')||'Σύνολα')+'</h2>'+totalsTable.outerHTML+'</div>':clone.innerHTML;_openPrintWindow(buildSinglePrintDoc(titleText,bodyContent));}};actions.appendChild(printBtn);var closeBtn=document.createElement('button');closeBtn.className='fs-close';closeBtn.innerHTML='✕';closeBtn.title='Κλείσιμο (Esc)';closeBtn.onclick=closeTableFs;actions.appendChild(closeBtn);toolbar.appendChild(actions);var body=document.createElement('div');body.className='fs-body';if(hasInteractive){var placeholder=document.createElement('div');placeholder.id='fs-placeholder';placeholder.style.display='none';source.parentNode.insertBefore(placeholder,source);body.appendChild(source);overlay._fsSource=source;overlay._fsPlaceholder=placeholder;}else{body.appendChild(source.cloneNode(true));}overlay.appendChild(toolbar);overlay.appendChild(body);document.body.appendChild(overlay);document.body.style.overflow='hidden';}
 function closeTableFs(){var overlay=document.getElementById('fs-overlay');if(overlay){if(overlay._fsSource&&overlay._fsPlaceholder){overlay._fsPlaceholder.parentNode.insertBefore(overlay._fsSource,overlay._fsPlaceholder);overlay._fsPlaceholder.remove();}overlay.remove();document.body.style.overflow='';}}
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeTableFs();});
-function openPrint(){if(typeof updatePersonalTitle==='function')updatePersonalTitle();var safeName=(typeof _clientName==='string'?_clientName:'').trim().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');var html=_printHtml;if(safeName)html=_printHtml.replace(/<body>/,'<body><div class="prt-name">'+safeName+'</div>');var blob=new Blob([html],{type:'text/html;charset=utf-8'});var url=URL.createObjectURL(blob);window.open(url,'_blank');}
+function openPrint(){if(typeof updatePersonalTitle==='function')updatePersonalTitle();if(typeof persistInteractiveValues==='function')persistInteractiveValues(document.body);var safeName=(typeof _clientName==='string'?_clientName:'').trim().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');var html=_printHtml;if(typeof _patchApdInPrintHtml==='function')html=_patchApdInPrintHtml(html);if(safeName)html=html.replace(/<body>/,'<body><div class="prt-name">'+safeName+'</div>');var blob=new Blob([html],{type:'text/html;charset=utf-8'});var url=URL.createObjectURL(blob);window.open(url,'_blank');}
 function getFullSaveFilename(){var n=document.getElementById('personal_fullname');var t=document.getElementById('personal_tameio');var ak=document.getElementById('personal_amka');var name=(n&&n.value)?n.value.trim():'';var tameio=(t&&t.options[t.selectedIndex])?t.options[t.selectedIndex].text.trim():'';var amka=(ak&&ak.value)?ak.value.trim():'';function sanitize(s){return (s||'').replace(/[\s\/\\:*?"<>|]+/g,' ').trim().replace(/\s+/g,'_')||'';}var a=sanitize(name),b=sanitize(tameio),c=sanitize(amka);var parts=[a,b,c].filter(Boolean);var ds=document.body&&document.body.getAttribute('data-atlas-save-file');var suf=(ds&&String(ds).trim())?String(ds).trim():((typeof _fullSaveSuffix==='string'&&_fullSaveSuffix)?_fullSaveSuffix:'ATLAS Pro.html');return (parts.length?parts.join('_')+'_':'')+suf;}
 function persistInteractiveValues(root){var r=root||document.body;if(!r||!r.querySelectorAll)return;r.querySelectorAll('input').forEach(function(inp){var t=(inp.type||'').toLowerCase();if(t==='checkbox'||t==='radio'){if(inp.checked)inp.setAttribute('checked','checked');else inp.removeAttribute('checked');}else if(t!=='file'&&t!=='button'&&t!=='submit'&&t!=='image'){inp.setAttribute('value',inp.value);}});r.querySelectorAll('textarea').forEach(function(ta){ta.textContent=ta.value;});r.querySelectorAll('select').forEach(function(sel){Array.from(sel.options).forEach(function(opt){if(opt.selected)opt.setAttribute('selected','selected');else opt.removeAttribute('selected');});});}
 function downloadFullHtml(){persistInteractiveValues(document.body);var html='<!DOCTYPE html>\n'+document.documentElement.outerHTML;var blob=new Blob([html],{type:'text/html;charset=utf-8'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=(typeof getFullSaveFilename==='function'?getFullSaveFilename():_downloadFilename);a.click();URL.revokeObjectURL(a.href);}
