@@ -4794,11 +4794,28 @@ def _syntaksi_sum_column(df_slice: pd.DataFrame, column: str, exclude_drx: bool 
     return total if has_value else None
 
 
+def _syntaksi_apd_plafond_mode(apd_plafond_filter: str | None) -> str:
+    """Μετατροπή της επιλογής «Πλαφόν» της ΑΠΔ σε mode: 'palios' | 'neos' | 'none' | 'auto'."""
+    s = unicodedata.normalize("NFC", str(apd_plafond_filter or "").strip())
+    if s == "Πλαφόν Παλιού":
+        return "palios"
+    if s == "Πλαφόν Νέου":
+        return "neos"
+    if s.startswith("Χωρίς πλαφόν"):
+        return "none"
+    return "auto"
+
+
 def _compute_apd_yearly_for_syntaksi_packages(
     source_df: pd.DataFrame,
     selected_klados: set[str],
+    plafond_mode: str | None = None,
 ) -> tuple[dict[int, float], dict[int, float], dict[int, float]]:
-    """Ετήσια σύνολα μισθωτή (2002+) από ΑΠΔ μόνο για επιλεγμένα πακέτα — όχι ολόκληρη την ΑΠΔ."""
+    """Ετήσια σύνολα μισθωτή (2002+) από ΑΠΔ μόνο για επιλεγμένα πακέτα — όχι ολόκληρη την ΑΠΔ.
+
+    plafond_mode: 'palios' / 'neos' / 'none' (χωρίς πλαφόν → Συντ. = Μικτές) /
+    None|'auto' (αυτόματο βάσει εγγραφής πριν 1/1/1993). Επιτρέπει δυναμικό συγχρονισμό
+    με το φίλτρο «Πλαφόν» της καρτέλας ΑΠΔ."""
     im: dict[int, float] = {}
     mk: dict[int, float] = {}
     sy: dict[int, float] = {}
@@ -4814,6 +4831,26 @@ def _compute_apd_yearly_for_syntaksi_packages(
     sub = sub[kl.isin(selected_klados)]
     if sub.empty:
         return im, mk, sy
+
+    # «Συντ. Αποδοχές» = min(Μικτές, Εισφ. πλαφόν) όπως η καρτέλα ΑΠΔ (δεν είναι raw στήλη).
+    # Πλαφόν βάσει επιλογής ΑΠΔ· σε 'auto' → παλιού/νέου από εγγραφή πριν 1/1/1993.
+    _mode = (plafond_mode or "auto").strip().lower()
+    if _mode == "none":
+        plafond_map = None
+    elif _mode == "palios":
+        plafond_map = PLAFOND_PALIOS
+    elif _mode == "neos":
+        plafond_map = PLAFOND_NEOS
+    else:
+        is_palios = False
+        try:
+            _fd = pd.to_datetime(source_df["Από"], format="%d/%m/%Y", errors="coerce")
+            if not _fd.isnull().all() and _fd.min() < pd.Timestamp("1993-01-01"):
+                is_palios = True
+        except Exception:
+            is_palios = False
+        plafond_map = PLAFOND_PALIOS if is_palios else PLAFOND_NEOS
+    earnings_col = next((c for c in sub.columns if "Τύπος Αποδοχών" in c), None)
 
     sub["_y"] = pd.to_datetime(sub["Από"], format="%d/%m/%Y", errors="coerce").dt.year
     for year_raw in sub["_y"].dropna().unique():
@@ -4832,11 +4869,28 @@ def _compute_apd_yearly_for_syntaksi_packages(
         if has_days:
             im[y] = days_total
         gross_sum = _syntaksi_sum_column(ys, "Μικτές αποδοχές", exclude_drx=True)
-        synt_sum = _syntaksi_sum_column(ys, "Συντ. Αποδοχές", exclude_drx=True)
         if gross_sum is not None:
             mk[y] = float(gross_sum)
-        if synt_sum is not None:
-            sy[y] = float(synt_sum)
+
+        # Συντ. Αποδοχές: άθροισμα ανά γραμμή min(μικτές, πλαφόν) — πλαφόν/2 για τύπους 04/05.
+        # Αν plafond_map None ('Χωρίς πλαφόν') → Συντ. = Μικτές (καμία περικοπή).
+        base_plaf = plafond_map.get(str(y)) if plafond_map is not None else None
+        capped_total = 0.0
+        has_capped = False
+        for _, row in ys.iterrows():
+            g = clean_numeric_value(row.get("Μικτές αποδοχές", 0), exclude_drx=True)
+            if g is None:
+                continue
+            plaf = base_plaf
+            if plaf and earnings_col is not None:
+                et = str(row.get(earnings_col, "")).strip()
+                if et in ("04", "05"):
+                    plaf = plaf / 2.0
+            capped = float(g) if (plaf is None or plaf == 0) else min(float(g), float(plaf))
+            capped_total += capped
+            has_capped = True
+        if has_capped:
+            sy[y] = capped_total
     return im, mk, sy
 
 
@@ -8445,15 +8499,19 @@ def show_results_page(df, filename):
             with col1:
                 if 'Ταμείο' in apd_df.columns:
                     taimeia_options = sorted(apd_df['Ταμείο'].dropna().unique().tolist())
-                    selected_taimeia = st.multiselect(
+                    # Κλειδωμένο: ακολουθεί την Καταμέτρηση (αντιστοίχιση φίλτρων)
+                    _cnt_tam = [t for t in (st.session_state.get("cnt_filter_tameio") or []) if t in taimeia_options]
+                    st.session_state["apd_filter_taimeio"] = _cnt_tam
+                    st.multiselect(
                         "Ταμείο:",
                         options=taimeia_options,
-                        default=[],
                         key="apd_filter_taimeio",
-                        placeholder=""
+                        placeholder="Ακολουθεί την Καταμέτρηση",
+                        disabled=True,
+                        help="Κλειδωμένο: ακολουθεί την καρτέλα «Καταμέτρηση».",
                     )
-                    if selected_taimeia:
-                        apd_df = apd_df[apd_df['Ταμείο'].isin(selected_taimeia)]
+                    if _cnt_tam:
+                        apd_df = apd_df[apd_df['Ταμείο'].isin(_cnt_tam)]
 
             with col2:
                 if 'Κλάδος/Πακέτο Κάλυψης' in apd_df.columns:
@@ -8468,11 +8526,15 @@ def show_results_page(df, filename):
                         else:
                             klados_options_with_desc.append(code)
                             klados_code_map[code] = code
+                    # Κλειδωμένο: τα πακέτα της ΑΠΔ ακολουθούν υποχρεωτικά την Καταμέτρηση
+                    # (αποφυγή αναντιστοιχίας με τις Συντάξιμες — ταύτιση πακέτων ύψιστης σημασίας).
                     selected_klados = st.multiselect(
                         "Κλάδος/Πακέτο:",
                         options=klados_options_with_desc,
                         key="apd_filter_klados",
-                        placeholder=""
+                        placeholder="Ακολουθεί την Καταμέτρηση",
+                        disabled=True,
+                        help="Κλειδωμένο: τα πακέτα συγχρονίζονται αυτόματα με την καρτέλα «Καταμέτρηση» ώστε να μην υπάρχει αναντιστοιχία με τις «Συντάξιμες».",
                     )
                     if selected_klados:
                         selected_codes = [klados_code_map.get(opt, opt) for opt in selected_klados]
@@ -8483,22 +8545,29 @@ def show_results_page(df, filename):
                 if earnings_col:
                     options_raw = apd_df[earnings_col].dropna().astype(str).unique().tolist()
                     typos_apodochon_options = sorted(options_raw)
-                    selected_typos_apodochon = st.multiselect(
+                    # Κλειδωμένο: ακολουθεί την Καταμέτρηση (αντιστοίχιση φίλτρων)
+                    _cnt_earn = [t for t in (st.session_state.get("cnt_filter_earnings") or []) if t in typos_apodochon_options]
+                    st.session_state["apd_filter_apodochon"] = _cnt_earn
+                    st.multiselect(
                         "Τύπος Αποδοχών:",
                         options=typos_apodochon_options,
-                        default=[],
                         key="apd_filter_apodochon",
-                        placeholder=""
+                        placeholder="Ακολουθεί την Καταμέτρηση",
+                        disabled=True,
+                        help="Κλειδωμένο: ακολουθεί την καρτέλα «Καταμέτρηση».",
                     )
-                    if selected_typos_apodochon:
-                        apd_df = apd_df[apd_df[earnings_col].isin(selected_typos_apodochon)]
+                    if _cnt_earn:
+                        apd_df = apd_df[apd_df[earnings_col].isin(_cnt_earn)]
 
             # Γραμμή 2: Φίλτρα ημερομηνιών, ποσοστού και πλαφόν
             col5, col6, col7, col8, col9, col10 = st.columns([1.2, 1.2, 1.0, 1.4, 1.2, 1.4])
             with col5:
-                from_date_str = st.text_input("Από (dd/mm/yyyy):", value="01/01/2002", placeholder="01/01/2002", key="apd_filter_from_date")
+                # Κλειδωμένο: ακολουθεί την Καταμέτρηση (αντιστοίχιση φίλτρων)
+                st.session_state["apd_filter_from_date"] = (st.session_state.get("cnt_filter_from") or "").strip()
+                from_date_str = st.text_input("Από (dd/mm/yyyy):", placeholder="Ακολουθεί την Καταμέτρηση", key="apd_filter_from_date", disabled=True, help="Κλειδωμένο: ακολουθεί την καρτέλα «Καταμέτρηση».")
             with col6:
-                to_date_str = st.text_input("Έως (dd/mm/yyyy):", value="", placeholder="31/12/1990", key="apd_filter_to_date")
+                st.session_state["apd_filter_to_date"] = (st.session_state.get("cnt_filter_to") or "").strip()
+                to_date_str = st.text_input("Έως (dd/mm/yyyy):", placeholder="Ακολουθεί την Καταμέτρηση", key="apd_filter_to_date", disabled=True, help="Κλειδωμένο: ακολουθεί την καρτέλα «Καταμέτρηση».")
             with col7:
                 filter_threshold = st.number_input("Φίλτρο %", min_value=0.0, max_value=100.0, value=18.0, step=0.1, format="%.1f", key="apd_filter_val")
             with col8:
@@ -10474,18 +10543,15 @@ def show_results_page(df, filename):
                                 lambda e: int(float(e)) >= 2002 if pd.notna(e) else False
                             )
 
-                            # Από 2002+: στήλες μισθωτή από ΑΠΔ μόνο για τα επιλεγμένα πακέτα
-                            _apd_im: dict[int, float] = {}
-                            _apd_mk: dict[int, float] = {}
-                            _apd_sy: dict[int, float] = {}
-                            try:
-                                _apd_src = df
-                            except NameError:
-                                _apd_src = None
-                            if _apd_src is not None and not getattr(_apd_src, "empty", True):
-                                _apd_im, _apd_mk, _apd_sy = _compute_apd_yearly_for_syntaksi_packages(
-                                    _apd_src, _sel_klados
-                                )
+                            # Από 2002+: ΚΛΩΝΟΣ των ετήσιων γραμμών της καρτέλας ΑΠΔ.
+                            # Η ΑΠΔ υπολογίζει τα ετήσια σύνολα (ημέρες/μικτές/Συντ. Αποδοχές μετά
+                            # πλαφόν) με βάση τα ΔΙΚΑ της φίλτρα (κλειδωμένα στην Καταμέτρηση: ταμείο/
+                            # πακέτο/τύπος/από-έως) + τα ελεύθερα (πλαφόν, %). Τα αποθηκεύει στο
+                            # session_state· εδώ απλώς τα αντιγράφουμε. Η ΑΠΔ δεν είναι fragment, οπότε
+                            # κάθε αλλαγή της κάνει full rerun και τρέχει πριν από αυτό το tab → φρέσκα.
+                            _apd_im = dict(st.session_state.get("_apd_yearly_imeres") or {})
+                            _apd_mk = dict(st.session_state.get("_apd_yearly_miktes") or {})
+                            _apd_sy = dict(st.session_state.get("_apd_yearly_synt") or {})
                             _has_apd = bool(_apd_im or _apd_mk or _apd_sy)
 
                             if _has_apd:

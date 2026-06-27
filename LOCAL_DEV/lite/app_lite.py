@@ -4739,11 +4739,28 @@ def _syntaksi_sum_column(df_slice: pd.DataFrame, column: str, exclude_drx: bool 
     return total if has_value else None
 
 
+def _syntaksi_apd_plafond_mode(apd_plafond_filter: str | None) -> str:
+    """Μετατροπή της επιλογής «Πλαφόν» της ΑΠΔ σε mode: 'palios' | 'neos' | 'none' | 'auto'."""
+    s = unicodedata.normalize("NFC", str(apd_plafond_filter or "").strip())
+    if s == "Πλαφόν Παλιού":
+        return "palios"
+    if s == "Πλαφόν Νέου":
+        return "neos"
+    if s.startswith("Χωρίς πλαφόν"):
+        return "none"
+    return "auto"
+
+
 def _compute_apd_yearly_for_syntaksi_packages(
     source_df: pd.DataFrame,
     selected_klados: set[str],
+    plafond_mode: str | None = None,
 ) -> tuple[dict[int, float], dict[int, float], dict[int, float]]:
-    """Ετήσια σύνολα μισθωτή (2002+) από ΑΠΔ μόνο για επιλεγμένα πακέτα — όχι ολόκληρη την ΑΠΔ."""
+    """Ετήσια σύνολα μισθωτή (2002+) από ΑΠΔ μόνο για επιλεγμένα πακέτα — όχι ολόκληρη την ΑΠΔ.
+
+    plafond_mode: 'palios' / 'neos' / 'none' (χωρίς πλαφόν → Συντ. = Μικτές) /
+    None|'auto' (αυτόματο βάσει εγγραφής πριν 1/1/1993). Επιτρέπει δυναμικό συγχρονισμό
+    με το φίλτρο «Πλαφόν» της καρτέλας ΑΠΔ."""
     im: dict[int, float] = {}
     mk: dict[int, float] = {}
     sy: dict[int, float] = {}
@@ -4759,6 +4776,26 @@ def _compute_apd_yearly_for_syntaksi_packages(
     sub = sub[kl.isin(selected_klados)]
     if sub.empty:
         return im, mk, sy
+
+    # «Συντ. Αποδοχές» = min(Μικτές, Εισφ. πλαφόν) όπως η καρτέλα ΑΠΔ (δεν είναι raw στήλη).
+    # Πλαφόν βάσει επιλογής ΑΠΔ· σε 'auto' → παλιού/νέου από εγγραφή πριν 1/1/1993.
+    _mode = (plafond_mode or "auto").strip().lower()
+    if _mode == "none":
+        plafond_map = None
+    elif _mode == "palios":
+        plafond_map = PLAFOND_PALIOS
+    elif _mode == "neos":
+        plafond_map = PLAFOND_NEOS
+    else:
+        is_palios = False
+        try:
+            _fd = pd.to_datetime(source_df["Από"], format="%d/%m/%Y", errors="coerce")
+            if not _fd.isnull().all() and _fd.min() < pd.Timestamp("1993-01-01"):
+                is_palios = True
+        except Exception:
+            is_palios = False
+        plafond_map = PLAFOND_PALIOS if is_palios else PLAFOND_NEOS
+    earnings_col = next((c for c in sub.columns if "Τύπος Αποδοχών" in c), None)
 
     sub["_y"] = pd.to_datetime(sub["Από"], format="%d/%m/%Y", errors="coerce").dt.year
     for year_raw in sub["_y"].dropna().unique():
@@ -4777,11 +4814,28 @@ def _compute_apd_yearly_for_syntaksi_packages(
         if has_days:
             im[y] = days_total
         gross_sum = _syntaksi_sum_column(ys, "Μικτές αποδοχές", exclude_drx=True)
-        synt_sum = _syntaksi_sum_column(ys, "Συντ. Αποδοχές", exclude_drx=True)
         if gross_sum is not None:
             mk[y] = float(gross_sum)
-        if synt_sum is not None:
-            sy[y] = float(synt_sum)
+
+        # Συντ. Αποδοχές: άθροισμα ανά γραμμή min(μικτές, πλαφόν) — πλαφόν/2 για τύπους 04/05.
+        # Αν plafond_map None ('Χωρίς πλαφόν') → Συντ. = Μικτές (καμία περικοπή).
+        base_plaf = plafond_map.get(str(y)) if plafond_map is not None else None
+        capped_total = 0.0
+        has_capped = False
+        for _, row in ys.iterrows():
+            g = clean_numeric_value(row.get("Μικτές αποδοχές", 0), exclude_drx=True)
+            if g is None:
+                continue
+            plaf = base_plaf
+            if plaf and earnings_col is not None:
+                et = str(row.get(earnings_col, "")).strip()
+                if et in ("04", "05"):
+                    plaf = plaf / 2.0
+            capped = float(g) if (plaf is None or plaf == 0) else min(float(g), float(plaf))
+            capped_total += capped
+            has_capped = True
+        if has_capped:
+            sy[y] = capped_total
     return im, mk, sy
 
 
