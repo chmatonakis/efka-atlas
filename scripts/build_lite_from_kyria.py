@@ -58,21 +58,89 @@ def main() -> None:
         1,
     )
 
-    # Μετά την επεξεργασία: μόνο ένα κουμπί (νέο UI: ATLAS Pro/Lite στήλες, ή παλιό: τρεις στήλες)
-    new_a = """            if st.button("Άνοιγμα / Προβολή", type="primary", width="stretch", key="open_html_btn"):
+    # Μετά την επεξεργασία: μόνο ένα κουμπί (νέο UI Pro/HTML, παλιό Pro+Lite, ή τριών στηλών)
+    new_a = """            if st.button("Άνοιγμα / Προβολή", type="primary", use_container_width=True, key="open_html_btn"):
                 st.session_state['open_html_report'] = True
+
+            if st.session_state.get('open_html_report'):
+                _atlas_render_full_html_report_open_tab(df)
+                st.session_state['open_html_report'] = False
 """
-    new_b = """                    if st.button("Άνοιγμα / Προβολή", type="primary", width="stretch", key="open_html_btn"):
+    new_b = """                    if st.button("Άνοιγμα / Προβολή", type="primary", use_container_width=True, key="open_html_btn"):
                         st.session_state['open_html_report'] = True
+
+                if st.session_state.get('open_html_report'):
+                    _atlas_render_full_html_report_open_tab(df)
+                    st.session_state['open_html_report'] = False
 """
 
-    # Νεότερη Κυρία: κεντραρισμένα δύο κουμπιά (ATLAS Pro / ATLAS Lite)
     def _btn_kw(width_stretch: bool) -> str:
         return 'width="stretch"' if width_stretch else "use_container_width=True"
 
-    for stretch in (True, False):
-        kw = _btn_kw(stretch)
-        new_ui_a = f"""            _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
+    pro_html_a = """            _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
+            with _pp_mid:
+                _pp_b1, _pp_b2 = st.columns(2, vertical_alignment="center")
+                with _pp_b1:
+                    if st.button(
+                        "ATLAS Pro\\n(πλήρες)",
+                        type="primary",
+                        use_container_width=True,
+                        key="show_results_btn",
+                        help="Πλήρης ανάλυση στην εφαρμογή (όλες οι καρτέλες).",
+                    ):
+                        st.session_state['show_results'] = True
+                        st.rerun()
+                with _pp_b2:
+                    if st.button(
+                        "ATLAS Pro\\n(HTML)",
+                        type="secondary",
+                        use_container_width=True,
+                        key="open_html_pro_btn",
+                        help="Πλήρης HTML αναφορά Pro σε νέα καρτέλα (επιτρέψτε pop-ups).",
+                    ):
+                        st.session_state['open_html_report_pro'] = True
+            _atlas_inject_post_process_choice_buttons_style()
+
+            if st.session_state.get('open_html_report_pro'):
+                _atlas_render_full_html_report_open_tab(df, edition="pro")
+                st.session_state['open_html_report_pro'] = False
+"""
+    pro_html_b = """                    _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
+                    with _pp_mid:
+                        _pp_b1, _pp_b2 = st.columns(2, vertical_alignment="center")
+                        with _pp_b1:
+                            if st.button(
+                                "ATLAS Pro\\n(πλήρες)",
+                                type="primary",
+                                use_container_width=True,
+                                key="show_results_btn",
+                                help="Πλήρης ανάλυση στην εφαρμογή (όλες οι καρτέλες).",
+                            ):
+                                st.session_state['show_results'] = True
+                                st.rerun()
+                        with _pp_b2:
+                            if st.button(
+                                "ATLAS Pro\\n(HTML)",
+                                type="secondary",
+                                use_container_width=True,
+                                key="open_html_pro_btn",
+                                help="Πλήρης HTML αναφορά Pro σε νέα καρτέλα (επιτρέψτε pop-ups).",
+                            ):
+                                st.session_state['open_html_report_pro'] = True
+                    _atlas_inject_post_process_choice_buttons_style()
+
+                if st.session_state.get('open_html_report_pro'):
+                    _atlas_render_full_html_report_open_tab(df, edition="pro")
+                    st.session_state['open_html_report_pro'] = False
+"""
+    if pro_html_a in body and pro_html_b in body:
+        body = body.replace(pro_html_a, new_a, 1)
+        body = body.replace(pro_html_b, new_b, 1)
+    else:
+        # Νεότερη Κυρία (παλιό): κεντραρισμένα δύο κουμπιά (ATLAS Pro / ATLAS Lite)
+        for stretch in (True, False):
+            kw = _btn_kw(stretch)
+            new_ui_a = f"""            _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
             with _pp_mid:
                 _pp_b1, _pp_b2 = st.columns(2, vertical_alignment="center")
                 with _pp_b1:
@@ -96,7 +164,7 @@ def main() -> None:
                         st.session_state['open_html_report'] = True
             _atlas_inject_post_process_choice_buttons_style()
 """
-        new_ui_b = f"""                    _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
+            new_ui_b = f"""                    _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
                     with _pp_mid:
                         _pp_b1, _pp_b2 = st.columns(2, vertical_alignment="center")
                         with _pp_b1:
@@ -120,15 +188,15 @@ def main() -> None:
                                 st.session_state['open_html_report'] = True
                     _atlas_inject_post_process_choice_buttons_style()
 """
-        if new_ui_a in body and new_ui_b in body:
-            body = body.replace(new_ui_a, new_a, 1)
-            body = body.replace(new_ui_b, new_b, 1)
-            break
-    else:
-        # Παλιότερη Κυρία: τρεις στήλες, «Προβολή Αποτελεσμάτων» / «Γρήγορη Προβολή - HTML»
-        for stretch in (True, False):
-            kw = _btn_kw(stretch)
-            old_a = f"""            col1, col2, col3 = st.columns([1, 1, 1])
+            if new_ui_a in body and new_ui_b in body:
+                body = body.replace(new_ui_a, new_a, 1)
+                body = body.replace(new_ui_b, new_b, 1)
+                break
+        else:
+            # Παλιότερη Κυρία: τρεις στήλες, «Προβολή Αποτελεσμάτων» / «Γρήγορη Προβολή - HTML»
+            for stretch in (True, False):
+                kw = _btn_kw(stretch)
+                old_a = f"""            col1, col2, col3 = st.columns([1, 1, 1])
             with col1:
                 if st.button("Προβολή Αποτελεσμάτων", type="primary", {kw}, key="show_results_btn"):
                     st.session_state['show_results'] = True
@@ -137,7 +205,7 @@ def main() -> None:
                 if st.button("Γρήγορη Προβολή - HTML", type="secondary", {kw}, key="open_html_btn"):
                     st.session_state['open_html_report'] = True
 """
-            old_b = f"""                    col1, col2, col3 = st.columns([1, 1, 1])
+                old_b = f"""                    col1, col2, col3 = st.columns([1, 1, 1])
                     with col1:
                         if st.button("Προβολή Αποτελεσμάτων", type="primary", {kw}, key="show_results_btn"):
                             st.session_state['show_results'] = True
@@ -146,14 +214,48 @@ def main() -> None:
                         if st.button("Γρήγορη Προβολή - HTML", type="secondary", {kw}, key="open_html_btn"):
                             st.session_state['open_html_report'] = True
 """
-            if old_a in body and old_b in body:
-                body = body.replace(old_a, new_a, 1)
-                body = body.replace(old_b, new_b, 1)
-                break
-        else:
-            raise SystemExit(
-                "Δεν βρέθηκαν μπλοκ κουμπιών (νέο UI ATLAS Pro/Lite ή παλιό τριών στηλών)"
-            )
+                if old_a in body and old_b in body:
+                    body = body.replace(old_a, new_a, 1)
+                    body = body.replace(old_b, new_b, 1)
+                    break
+            else:
+                raise SystemExit(
+                    "Δεν βρέθηκαν μπλοκ κουμπιών (Pro/HTML, Pro+Lite ή παλιό τριών στηλών)"
+                )
+
+    body = body.replace(
+        '    _app_title = "ATLAS Pro" if edition == "pro" else "ATLAS"\n'
+        '    _report_kwargs = {\n'
+        '        "client_name": client_name,\n'
+        '        "app_title": _app_title,\n'
+        '        "app_subtitle": "Ασφαλιστικό Βιογραφικό",\n'
+        '    }',
+        '    _app_title = "ATLAS Lite"\n'
+        '    _report_kwargs = {\n'
+        '        "client_name": client_name,\n'
+        '        "app_title": _app_title,\n'
+        '        "app_subtitle": "",\n'
+        '        "full_save_suffix": "ATLAS_Lite.html",\n'
+        '    }',
+        1,
+    )
+
+    body = body.replace(
+        'def _atlas_render_full_html_report_open_tab(df: pd.DataFrame, edition: str = "lite") -> None:',
+        'def _atlas_render_full_html_report_open_tab(df: pd.DataFrame) -> None:',
+        1,
+    )
+    body = body.replace(
+        '\n    edition: "lite" (προεπιλογή) ή "pro" (επιπλέον καρτέλες — υπό σταδιακή μεταφορά).\n',
+        '\n',
+        1,
+    )
+    body = body.replace(
+        '    if "edition" in inspect.signature(generate_full_html_report).parameters:\n'
+        '        _report_kwargs["edition"] = edition\n',
+        '    _report_kwargs["edition"] = "lite"\n',
+        1,
+    )
 
     body = body.replace(
         '                _app_title = "ATLAS"\n                _subtitle = "Ασφαλιστικό Βιογραφικό"',
@@ -213,7 +315,11 @@ def main() -> None:
         body = body[:inj_i].rstrip() + "\n\n" + body[inj_j:]
 
     LITE_OUT.write_text(body, encoding="utf-8")
+    (ROOT / "app_lite.py").write_text(body, encoding="utf-8")
+    (ROOT / "app_final.py").write_text(KYRIA.read_text(encoding="utf-8"), encoding="utf-8")
     print("OK:", LITE_OUT)
+    print("OK:", ROOT / "app_lite.py")
+    print("OK:", ROOT / "app_final.py")
 
 
 if __name__ == "__main__":

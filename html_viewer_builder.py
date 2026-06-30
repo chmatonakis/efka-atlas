@@ -53,6 +53,7 @@ from app_final import (
     APODOXES_DESCRIPTIONS,
     compute_parallel_summary_metrics,
     compute_parallel_2017_summary_metrics,
+    compute_multi_employment_summary_metrics,
     _compute_apd_yearly_for_syntaksi_packages,
     _syntaksi_oga_tekmark_rate_decimal,
     df_has_tsmede_misthoti_insurance,
@@ -75,10 +76,7 @@ EXCLUSION_NOTE_HTML = (
     f'</div>'
 )
 COMPLEX_FILE_WARNING_HTML = (
-    '<div class="complex-file-warning" style="'
-    'background:rgba(254,242,242,0.88);border:none;border-radius:8px;'
-    'padding:12px 16px;margin-bottom:16px;'
-    'color:#991b1b;font-weight:700;font-size:1rem;">'
+    '<div class="complex-file-warning">'
     '⚠️ Προσοχή: Περίπλοκο αρχείο — Ελέγξτε απαραίτητα το πρωτότυπο ΑΤΛΑΣ.'
     '</div>'
 )
@@ -202,6 +200,26 @@ def _build_parallel_metrics_html(
     )
 
 
+def _build_multi_metrics_html(df: pd.DataFrame, description_map: dict | None = None) -> str:
+    months = compute_multi_employment_summary_metrics(df, description_map)
+    info_html = (
+        '<div class="atlas-info-box">'
+        '<div class="atlas-info-box-title">Πολλαπλή απασχόληση</div>'
+        '<div class="atlas-info-box-body">Κριτήρια: ΙΚΑ (αποδοχές 01, 16, ή 99) με πάνω από έναν '
+        "εργοδότη στον ίδιο μήνα.</div>"
+        "</div>"
+    )
+    return _build_atlas_header_split_metrics_html(
+        info_html,
+        [
+            _atlas_metric_cell_html(
+                "Μήνες Πολλαπλής",
+                format_number_greek(months, decimals=0),
+            ),
+        ],
+    )
+
+
 def _build_tab_page(
     section_id: str,
     *,
@@ -211,10 +229,11 @@ def _build_tab_page(
     metrics_html: str = "",
     filters_html: str = "",
     body_html: str = "",
+    footer_html: str = "",
     scripts_html: str = "",
     extra_section_classes: str = "",
 ) -> str:
-    """Σταθερή δομή καρτέλας html-lite: προειδοποίηση → τίτλος → metrics → φίλτρα → scroll body."""
+    """Σταθερή δομή καρτέλας html-lite: προειδοποίηση → τίτλος → metrics → φίλτρα → body → footer."""
     top_parts = [
         warning_html,
         heading_html,
@@ -226,10 +245,16 @@ def _build_tab_page(
     sec_classes = "print-section atlas-tab-layout"
     if extra_section_classes:
         sec_classes += f" {extra_section_classes}"
+    footer_block = (
+        f'<div class="atlas-tab-layout-footer" id="{html_mod.escape(section_id)}-footer">{footer_html}</div>'
+        if footer_html
+        else ""
+    )
     return (
         f'<section class="{sec_classes}" id="{html_mod.escape(section_id)}">'
         f'<div class="atlas-tab-layout-top">{top_html}</div>'
         f'<div class="atlas-tab-layout-body" id="{html_mod.escape(section_id)}-body">{body_html}</div>'
+        f"{footer_block}"
         f"{scripts_html}"
         f"</section>"
     )
@@ -1274,6 +1299,67 @@ def _apodoxes_option_pairs(values):
     return pairs
 
 
+def _klados_eisf_pct_map_from_totals(
+    display_summary: pd.DataFrame,
+    source_df: pd.DataFrame | None = None,
+) -> dict[str, str]:
+    """Ποσοστό ανά πακέτο — ίδιες τιμές με τη στήλη «Εισφορές / Αποδοχές %» των Σύνολα."""
+    pkg_col = 'Κλάδος/Πακέτο Κάλυψης'
+    pct_col = 'Εισφορές / Αποδοχές %'
+    gross_col = 'Μικτές αποδοχές'
+    contrib_col = 'Συνολικές εισφορές'
+    if display_summary is None or display_summary.empty or pkg_col not in display_summary.columns:
+        return {}
+
+    by_pkg: dict[str, list[str]] = {}
+    if pct_col in display_summary.columns:
+        for _, row in display_summary.iterrows():
+            code = str(row.get(pkg_col, '')).strip()
+            pct = str(row.get(pct_col, '')).strip()
+            if not code or code.lower() in ('nan', 'none') or not pct:
+                continue
+            by_pkg.setdefault(code, []).append(pct)
+
+    out: dict[str, str] = {}
+    for code, pcts in by_pkg.items():
+        if len(pcts) == 1:
+            out[code] = pcts[0]
+
+    if source_df is None or source_df.empty or pkg_col not in source_df.columns:
+        return out
+
+    missing = [c for c in (gross_col, contrib_col) if c not in source_df.columns]
+    if missing:
+        return out
+
+    work = source_df.copy()
+    work[pkg_col] = work[pkg_col].astype(str).str.strip()
+    work = work[work[pkg_col] != '']
+    work[gross_col] = work[gross_col].apply(lambda x: clean_numeric_value(x, exclude_drx=True))
+    work[contrib_col] = work[contrib_col].apply(lambda x: clean_numeric_value(x, exclude_drx=True))
+
+    for code in by_pkg:
+        if code in out:
+            continue
+        sub = work[work[pkg_col] == code]
+        if sub.empty:
+            continue
+        g_sum = float(sub[gross_col].sum())
+        c_sum = float(sub[contrib_col].sum())
+        if abs(g_sum) > 1e-12 and abs(c_sum) > 1e-12:
+            out[code] = format_number_greek(c_sum / g_sum * 100, decimals=2) + ' %'
+
+    # Πακέτα που υπάρχουν μόνο στην καταμέτρηση (όχι στα Σύνολα)
+    for code, grp in work.groupby(pkg_col):
+        if code in out:
+            continue
+        g_sum = float(grp[gross_col].sum())
+        c_sum = float(grp[contrib_col].sum())
+        if abs(g_sum) > 1e-12 and abs(c_sum) > 1e-12:
+            out[str(code).strip()] = format_number_greek(c_sum / g_sum * 100, decimals=2) + ' %'
+    return out
+
+
 def _lite_filter_modal_group(
     name,
     options,
@@ -1281,11 +1367,14 @@ def _lite_filter_modal_group(
     checkbox_name=None,
     with_desc=False,
     desc_map=None,
+    pct_map=None,
+    modal_wide=False,
 ):
     """Modal-based φίλτρο Lite — checkboxes σε κρυφό store, πλήρες modal στο κλικ."""
     if not options:
         return ""
     desc_map = desc_map or {}
+    pct_map = pct_map or {}
     cb_name = checkbox_name if checkbox_name is not None else name
     if options and isinstance(options[0], tuple):
         pairs = list(options)
@@ -1298,15 +1387,34 @@ def _lite_filter_modal_group(
             else:
                 label = str(v)
             pairs.append((v, label))
-    items_html = "".join(
-        f'<label class="filter-cb"><input type="checkbox" name="{html_mod.escape(cb_name)}" '
-        f'value="{html_mod.escape(str(val))}" data-attr="{html_mod.escape(data_attr)}">'
-        f'<span class="lite-filter-opt-label">{html_mod.escape(label)}</span></label>'
-        for val, label in pairs
-    )
+    items_parts = []
+    for val, label in pairs:
+        pct_html = ""
+        if pct_map:
+            pct_val = pct_map.get(str(val).strip(), "")
+            if pct_val:
+                pct_html = (
+                    f'<span class="lite-filter-opt-pct">{html_mod.escape(pct_val)}</span>'
+                )
+        cb_cls = "filter-cb has-opt-pct" if pct_map else "filter-cb"
+        if pct_map:
+            label_html = (
+                f'<span class="lite-filter-opt-body">'
+                f'<span class="lite-filter-opt-label">{html_mod.escape(label)}</span>'
+                f'{pct_html}</span>'
+            )
+        else:
+            label_html = f'<span class="lite-filter-opt-label">{html_mod.escape(label)}</span>'
+        items_parts.append(
+            f'<label class="{cb_cls}"><input type="checkbox" name="{html_mod.escape(cb_name)}" '
+            f'value="{html_mod.escape(str(val))}" data-attr="{html_mod.escape(data_attr)}">'
+            f'{label_html}</label>'
+        )
+    items_html = "".join(items_parts)
+    wide_attr = ' data-modal-wide="1"' if modal_wide else ''
     return (
         f'<div class="filter-group filter-modal-group" data-filter-name="{html_mod.escape(name)}" '
-        f'data-filter-key="{html_mod.escape(data_attr)}">'
+        f'data-filter-key="{html_mod.escape(data_attr)}"{wide_attr}>'
         f'<button type="button" class="filter-modal-trigger" aria-haspopup="dialog" '
         f'title="Επιλέξτε {html_mod.escape(name)}">'
         f'<span class="filter-modal-trigger-label">{html_mod.escape(name)}</span>'
@@ -1503,10 +1611,14 @@ def build_totals_with_filters(display_summary, raw_df=None, desc_map=None,
         )
         rows_parts.append(f"<tr{tr_cls}{data_attrs}>{tds}</tr>")
     table_body = "".join(rows_parts)
+    totals_colgroup = _atlas_colgroup_html(display_summary.columns, month_shave=False)
     custom_table = (
-        f'<table class="print-table wrap-cells" id="totals-filter-table">'
+        f'<div class="totals-table-scroll" id="totals-tables-wrapper">'
+        f'<table class="print-table wrap-cells atlas-weighted-table totals-weighted" id="totals-filter-table">'
+        f"{totals_colgroup}"
         f'<thead><tr>{headers_html}</tr></thead>'
         f'<tbody>{table_body}</tbody></table>'
+        f"</div>"
     )
 
     raw_records_js = json.dumps(
@@ -1542,15 +1654,19 @@ def build_totals_with_filters(display_summary, raw_df=None, desc_map=None,
 
     return _build_tab_page(
         section_id="totals-section",
+        extra_section_classes="atlas-tab-layout--totals-page",
         heading_html=(
             '<h2>Σύνολα - Ομαδοποίηση κατά Κλάδο/Πακέτο (και Ταμείο)</h2>'
         ),
         description_html=(
-            '<p class="print-description">Συνοπτική απεικόνιση ανά Κλάδο/Πακέτο Κάλυψης και Ταμείο.</p>'
+            '<p class="print-description">Συνοπτική απεικόνιση ανά Κλάδο/Πακέτο Κάλυψης και Ταμείο, '
+            'με άθροισμα αποδοχών και εισφορών (μόνο εγγραφές σε €). '
+            'Στήλη «Εισφορές / Αποδοχές %»: εισφορές÷αποδοχές×100 όταν και τα δύο ποσά είναι μη μηδενικά.</p>'
         ),
         metrics_html=f"{info_banner}{exceeded_warning_div}",
         filters_html=filters_bar,
-        body_html=f"{custom_table}{calcs_panel}",
+        body_html=custom_table,
+        footer_html=calcs_panel,
         scripts_html=f"<script>{js}</script>",
     )
 
@@ -1826,7 +1942,11 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
           if(HT)cells.push(g.ty||'');
           if(showEtDetail)cells.push(g.et||'');
           if(HD)cells.push(desc);
-          cells=cells.concat([g.apo,g.eos,fi(g.h),fd(y),fd(m),fd(d),fc(g.gross),fc(g.contrib),fi(g.n||0)]);
+          var pctCell='';
+          var gV=(g.gross!=null&&!isNaN(g.gross))?g.gross:0;
+          var cV=(g.contrib!=null&&!isNaN(g.contrib))?g.contrib:0;
+          if(Math.abs(gV)>1e-12&&Math.abs(cV)>1e-12)pctCell=fy(cV/gV*100)+' %';
+          cells=cells.concat([g.apo,g.eos,fi(g.h),fd(y),fd(m),fd(d),fc(g.gross),fc(g.contrib),pctCell,fi(g.n||0)]);
           while(cells.length<colCount)cells.push('');
 
           var tyA=HT?' data-typos="'+esc(g.ty||'')+'"':'';
@@ -1986,14 +2106,95 @@ def _count_kind_metrics_by_klados_map(
     return out
 
 
-def _count_filter_modal(name, options, data_attr, with_desc=False, desc_map=None):
+def _count_filter_modal(
+    name, options, data_attr, with_desc=False, desc_map=None,
+    pct_map=None, modal_wide=False,
+):
     """Modal φίλτρο καταμέτρησης (ίδια δομή με totals)."""
     return _lite_filter_modal_group(
         name, options, data_attr,
         checkbox_name=f"cnt-{data_attr}",
         with_desc=with_desc,
         desc_map=desc_map,
+        pct_map=pct_map,
+        modal_wide=modal_wide,
     )
+
+
+_ATLAS_MONTH_COLS = {"ΙΑΝ", "ΦΕΒ", "ΜΑΡ", "ΑΠΡ", "ΜΑΙ", "ΙΟΥΝ", "ΙΟΥΛ", "ΑΥΓ", "ΣΕΠ", "ΟΚΤ", "ΝΟΕ", "ΔΕΚ"}
+_ATLAS_MONTH_COL_WT = 1.8
+
+
+def _atlas_norm_col_name(name) -> str:
+    up = str(name).upper().strip()
+    return "".join(
+        ch for ch in unicodedata.normalize("NFD", up)
+        if unicodedata.category(ch) != "Mn"
+    )
+
+
+def _atlas_table_col_weight(name) -> float:
+    """Αναλογικά βάρη ανά τύπο στήλης (Καταμέτρηση / Σύνολα / Παράρτημα)."""
+    u = _atlas_norm_col_name(name)
+    if u in ("A/A", "AA", "Α/Α"):
+        return 1.2
+    if u == "ΕΤΟΣ":
+        return 1.5
+    if u == "ΦΟΡΕΑΣ":
+        return 1.8
+    if u == "ΤΑΜΕΙΟ":
+        return 2.6
+    if u == "ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ":
+        return 3.4
+    if u == "ΕΡΓΟΔΟΤΗΣ" or "ΕΡΓΟΔΟΤΗ" in u:
+        return 3.0
+    if "ΚΛΑΔΟΣ" in u or "ΠΑΚΕΤΟ" in u or "ΚΩΔΙΚΟΣ ΚΛΑΔΩΝ" in u:
+        return 2.6
+    if u == "ΠΕΡΙΓΡΑΦΗ" or u.startswith("ΠΕΡΙΓΡΑΦΗ"):
+        return 5.0
+    if "ΑΠΟΔΟΧΩΝ" in u and "ΤΥΠΟΣ" in u:
+        return 2.4
+    if u == "ΣΥΝΟΛΟ":
+        return 1.7
+    if u in _ATLAS_MONTH_COLS:
+        return _ATLAS_MONTH_COL_WT
+    if u in ("ΑΠΟ", "ΕΩΣ"):
+        return 2.2
+    if "ΣΥΝΟΛΙΚΕΣ ΗΜΕΡΕΣ" in u:
+        return 2.4
+    if u in ("ΕΤΗ", "ΜΗΝΕΣ", "ΗΜΕΡΕΣ"):
+        return 1.8
+    if u == "ΑΡΙΘΜΟΣ ΕΓΓΡΑΦΩΝ":
+        return 2.2
+    if u == "ΑΠΟΔΟΧΕΣ" or "ΜΙΚΤΕΣ" in u:
+        return 3.0
+    if "ΕΙΣΦΟΡΕΣ" in u and "ΑΠΟΔΟΧΕΣ" in u and "%" in u:
+        return 2.2
+    if "ΕΙΣΦΟΡΕΣ" in u or u == "ΕΙΣΦΟΡΕΣ":
+        return 3.0
+    if u == "%" or "ΠΟΣΟΣΤΟ" in u:
+        return 1.8
+    if u == "ΜΗΝΑΣ":
+        return 2.0
+    return 2.4
+
+
+def _atlas_colgroup_html(columns, *, month_shave: bool = True) -> str:
+    header_cells = [str(c) for c in columns]
+    weights = [_atlas_table_col_weight(h) for h in header_cells]
+    if month_shave:
+        n_month = sum(1 for h in header_cells if _atlas_norm_col_name(h) in _ATLAS_MONTH_COLS)
+        n_other = len(header_cells) - n_month
+        if n_month and n_other:
+            shave = n_month * (_ATLAS_MONTH_COL_WT - 1.5) / n_other
+            weights = [
+                w - shave if _atlas_norm_col_name(h) not in _ATLAS_MONTH_COLS else _ATLAS_MONTH_COL_WT
+                for h, w in zip(header_cells, weights)
+            ]
+    total_w = sum(weights) or 1.0
+    return "<colgroup>" + "".join(
+        f'<col style="width:{round(w / total_w * 100, 3)}%">' for w in weights
+    ) + "</colgroup>"
 
 
 def _build_unified_count_table_html(per_year_html: str) -> str:
@@ -2011,50 +2212,7 @@ def _build_unified_count_table_html(per_year_html: str) -> str:
         for h in re.findall(r"<th\b[^>]*>(.*?)</th>", thead, re.DOTALL)
     ]
     ncols = len(header_cells) or 1
-    # Αναλογικά βάρη ανά τύπο στήλης → σταθερά πλάτη (table-layout: fixed), δεν αλλάζουν με
-    # φίλτρα/γραμμές συνόλου, και γεμίζουν ακριβώς το πλάτος (width:100% → καλό full screen).
-    _months = {"ΙΑΝ", "ΦΕΒ", "ΜΑΡ", "ΑΠΡ", "ΜΑΙ", "ΙΟΥΝ", "ΙΟΥΛ", "ΑΥΓ", "ΣΕΠ", "ΟΚΤ", "ΝΟΕ", "ΔΕΚ"}
-    _month_wt = 1.8
-
-    def _wt(name):
-        u = str(name).strip().upper()
-        if u == "ΤΑΜΕΙΟ":
-            return 2.6
-        if u == "ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ":
-            return 3.4
-        if u == "ΕΡΓΟΔΟΤΗΣ":
-            return 3.0
-        if "ΚΛΑΔΟΣ" in u or "ΠΑΚΕΤΟ" in u:
-            return 2.6
-        if u == "ΠΕΡΙΓΡΑΦΗ":
-            return 5.0
-        if "ΑΠΟΔΟΧΩΝ" in u and "ΤΥΠΟΣ" in u:
-            return 2.4
-        if u == "ΣΥΝΟΛΟ":
-            return 1.7
-        if u in _months:
-            return _month_wt
-        if u == "ΑΠΟΔΟΧΕΣ" or "ΜΙΚΤΕΣ" in u:
-            return 3.0
-        if u == "ΕΙΣΦΟΡΕΣ":
-            return 3.0
-        if u == "%" or "ΠΟΣΟΣΤΟ" in u:
-            return 1.8
-        return 2.4
-
-    _weights = [_wt(h) for h in header_cells]
-    _n_month = sum(1 for h in header_cells if str(h).strip().upper() in _months)
-    _n_other = len(header_cells) - _n_month
-    if _n_month and _n_other:
-        _shave = _n_month * (_month_wt - 1.5) / _n_other
-        _weights = [
-            w - _shave if str(h).strip().upper() not in _months else _month_wt
-            for h, w in zip(header_cells, _weights)
-        ]
-    _total_w = sum(_weights) or 1.0
-    colgroup = "<colgroup>" + "".join(
-        f'<col style="width:{round(w / _total_w * 100, 3)}%">' for w in _weights
-    ) + "</colgroup>"
+    colgroup = _atlas_colgroup_html(header_cells, month_shave=True)
 
     rows_out = []
     for block in per_year_html.split("<div class='year-section'>")[1:]:
@@ -2119,7 +2277,8 @@ def _count_unified_to_per_year_html(html: str) -> str:
 
 def build_count_with_filters(count_display_df, print_style_rows, count_df,
                              description_map=None, disclaimer_html=None,
-                             warning_types=None):
+                             warning_types=None, display_summary=None,
+                             source_df=None):
     """Ενότητα Καταμέτρηση με client-side φίλτρα και δυναμικά σύνολα ανά έτος.
     Αν δοθεί disclaimer_html, η δομή είναι τριών ζωνών: σταθερό πάνω (κεφαλίδες+φίλτρα),
     ενδιάμεσο με πίνακα (κύληση εδώ), σταθερό κάτω (disclaimer).
@@ -2162,16 +2321,20 @@ def build_count_with_filters(count_display_df, print_style_rows, count_df,
     _cnt_dd_tameio = _count_filter_modal("Ταμείο", tameio_vals, "tameio")
     _cnt_dd_typos = _count_filter_modal("Τύπος Ασφάλισης", typos_vals, "typos")
     _cnt_dd_employer = _count_filter_modal("Εργοδότης", employer_vals, "employer")
+    _klados_pct_map = _klados_eisf_pct_map_from_totals(display_summary, source_df=source_df)
     _cnt_dd_klados = _count_filter_modal(
-        "Κλάδος/Πακέτο", klados_vals, "klados", with_desc=True, desc_map=desc_map
+        "Κλάδος/Πακέτο και μέσο ποσοστό εισφοράς",
+        klados_vals, "klados", with_desc=True, desc_map=desc_map,
+        pct_map=_klados_pct_map, modal_wide=True,
     )
     _cnt_apodoxes_dd = _count_filter_modal(
         "Τύπος Αποδοχών", _apodoxes_option_pairs(apodoxes_vals), "apodoxes"
     )
+    _cnt_to_current_year = f"31/12/{datetime.date.today().year}"
     _cnt_preset_btns = (
         '<button type="button" class="count-preset-btn" data-cnt-preset="from_2002" '
-        'data-cnt-from="01/01/2002" data-cnt-to="31/12/2050" '
-        'title="Φίλτρο από 01/01/2002 έως 31/12/2050 (μέγιστο) — ξανά κλικ για επαναφορά ημερομηνιών">Από 1/1/2002</button>'
+        f'data-cnt-from="01/01/2002" data-cnt-to="{_cnt_to_current_year}" '
+        f'title="Φίλτρο από 01/01/2002 έως {_cnt_to_current_year} — ξανά κλικ για επαναφορά ημερομηνιών">Από 1/1/2002</button>'
         '<button type="button" class="count-preset-btn" data-cnt-preset="range_2002_2014" '
         'data-cnt-from="01/01/2002" data-cnt-to="31/12/2014" '
         'title="Φίλτρο 01/01/2002 – 31/12/2014 — ξανά κλικ για επαναφορά ημερομηνιών">1/1/2002 – 31/12/2014</button>'
@@ -2185,8 +2348,8 @@ def build_count_with_filters(count_display_df, print_style_rows, count_df,
         'data-cnt-from="01/01/2017" data-cnt-to="31/12/2019" '
         'title="Φίλτρο 01/01/2017 – 31/12/2019 — ξανά κλικ για επαναφορά ημερομηνιών">1/1/2017 – 31/12/2019</button>'
         '<button type="button" class="count-preset-btn" data-cnt-preset="from_2020" '
-        'data-cnt-from="01/01/2020" data-cnt-to="31/12/2050" '
-        'title="Φίλτρο από 01/01/2020 έως 31/12/2050 (μέγιστο) — ξανά κλικ για επαναφορά ημερομηνιών">Από 1/1/2020</button>'
+        f'data-cnt-from="01/01/2020" data-cnt-to="{_cnt_to_current_year}" '
+        f'title="Φίλτρο από 01/01/2020 έως {_cnt_to_current_year} — ξανά κλικ για επαναφορά ημερομηνιών">Από 1/1/2020</button>'
     )
     # Ένα μόνο κουμπί reset (στατικό HTML)· όχι appendChild από JS — αποφεύγει διπλό κουμπί αν τρέξει δύο φορές το script.
     _cnt_reset_btn = (
@@ -2371,15 +2534,14 @@ def _build_count_filter_js():
     if(cm.perigrafi!==undefined&&tds[cm.perigrafi]&&(tds[cm.perigrafi].textContent||'').trim()==='Εισφορές μήνα')return;
     if(totOnly){if(tr.getAttribute('data-filter-ok')!=='1')return;}
     else if(tr.style.display==='none')return;
-    var added=false;
-    Object.keys(sums).forEach(function(k){
-      var i=parseInt(k,10);
-      if(tds[i]){var v=parseGreekNum(tds[i].textContent);if(!isNaN(v)){sums[k]=sums[k]+v;added=true;}}
-    });
-    if(added&&segTameioRef){
+    if(segTameioRef){
       var tm=(tr.getAttribute('data-c-tameio')||'').trim();
       if(tm&&!segTameioRef.v)segTameioRef.v=tm;
     }
+    Object.keys(sums).forEach(function(k){
+      var i=parseInt(k,10);
+      if(tds[i]){var v=parseGreekNum(tds[i].textContent);if(!isNaN(v))sums[k]=sums[k]+v;}
+    });
   }
 
   function monthCapForTameio(tn){
@@ -2387,7 +2549,7 @@ def _build_count_filter_js():
     return u.indexOf('ΙΚΑ')!==-1?31:25;
   }
 
-  function flushTotalRow(tr,sums,cm,segTameio){
+  function flushTotalRow(tr,sums,cm,segTameio,showFund){
     var cap=monthCapForTameio(segTameio);
     var tds=tr.querySelectorAll('td');
     function setCell(i,txt){if(tds[i])tds[i].textContent=txt;}
@@ -2406,6 +2568,36 @@ def _build_count_filter_js():
       var pct=(apo&&Math.abs(apo)>1e-9)?(eis/apo*100):NaN;
       setCell(cm.pctCol,(isNaN(pct)||pct===0)?'':(pct.toFixed(2).replace('.',',')+' %'));
     }
+    if(showFund&&segTameio){
+      tr.setAttribute('data-c-seg-tameio',segTameio);
+    }else if(!showFund){
+      tr.removeAttribute('data-c-seg-tameio');
+    }
+  }
+
+  function reflowTotalsOnlyFundLabels(cm,rows,totOnly){
+    if(!totOnly){
+      Array.prototype.forEach.call(rows,function(tr){
+        if(tr.getAttribute('data-is-total')!=='1')return;
+        tr.removeAttribute('data-c-seg-tameio');
+        var tds=tr.querySelectorAll('td');
+        if(cm.tameio!==undefined&&tds[cm.tameio])tds[cm.tameio].textContent='';
+      });
+      return;
+    }
+    var prevT='\u0000';
+    Array.prototype.forEach.call(rows,function(tr){
+      if(tr.getAttribute('data-is-band')==='1'){prevT='\u0000';return;}
+      if(tr.getAttribute('data-is-sep')==='1')return;
+      if(tr.getAttribute('data-is-total')!=='1')return;
+      if(tr.style.display==='none')return;
+      var t=(tr.getAttribute('data-c-seg-tameio')||'').trim();
+      var tds=tr.querySelectorAll('td');
+      if(cm.tameio!==undefined&&tds[cm.tameio]){
+        tds[cm.tameio].textContent=(t&&t!==prevT)?t:'';
+      }
+      if(t)prevT=t;
+    });
   }
 
   function rowCountsTowardSubtotal(tr,cm,totOnly){
@@ -2460,7 +2652,10 @@ def _build_count_filter_js():
       tr.removeAttribute('title');
       var allEmpty=true;for(var k=0;k<tds.length;k++){if(tds[k].textContent.trim()){allEmpty=false;break;}}
       if(allEmpty){tr.setAttribute('data-is-sep','1');return;}
-      if(isTotal)return;
+      if(isTotal){
+        if(lastTag['tameio'])tr.setAttribute('data-c-seg-tameio',lastTag['tameio']);
+        return;
+      }
       function gv(key){var idx=cmTag[key];if(idx===undefined)return '';var td=tds[idx];var v=td?td.textContent.trim():'';if(v)lastTag[key]=v;return lastTag[key]||'';}
       tr.setAttribute('data-c-tameio',gv('tameio'));tr.setAttribute('data-c-typos',gv('typos'));tr.setAttribute('data-c-employer',gv('employer'));tr.setAttribute('data-c-klados',gv('klados'));tr.setAttribute('data-c-apodoxes',gv('apodoxes'));
     });
@@ -2573,7 +2768,7 @@ def _build_count_filter_js():
         if(trS.getAttribute('data-is-band')==='1'){segVis=0;continue;}
         if(trS.getAttribute('data-is-sep')==='1')continue;
         if(trS.getAttribute('data-is-total')==='1'){
-          var showSub=rowYearOK(trS)&&f.klados.length>0&&segVis>0;
+          var showSub=rowYearOK(trS)&&(totOnly?segVis>0:(f.klados.length>0&&segVis>0));
           trS.style.display=showSub?'':'none';
           segVis=0;
         }else if(rowCountsTowardSubtotal(trS,cm,totOnly)){
@@ -2590,7 +2785,7 @@ def _build_count_filter_js():
         if(tr.getAttribute('data-is-sep')==='1')continue;
         if(tr.getAttribute('data-is-total')==='1'){
           if(tr.style.display!=='none')
-            flushTotalRow(tr,sums,cm,segTameioRef.v);
+            flushTotalRow(tr,sums,cm,segTameioRef.v,totOnly);
           sums=initSums(cm);
           segTameioRef.v='';
           continue;
@@ -2614,6 +2809,7 @@ def _build_count_filter_js():
 
       // 5) Reflow ετικετών (collapsed)
       reflowCollapsedFundLabels(cm,rows,totOnly);
+      reflowTotalsOnlyFundLabels(cm,rows,totOnly);
     }
 
     (function updateCountKindMetrics(){
@@ -2853,6 +3049,34 @@ def _build_maindata_table_html(dataframe: pd.DataFrame) -> str:
     return (
         '<div class="maindata-table-scroll" id="maindata-tables-wrapper">'
         f"{table_html}"
+        "</div>"
+    )
+
+
+def _build_annex_table_html(dataframe: pd.DataFrame) -> str:
+    """Παράρτημα: πίνακας με αναλογικά βάρη στηλών (όπως Καταμέτρηση)."""
+    if dataframe is None or dataframe.empty:
+        return ""
+    colgroup = _atlas_colgroup_html(dataframe.columns, month_shave=False)
+    headers_html = "".join(
+        f"<th>{html_mod.escape(str(h))}</th>" for h in dataframe.columns
+    )
+    bold_cols = {"Φορέας"}
+    rows_html = []
+    for _, row in dataframe.iterrows():
+        tds = []
+        for col, v in zip(dataframe.columns, row.values):
+            cell = "" if pd.isna(v) else html_mod.escape(str(v))
+            if col in bold_cols:
+                tds.append(f'<td style="font-weight:700">{cell}</td>')
+            else:
+                tds.append(f"<td>{cell}</td>")
+        rows_html.append(f"<tr>{''.join(tds)}</tr>")
+    return (
+        '<div class="annex-table-scroll" id="annex-tables-wrapper">'
+        '<table class="print-table wrap-cells atlas-weighted-table annex-weighted">'
+        f"{colgroup}<thead><tr>{headers_html}</tr></thead>"
+        f"<tbody>{''.join(rows_html)}</tbody></table>"
         "</div>"
     )
 
@@ -4174,18 +4398,12 @@ def build_syntaksi_with_filters(df, description_map=None):
         "atlas-info-store-syntaksi",
     )
 
-    download_bar = (
-        '<div class="syntaksi-actions">'
-        '<button type="button" class="btn-action syntaksi-dl-btn" id="syntaksi-json-dl" '
-        'disabled>JSON για Syntaksi Pro 3</button>'
-        "</div>"
-    )
-
     body_html = (
+        '<button type="button" class="btn-json-syntaksi" id="syntaksi-json-dl" '
+        'disabled hidden>JSON για Syntaksi Pro 3</button>'
         '<div class="syntaksi-empty" id="syntaksi-empty">'
         "Επιλέξτε πακέτα κάλυψης στην καρτέλα <strong>Καταμέτρηση</strong> "
         "για να γεμίσει ο πίνακας.</div>"
-        f"{download_bar}"
         '<div class="syntaksi-table-scroll" id="syntaksi-table-mount" hidden></div>'
     )
 
@@ -4243,8 +4461,14 @@ def _build_syntaksi_filter_js():
   }
   function fmtDays(n){
     if(n===null||n===undefined||isNaN(n)||n===0)return '';
-    var r=Math.round(n);
-    return String(r).replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+    var v=Number(n);
+    if(Math.abs(v-Math.round(v))<0.01){
+      return String(Math.round(v)).replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+    }
+    var s=v.toFixed(1);
+    var p=s.split('.');
+    p[0]=p[0].replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+    return p[0]+','+p[1];
   }
   function fmtDtk(n){
     if(n===null||n===undefined||isNaN(n)||n===0)return '';
@@ -4896,7 +5120,7 @@ def _append_pro_tab_entries(df, description_map, tab_entries):
                         "<p class='print-description'>Επεξηγηματικοί πίνακες καλύψεων και "
                         "αποδοχών από τις τελευταίες σελίδες του ΑΤΛΑΣ.</p>"
                     ),
-                    body_html=build_print_table_html(annex_df, wrap_cells=True),
+                    body_html=_build_annex_table_html(annex_df),
                 ),
             ))
     except Exception:
@@ -4956,13 +5180,28 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
 
     # -- Detect warning types for totals --
     warning_types = []
-    parallel_df = _safe_call(build_parallel_print_df, df, description_map)
+    _par_res = _safe_call(build_parallel_print_df, df, description_map, True)
+    parallel_df, parallel_styles = (None, None)
+    if isinstance(_par_res, tuple):
+        parallel_df, parallel_styles = _par_res
+    else:
+        parallel_df = _par_res
     if parallel_df is not None and not parallel_df.empty:
         warning_types.append("παράλληλη ασφάλιση")
-    parallel_2017_df = _safe_call(build_parallel_2017_print_df, df, description_map)
+    _par17_res = _safe_call(build_parallel_2017_print_df, df, description_map, True)
+    parallel_2017_df, parallel_2017_styles = (None, None)
+    if isinstance(_par17_res, tuple):
+        parallel_2017_df, parallel_2017_styles = _par17_res
+    else:
+        parallel_2017_df = _par17_res
     if parallel_2017_df is not None and not parallel_2017_df.empty:
         warning_types.append("παράλληλη απασχόληση 2017+")
-    multi_df = _safe_call(build_multi_employment_print_df, df, description_map)
+    _multi_res = _safe_call(build_multi_employment_print_df, df, description_map, True)
+    multi_df, multi_styles = (None, None)
+    if isinstance(_multi_res, tuple):
+        multi_df, multi_styles = _multi_res
+    else:
+        multi_df = _multi_res
     if multi_df is not None and not multi_df.empty:
         warning_types.append("πολλαπλή απασχόληση")
 
@@ -4979,6 +5218,8 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
         count_html = build_count_with_filters(
             count_display_df, print_style_rows, count_df, description_map,
             warning_types=warning_types,
+            display_summary=display_summary,
+            source_df=df,
         )
         tab_entries.append(("count", "Καταμέτρηση", count_html))
 
@@ -5054,6 +5295,7 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
     if parallel_df is not None and not parallel_df.empty:
         par_html = build_yearly_print_html(
             parallel_df, year_column='Έτος',
+            style_rows=parallel_styles,
             collapse_cols=['Ταμείο', 'Τύπος Ασφάλισης', 'Εργοδότης'],
         )
         _par_info = [
@@ -5094,6 +5336,7 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
     if parallel_2017_df is not None and not parallel_2017_df.empty:
         par2017_html = build_yearly_print_html(
             parallel_2017_df, year_column='Έτος',
+            style_rows=parallel_2017_styles,
             collapse_cols=['Ταμείο', 'Τύπος Ασφάλισης', 'Εργοδότης'],
         )
         _p17_info = [
@@ -5133,6 +5376,7 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
     if multi_df is not None and not multi_df.empty:
         multi_html = build_yearly_print_html(
             multi_df, year_column='Έτος',
+            style_rows=multi_styles,
             collapse_cols=['Ταμείο', 'Τύπος Ασφάλισης', 'Εργοδότης'],
             bold_columns=['Εργοδότης'],
             col_width_overrides={'Εργοδότης': '90px'},
@@ -5146,6 +5390,7 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
                     "<p class='print-description'>Μήνες με πολλαπλούς εργοδότες ΙΚΑ "
                     "(αποδοχές 01, 16, ή 99).</p>"
                 ),
+                metrics_html=_build_multi_metrics_html(df, description_map),
                 body_html=multi_html,
             ),
         ))
@@ -5740,6 +5985,7 @@ body { overflow-x: hidden; }
 .tab-pane { display: none; } .tab-pane.active { display: block; position: relative; }
 #pane-count.tab-pane { display: none; }
 .tab-panes-container .tab-pane.active:has(.atlas-tab-layout) { display: flex !important; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.tab-panes-container .tab-pane.active:has(.atlas-tab-layout--totals-page) { display: block !important; flex: none !important; min-height: auto !important; overflow: visible !important; }
 .tab-panes-container { flex: 0 1 auto; min-width: 0; overflow-x: hidden; overflow-y: visible; display: block; -webkit-overflow-scrolling: touch; }
 .main-content.atlas-scroll-tab-active .tab-panes-container,
 .main-content.count-tab-active .tab-panes-container { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
@@ -6041,13 +6287,15 @@ body { overflow-x: hidden; }
 }
 .atlas-tab-header-warning .complex-file-warning {
   margin: 0;
-  padding: 10px 18px;
+  padding: 12px 14px;
   font-size: 15px;
   font-weight: 700;
   line-height: 1.45;
-  border: 1.5px solid #fca5a5;
-  border-radius: 10px;
-  box-shadow: 0 1px 4px rgba(220, 38, 38, 0.08);
+  border: none;
+  border-radius: 8px;
+  background: rgba(254, 242, 242, 0.88);
+  color: #991b1b;
+  box-shadow: none;
 }
 .atlas-tab-header-warning .complex-file-readmore-btn {
   padding: 8px 16px;
@@ -6104,14 +6352,14 @@ body { overflow-x: hidden; }
   margin-bottom: 0;
 }
 .synopsis-modal-body .atlas-synopsis-info {
-  background: #e0f2fe;
-  border-left: 4px solid #0284c7;
-  color: #0c4a6e;
+  background: rgba(219, 234, 254, 0.55);
+  border: none;
+  color: #1e40af;
 }
 .synopsis-modal-body .atlas-synopsis-warning {
-  background: #fef9c3;
-  border-left: 4px solid #ca8a04;
-  color: #713f12;
+  background: rgba(254, 243, 199, 0.88);
+  border: none;
+  color: #b45309;
 }
 .complex-file-warning-viewer {
   display: flex;
@@ -6154,6 +6402,9 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .btn-fs, .btn-print-tab { width: 40px; height: 40px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; border: 1px solid transparent; transition: opacity 0.2s, background 0.15s, transform 0.15s; font-size: 18px; line-height: 1; }
 .btn-fs { background: #e0e7ff; border-color: #a5b4fc; color: #4338ca; } .btn-fs:hover { background: #6366f1; color: #fff; border-color: #4f46e5; transform: scale(1.1); }
 .btn-print-tab { background: #f0fdf4; border-color: #86efac; color: #15803d; } .btn-print-tab:hover { background: #22c55e; color: #fff; border-color: #16a34a; transform: scale(1.1); }
+.btn-json-syntaksi { height: 40px; padding: 0 14px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; border: 1px solid #93c5fd; background: #eff6ff; color: #1d4ed8; font-size: 13px; font-weight: 600; font-family: """ + FONT_MAIN + """; white-space: nowrap; transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.15s; }
+.btn-json-syntaksi:hover:not([disabled]) { background: #2563eb; color: #fff; border-color: #1d4ed8; transform: scale(1.03); }
+.btn-json-syntaksi[disabled] { opacity: 0.5; cursor: not-allowed; }
 .table-fullscreen .section-actions { display: none; }
 .table-fullscreen { position: fixed; inset: 0; z-index: 10000; background: #fff; display: flex; flex-direction: column; }
 .table-fullscreen .fs-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; border-bottom: 2px solid #e2e8f0; background: #f8fafc; flex-shrink: 0; }
@@ -6171,11 +6422,31 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .atlas-tab-layout-body { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; background: #fff; padding: 0 2px; }
 .atlas-tab-layout-body:has(.count-layout-middle) { overflow: hidden; display: flex; flex-direction: column; padding: 0; }
 .atlas-tab-layout-body:has(.maindata-table-scroll) { overflow: hidden; display: flex; flex-direction: column; padding: 0; }
+.atlas-tab-layout-body:has(.annex-table-scroll) { overflow: hidden; display: flex; flex-direction: column; padding: 0; }
 #maindata-section { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+#totals-section,
+#totals-section.atlas-tab-layout--totals-page { display: block; flex: none; min-height: auto; overflow: visible; }
+#totals-section .atlas-tab-layout-body { overflow: visible; flex: none; min-height: auto; display: block; padding: 0 2px; }
+#totals-section .atlas-tab-layout-footer { flex-shrink: 0; padding: 0 2px 24px; }
+#annex-section { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 #maindata-section .atlas-tab-layout-top,
 #maindata-section h2,
 #maindata-section .print-description { flex-shrink: 0; }
+#totals-section .atlas-tab-layout-top,
+#totals-section h2,
+#totals-section .print-description,
+#totals-section .totals-filters,
+#totals-section .totals-info-bar,
+#totals-section .totals-exceeded-wrap { flex-shrink: 0; }
+#totals-section .atlas-tab-layout-footer,
+#totals-section .date-key-panel { flex-shrink: 0; }
+#annex-section .atlas-tab-layout-top,
+#annex-section h2,
+#annex-section .print-description { flex-shrink: 0; }
 .maindata-table-scroll { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; background: #fff; padding: 0 2px; }
+.totals-table-scroll { overflow: visible; background: #fff; padding: 0 2px; }
+.totals-table-scroll table.print-table.totals-weighted thead th { position: sticky; top: 0; z-index: 3; background: #f8fafc; border-bottom: 2px solid #cbd5e1; box-shadow: 0 1px 0 #cbd5e1; }
+.annex-table-scroll { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; background: #fff; padding: 0 2px; }
 .maindata-table-scroll table.print-table { border-collapse: separate; border-spacing: 0; overflow: visible; box-shadow: none; border-radius: 0; }
 .maindata-table-scroll table.print-table thead th { position: sticky; top: 0; z-index: 3; background: #f8fafc; border-bottom: 2px solid #cbd5e1; box-shadow: 0 1px 0 #cbd5e1; }
 .maindata-table-scroll table.print-table tbody tr.maindata-year-gap td { height: 26px; padding: 0; background: repeating-linear-gradient(45deg,#eef2f7,#eef2f7 6px,#f8fafc 6px,#f8fafc 12px); border-top: 2px solid #94a3b8 !important; border-bottom: 2px solid #94a3b8 !important; }
@@ -6184,6 +6455,30 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .count-layout .count-layout-bottom { display: none !important; }
 .table-fullscreen .atlas-tab-layout-top,
 .table-fullscreen .count-layout-top { display: none !important; }
+/* Καταμέτρηση full screen: πακέτα + ημερομηνίες (custom + presets) σε μία γραμμή */
+.table-fullscreen #count-section > .atlas-tab-layout-top { display: block !important; flex-shrink: 0; padding: 12px 20px 14px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+.table-fullscreen #count-section > .atlas-tab-layout-top > *:not(#count-filters-bar) { display: none !important; }
+.table-fullscreen #count-section #count-filters-bar.count-filters { display: block !important; margin: 0; padding: 0; background: transparent; border: none; border-radius: 0; }
+.table-fullscreen #count-section .count-filters-grid { display: flex !important; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 12px 14px; }
+.table-fullscreen #count-section .count-filters-grid > * { grid-column: auto !important; grid-row: auto !important; }
+.table-fullscreen #count-section .count-filters-grid > .filter-modal-group:not([data-filter-key="klados"]),
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-apodox { display: none !important; }
+.table-fullscreen #count-section .count-filters-grid > .filter-modal-group[data-filter-key="klados"] { flex: 0 1 300px; min-width: 200px; max-width: 340px; order: 1; }
+.table-fullscreen #count-section .count-filters-grid > .filter-modal-group[data-filter-key="klados"] .filter-selected-label { display: none; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-from { flex: 0 0 132px; min-width: 120px; order: 2; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-to { flex: 0 0 132px; min-width: 120px; order: 3; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 { flex: 1 1 auto; min-width: 0; display: flex !important; flex-wrap: nowrap; align-items: center; gap: 12px 14px; margin: 0; padding: 0; order: 4; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .count-date-presets-bar { order: 1; flex: 1 1 auto; min-width: 0; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .cnt-grid-cbs { display: flex !important; flex: 0 0 auto; flex-shrink: 0; order: 2; margin: 0; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .cnt-grid-cbs .filter-cb:has(#cnt-year-sparse) { display: none !important; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .cnt-grid-cbs .filter-cb { font-size: 16px; white-space: nowrap; margin: 0; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-reset { flex: 0 0 auto; order: 5; margin-left: auto; }
+.table-fullscreen #count-section .count-date-presets-bar { display: flex !important; flex-wrap: nowrap; gap: 10px; overflow-x: auto; overflow-y: hidden; min-width: 0; width: auto; margin: 0; padding: 0; grid-template-columns: unset; -webkit-overflow-scrolling: touch; }
+.table-fullscreen #count-section .count-preset-btn { flex: 0 0 auto; width: auto; min-width: 0; padding: 10px 14px; font-size: 14px; line-height: 1.25; font-weight: 600; white-space: nowrap; }
+.table-fullscreen #count-section .count-filters .filter-date { padding: 10px 14px; font-size: 16px; }
+.table-fullscreen #count-section .count-filters .filter-modal-trigger { padding: 10px 14px; font-size: 16px; }
+.table-fullscreen #count-section .count-filters .filter-modal-badge { min-width: 24px; height: 24px; line-height: 24px; font-size: 13px; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-reset .filter-reset-btn { margin-left: 0; padding: 10px 14px; font-size: 22px; }
 .table-fullscreen .atlas-tab-layout,
 .table-fullscreen .count-layout { display: flex !important; flex-direction: column !important; height: 100% !important; }
 .table-fullscreen .atlas-tab-layout-body,
@@ -6192,6 +6487,9 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .table-fullscreen .maindata-table-scroll table.print-table { border-collapse: separate; border-spacing: 0; overflow: visible; box-shadow: none; border-radius: 0; }
 .table-fullscreen .maindata-table-scroll table.print-table thead th { position: sticky; top: 0; z-index: 3; background: #f8fafc; border-bottom: 2px solid #cbd5e1; }
 .table-fullscreen .atlas-tab-layout { display: flex !important; flex-direction: column !important; height: 100% !important; }
+.table-fullscreen .fs-body:has(.atlas-tab-layout--totals-page) { overflow: auto !important; }
+.table-fullscreen .fs-body:has(.atlas-tab-layout--totals-page) .atlas-tab-layout--totals-page { height: auto !important; flex: none !important; min-height: auto !important; overflow: visible !important; }
+.table-fullscreen .fs-body:has(.atlas-tab-layout--totals-page) .atlas-tab-layout-body { overflow: visible !important; flex: none !important; min-height: auto !important; }
 
 /* ΑΠΔ / Πλαφόν (Pro) */
 .atlas-tab-layout-body:has(.apd-table-scroll) { overflow: hidden; display: flex; flex-direction: column; padding: 0; }
@@ -6346,22 +6644,33 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 #pane-timeline .tl-axis { margin-left: calc(var(--tl-label-w) + 14px); }
 .totals-info-bar { display: flex; flex-wrap: nowrap; align-items: stretch; gap: 14px; margin-bottom: 20px; padding: 0; background: transparent; border: none; }
 .totals-info-bar.atlas-header-split { margin-bottom: 20px; }
-.totals-info-bar-warning .atlas-header-info { padding: 16px 20px; background: rgba(254, 243, 199, 0.88); border-radius: 8px; border: none; }
-.totals-info-bar-warning .atlas-header-info .totals-info-msg { color: #b45309; }
-.totals-info-bar:not(.totals-info-bar-warning) .atlas-header-info .totals-info-msg { padding: 16px 20px; background: rgba(219, 234, 254, 0.88); border-radius: 8px; }
 .totals-info-bar-warning { background: transparent; border: none; }
-.totals-info-bar-warning .totals-info-msg { color: #b45309; }
+.totals-info-bar-warning .atlas-header-info,
+.totals-info-bar:not(.totals-info-bar-warning) .atlas-header-info { padding: 0; background: transparent; border: none; }
+.totals-info-msg {
+  font-size: 15px; font-weight: 600; flex: 1; min-width: 0;
+  padding: 12px 14px; border: none; border-radius: 8px; line-height: 1.45; box-sizing: border-box;
+}
+.totals-info-bar-warning .totals-info-msg,
+.totals-info-bar-warning .atlas-header-info .totals-info-msg {
+  background: rgba(254, 243, 199, 0.88); color: #b45309;
+}
+.totals-info-bar:not(.totals-info-bar-warning) .totals-info-msg,
+.totals-info-bar:not(.totals-info-bar-warning) .atlas-header-info .totals-info-msg {
+  background: rgba(219, 234, 254, 0.55); color: #1e40af;
+}
 .totals-exceeded-wrap { margin-bottom: 16px; }
 .totals-exceeded-compact {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 10px 14px;
-  padding: 12px 16px;
+  padding: 12px 14px;
   background: rgba(254, 243, 199, 0.88);
+  border: none;
   border-radius: 8px;
-  font-size: 14px;
-  color: #92400e;
+  font-size: 15px;
+  color: #b45309;
   line-height: 1.45;
 }
 .totals-exceeded-compact-text { flex: 1 1 auto; min-width: 200px; }
@@ -6460,7 +6769,6 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
   min-height: 0;
 }
 .totals-exceeded-modal-body p { font-size: inherit; line-height: inherit; }
-.totals-info-msg { font-size: 16px; font-weight: 600; color: #1e40af; flex: 1; min-width: 0; }
 .atlas-header-split { display: flex; flex-direction: row; align-items: stretch; gap: 14px; width: 100%; }
 .atlas-header-split--metrics-only { justify-content: flex-end; }
 .atlas-header-split--metrics-only .atlas-metrics-frame { flex: 0 0 66.666%; max-width: 66.666%; }
@@ -6471,14 +6779,14 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
   display: flex; align-items: center;
 }
 .atlas-info-box {
-  padding: 12px 14px; background: #eff6ff; border: 1px solid #bfdbfe;
-  border-left: 4px solid #3b82f6; border-radius: 8px; min-height: 100%; box-sizing: border-box;
+  padding: 12px 14px; background: rgba(219, 234, 254, 0.55); border: none;
+  border-radius: 8px; min-height: 100%; box-sizing: border-box;
 }
-.atlas-info-box-title { font-weight: 700; font-size: 14px; color: #1e40af; margin-bottom: 6px; }
-.atlas-info-box-body { font-size: 13px; color: #1e293b; line-height: 1.45; word-break: break-word; }
+.atlas-info-box-title { font-weight: 700; font-size: 15px; color: #1e40af; margin-bottom: 6px; }
+.atlas-info-box-body { font-size: 15px; color: #1e293b; line-height: 1.45; word-break: break-word; }
 .atlas-warn-box {
-  padding: 12px 14px; background: #fffbeb; border: 1px solid #fcd34d;
-  border-left: 4px solid #f59e0b; border-radius: 8px; font-size: 13px; color: #92400e; line-height: 1.45;
+  padding: 12px 14px; background: rgba(254, 243, 199, 0.88); border: none;
+  border-radius: 8px; font-size: 15px; font-weight: 600; color: #b45309; line-height: 1.45;
 }
 .atlas-metrics-row, .totals-summary { display: flex; flex-wrap: nowrap; gap: 12px; justify-content: space-between; align-items: flex-start; width: 100%; margin-left: 0; }
 .tab-metrics-bar { margin: 12px 0 20px; width: 100%; }
@@ -6562,6 +6870,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .lite-filter-modal-overlay { position: fixed; inset: 0; z-index: 99996; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: rgba(15, 23, 42, 0.55); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.25s ease, visibility 0.25s ease; }
 .lite-filter-modal-overlay.is-open { opacity: 1; visibility: visible; pointer-events: auto; }
 .lite-filter-modal-panel { width: min(720px, 100%); max-height: min(85vh, 880px); display: flex; flex-direction: column; background: #fff; border-radius: 16px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(148, 163, 184, 0.15); overflow: hidden; transform: scale(0.96) translateY(12px); transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.lite-filter-modal-panel.lite-filter-modal-panel--wide { width: min(792px, 100%); }
 .lite-filter-modal-overlay.is-open .lite-filter-modal-panel { transform: scale(1) translateY(0); }
 .lite-filter-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 22px 26px 18px; border-bottom: 1px solid #e2e8f0; background: linear-gradient(180deg, #eef2ff 0%, #fff 100%); flex-shrink: 0; }
 .lite-filter-modal-head h3 { margin: 0; font-size: 24px; font-weight: 800; color: #1e293b; line-height: 1.35; letter-spacing: -0.01em; }
@@ -6577,6 +6886,9 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 #lite-filter-modal-options-mount .filter-cb:hover { background: #f1f5f9; }
 #lite-filter-modal-options-mount .filter-cb input[type="checkbox"] { width: 28px; height: 28px; min-width: 28px; min-height: 28px; margin: 0; padding: 0; cursor: pointer; accent-color: #6366f1; justify-self: center; align-self: center; }
 #lite-filter-modal-options-mount .filter-cb .lite-filter-opt-label { display: block; min-width: 0; line-height: 1.45; letter-spacing: 0.01em; }
+#lite-filter-modal-options-mount .filter-cb.has-opt-pct .lite-filter-opt-body { display: flex; align-items: flex-start; justify-content: space-between; gap: 28px; min-width: 0; width: 100%; }
+#lite-filter-modal-options-mount .filter-cb.has-opt-pct .lite-filter-opt-label { flex: 1 1 auto; min-width: 0; }
+#lite-filter-modal-options-mount .filter-cb.has-opt-pct .lite-filter-opt-pct { flex: 0 0 auto; text-align: right; white-space: nowrap; font-weight: 600; color: #475569; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; padding-left: 8px; }
 .lite-filter-modal-foot { display: flex; justify-content: flex-start; gap: 10px; padding: 16px 26px 22px; border-top: 1px solid #e2e8f0; background: #f8fafc; flex-shrink: 0; }
 .lite-filter-modal-btn { padding: 11px 20px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; color: #334155; font-size: 16px; font-weight: 600; cursor: pointer; font-family: inherit; transition: border-color .15s, background .15s, color .15s; }
 .lite-filter-modal-btn:hover { border-color: #6366f1; color: #4f46e5; background: #eef2ff; }
@@ -6630,11 +6942,54 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 }
 .table-fullscreen .fs-body #count-tables-wrapper table.print-table.count-unified tbody tr.count-year-band td {
   font-size: 17px;
+  color: #1e40af !important;
 }
-#count-tables-wrapper table.print-table.count-unified tbody tr.count-year-band td { background: #fff; color: #0f172a; font-weight: 800; font-size: 16px; padding: 8px 12px; border: 0; }
-#count-tables-wrapper table.print-table.count-unified tbody tr.count-year-band td:first-child { color: #0f172a; }
+#count-tables-wrapper table.print-table.count-unified tbody tr.count-year-band td { background: #fff; color: #1e40af !important; font-weight: 800; font-size: 16px; padding: 8px 12px; border: 0; }
+#count-tables-wrapper table.print-table.count-unified tbody tr.count-year-band td:first-child { color: #1e40af !important; }
 #count-tables-wrapper table.print-table.count-unified tbody tr.count-year-gap td { height: 41px; padding: 0; background: transparent; border: 0; }
 #count-section.count-year-sparse #count-tables-wrapper table.print-table.count-unified tbody tr.count-year-gap td { height: 115px; }
+/* Σύνολα / Παράρτημα: fixed πλάτη από colgroup (ίδια λογική με Καταμέτρηση) */
+.totals-table-scroll table.print-table.totals-weighted,
+.annex-table-scroll table.print-table.annex-weighted {
+  table-layout: fixed; width: 100%; border-collapse: separate; border-spacing: 0;
+  overflow: visible; box-shadow: none; border-radius: 0; font-size: 15px;
+}
+.totals-table-scroll table.print-table.totals-weighted thead th,
+.annex-table-scroll table.print-table.annex-weighted thead th {
+  position: sticky; top: 0; z-index: 3; background: #f8fafc;
+  border-bottom: 2px solid #cbd5e1; box-shadow: 0 1px 0 #cbd5e1;
+  white-space: normal; padding: 6px 8px; font-size: 14px; line-height: 1.2;
+  vertical-align: bottom; color: #111827; font-weight: 500;
+}
+.totals-table-scroll table.print-table.totals-weighted tbody td,
+.annex-table-scroll table.print-table.annex-weighted tbody td {
+  padding: 6px 8px; font-size: 15px; word-break: break-word; color: #1f2937;
+}
+/* Σύνολα: αριθμητικές/ημερομηνίες από 7η στήλη */
+.totals-table-scroll table.print-table.totals-weighted thead th:nth-child(n+7),
+.totals-table-scroll table.print-table.totals-weighted tbody td:nth-child(n+7) {
+  text-align: right; white-space: nowrap;
+}
+.table-fullscreen .fs-body .totals-table-scroll,
+.table-fullscreen .fs-body .annex-table-scroll {
+  flex: none !important; min-height: auto !important; overflow: visible !important;
+}
+.table-fullscreen .fs-body .atlas-tab-layout-body:has(.totals-table-scroll),
+.table-fullscreen .fs-body .atlas-tab-layout-body:has(.annex-table-scroll) {
+  flex: 1 !important; min-height: 0 !important; overflow: auto !important;
+}
+.table-fullscreen .fs-body .totals-table-scroll table.print-table.totals-weighted,
+.table-fullscreen .fs-body .annex-table-scroll table.print-table.annex-weighted {
+  table-layout: fixed !important; width: 100%; font-size: 16px;
+}
+.table-fullscreen .fs-body .totals-table-scroll table.print-table.totals-weighted thead th,
+.table-fullscreen .fs-body .annex-table-scroll table.print-table.annex-weighted thead th {
+  font-size: 15px; padding: 10px 12px;
+}
+.table-fullscreen .fs-body .totals-table-scroll table.print-table.totals-weighted tbody td,
+.table-fullscreen .fs-body .annex-table-scroll table.print-table.annex-weighted tbody td {
+  font-size: 16px; padding: 8px 12px;
+}
 /* ---- Συντάξιμες Αποδοχές (Pro) ---- */
 .atlas-tab-layout-body:has(.syntaksi-table-scroll) { overflow: hidden; display: flex; flex-direction: column; padding: 0; }
 #syntaksi-section { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
@@ -6660,17 +7015,15 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .syntaksi-filters .apd-select:hover { border-color: #6366f1; }
 .syntaksi-filters .apd-filter-input:focus,
 .syntaksi-filters .apd-select:focus { border: 1px solid #6366f1 !important; outline: none !important; box-shadow: none !important; }
-.atlas-locked-count-bar { margin: 0 2px 12px; padding: 10px 14px; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 8px; }
-.atlas-locked-count-title { font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 8px; }
+.atlas-locked-count-bar { margin: 0 2px 12px; padding: 12px 14px; background: #f1f5f9; border: none; border-radius: 8px; }
+.atlas-locked-count-title { font-size: 15px; font-weight: 700; color: #475569; margin-bottom: 8px; }
 .atlas-locked-count-title::before { content: "🔒 "; }
 .atlas-locked-count-grid { display: flex; flex-wrap: wrap; gap: 10px 20px; }
-.atlas-locked-count-item { font-size: 12px; color: #334155; min-width: 0; }
+.atlas-locked-count-item { font-size: 14px; color: #334155; min-width: 0; }
 .atlas-locked-count-sub { font-weight: 600; color: #64748b; margin-right: 6px; }
 .atlas-locked-count-val { font-weight: 600; color: #1e293b; word-break: break-word; }
 .apd-filters-free.apd-filters-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .syntaksi-empty { padding: 18px; color: #64748b; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; margin: 8px 2px; flex-shrink: 0; }
-.syntaksi-actions { padding: 8px 2px; flex-shrink: 0; }
-.syntaksi-dl-btn[disabled] { opacity: 0.5; cursor: not-allowed; }
 .syntaksi-table-scroll { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; background: #fff; padding: 0 2px; }
 .syntaksi-table-scroll table.print-table { border-collapse: separate; border-spacing: 0; overflow: visible; box-shadow: none; border-radius: 0; table-layout: fixed; width: 100%; font-size: 15px; }
 .syntaksi-table-scroll table.print-table thead th { position: sticky; top: 0; z-index: 3; background: #f8fafc; border-bottom: 2px solid #cbd5e1; box-shadow: 0 1px 0 #cbd5e1; font-weight: 500; padding: 6px 8px; font-size: 14px; line-height: 1.2; vertical-align: bottom; white-space: normal; text-align: right; color: #111827; }
@@ -6684,7 +7037,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .table-fullscreen .syntaksi-table-scroll { flex: 1 !important; min-height: 0 !important; overflow: auto !important; }
 .table-fullscreen .syntaksi-table-scroll table.print-table { border-collapse: separate; border-spacing: 0; overflow: visible; box-shadow: none; border-radius: 0; }
 .table-fullscreen .syntaksi-table-scroll table.print-table thead th { position: sticky; top: 0; z-index: 3; background: #f8fafc; border-bottom: 2px solid #cbd5e1; }
-@media print { .syntaksi-actions, .syntaksi-dl-btn, .syntaksi-empty, #syntaksi-filters-bar { display: none !important; } #syntaksi-metrics-wrap.syntaksi-metrics, .syntaksi-print #syntaksi-metrics-wrap { display: flex !important; } }
+@media print { .btn-json-syntaksi, .syntaksi-empty, #syntaksi-filters-bar { display: none !important; } #syntaksi-metrics-wrap.syntaksi-metrics, .syntaksi-print #syntaksi-metrics-wrap { display: flex !important; } }
 /* Κλειδωμένο φίλτρο πακέτων ΑΠΔ (ακολουθεί την Καταμέτρηση) */
 .apd-klados-locked .filter-modal-trigger { opacity: 0.6; cursor: not-allowed; pointer-events: none; }
 .apd-klados-locked .filter-selected-chip { pointer-events: none; }
@@ -6704,7 +7057,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 #toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 9999; pointer-events: none; }
 .toast { background: #1e293b; color: #fff; padding: 10px 16px; border-radius: 8px; margin-top: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-size: 15px; font-weight: 600; opacity: 0; transform: translateY(10px); transition: opacity 0.3s, transform 0.3s; }
 .toast.show { opacity: 1; transform: translateY(0); }
-.complex-file-warning { background: rgba(254,242,242,0.88); border: none; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; color: #991b1b; font-weight: 700; font-size: 1rem; }
+.complex-file-warning { background: rgba(254,242,242,0.88); border: none; border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; color: #991b1b; font-weight: 700; font-size: 15px; line-height: 1.45; }
 .personal-form { display: flex; flex-direction: column; gap: 20px; padding: 24px 28px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; max-width: 960px; }
 .personal-form .form-row-full { grid-column: 1 / -1; }
 .personal-form .form-columns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px 28px; }
@@ -6781,6 +7134,8 @@ window._liteFilterModal = {
   var storeEl = null;
   var activeSection = null;
 
+  var panelEl = ov.querySelector('.lite-filter-modal-panel');
+
   function closeModal() {
     var secBeforeClose = activeSection;
     if (storeEl) {
@@ -6793,6 +7148,7 @@ window._liteFilterModal = {
     ov.classList.remove('is-open');
     ov.setAttribute('aria-hidden', 'true');
     document.body.style.overflow = '';
+    if (panelEl) panelEl.classList.remove('lite-filter-modal-panel--wide');
     if (searchEl) searchEl.value = '';
     filterSearch('');
     if (secBeforeClose) window._liteFilterModal.runApply(secBeforeClose);
@@ -6806,6 +7162,13 @@ window._liteFilterModal = {
     var opts = storeEl && storeEl.querySelector('.filter-options');
     if (opts) optsMount.appendChild(opts);
     if (titleEl) titleEl.textContent = group.getAttribute('data-filter-name') || '';
+    if (panelEl) {
+      if (group.getAttribute('data-modal-wide') === '1') {
+        panelEl.classList.add('lite-filter-modal-panel--wide');
+      } else {
+        panelEl.classList.remove('lite-filter-modal-panel--wide');
+      }
+    }
     ov.classList.add('is-open');
     ov.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
@@ -7062,7 +7425,7 @@ function applyPaketoTimelineTooltips(){var wrap=document.getElementById('tl-pake
 function buildPaketoTimeline(){var rowsEl=document.getElementById('tl-paketo-rows');var refEl=document.querySelector('#tl-paketo-wrap .tl-paketo-ref');var axisEl=document.querySelector('#tl-paketo-wrap .tl-paketo-axis');if(!rowsEl||!refEl||!axisEl)return;var RR=window._atlasRR,DM=window._atlasDM,pd=window._atlasPd;if(typeof pd!=='function'||!Array.isArray(RR)||!RR.length){rowsEl.innerHTML='<p style=\'color:#64748b;font-size:13px;padding:8px 0\'>Δεν υπάρχουν δεδομένα για χρονολόγιο πακέτων.</p>';return;}var tlStart=null,tlEnd=null;RR.forEach(function(r){var a=pd(r.apo),e=pd(r.eos);if(a&&(!tlStart||a<tlStart))tlStart=a;if(e&&(!tlEnd||e>tlEnd))tlEnd=e;});if(!tlStart)tlStart=new Date(1993,0,1);if(!tlEnd)tlEnd=new Date();var span=tlEnd-tlStart;if(span<=0)span=1;function pct(d){return Math.max(0,Math.min(100,(d-tlStart)/span*100));}function truncLabel(s,maxLen){s=String(s||'').replace(/\s+/g,' ').trim();if(s.length<=maxLen)return s;return s.slice(0,Math.max(0,maxLen-1))+'…';}function escAttr(x){return String(x==null?'':x).replace(/&/g,'&amp;').replace(/"/g,'&quot;');}function rowKey(r){return String(r.p||'').trim()+String.fromCharCode(1)+String(r.t||'').trim()+String.fromCharCode(1)+String(r.ty||'').trim();}var groups={};RR.forEach(function(r){var p=String(r.p||'').trim();if(!p)return;var a=pd(r.apo),b=pd(r.eos);if(!a||!b)return;var k=rowKey(r);if(!groups[k])groups[k]={p:p,t:String(r.t||'').trim(),ty:String(r.ty||'').trim(),segs:[]};groups[k].segs.push([a,b]);});var PAL=['#6366f1','#0ea5e9','#14b8a6','#a855f7','#f97316','#ec4899','#84cc16','#eab308','#64748b'];var keys=Object.keys(groups).sort(function(x,y){var ax=x.split(String.fromCharCode(1)),bx=y.split(String.fromCharCode(1));for(var i=0;i<3;i++){var c=(ax[i]||'').localeCompare(bx[i]||'','el');if(c)return c;}return 0;});var refHtml='',axisHtml='';var zIn=document.getElementById('tl-zoom-inner');if(zIn){zIn.querySelectorAll('.tl-ref-lines .tl-ref-line').forEach(function(line){refHtml+=line.outerHTML;});zIn.querySelectorAll('.tl-axis .tl-tick').forEach(function(tk){axisHtml+=tk.outerHTML;});}refEl.innerHTML=refHtml||'';axisEl.innerHTML=axisHtml||'';var html='';keys.forEach(function(k,idx){var g=groups[k];var segs=(g.segs||[]).filter(function(x){return x[0]&&x[1]&&x[0]<=x[1];});segs.sort(function(a,b){return a[0]-b[0]||a[1]-b[1]||0;});var fullDesc=(DM&&DM[g.p])?String(DM[g.p]).replace(/\r?\n/g,' ').trim():'';var mainLine=g.p+(fullDesc?' – '+truncLabel(fullDesc,26):'');var metaHtml='';if(g.t||g.ty){var _ps=[];if(g.t)_ps.push(g.t);if(g.ty)_ps.push(g.ty);var _full='('+_ps.join(', ')+')';var _short=truncLabel(_full,42);metaHtml+='<div class="tl-label-meta" data-tooltip="'+escAttr(_full)+'">'+String(_short).replace(/</g,'&lt;')+'</div>';}var labelHtml='<div class="tl-label tl-label-cell"><div class="tl-label-main">'+String(mainLine).replace(/</g,'&lt;')+'</div>'+metaHtml+'</div>';var col=PAL[idx%PAL.length];var bars=segs.map(function(seg){var L=pct(seg[0]),W=Math.max(0.15,pct(seg[1])-L);var apoStr=seg[0].getDate().toString().padStart(2,'0')+'/'+(seg[0].getMonth()+1).toString().padStart(2,'0')+'/'+seg[0].getFullYear();var eosStr=seg[1].getDate().toString().padStart(2,'0')+'/'+(seg[1].getMonth()+1).toString().padStart(2,'0')+'/'+seg[1].getFullYear();var barTip=apoStr+' — '+eosStr;return '<div class="tl-bar has-tl-paketo-tooltip" style="left:'+L.toFixed(2)+'%;width:'+W.toFixed(2)+'%;background:'+col+';" data-tooltip="'+escAttr(barTip)+'"></div>';}).join('');html+='<div class="tl-row">'+labelHtml+'<div class="tl-track">'+bars+'</div></div>';});rowsEl.innerHTML=html;if(typeof applyPaketoTimelineTooltips==='function')applyPaketoTimelineTooltips();}
 function updatePersonalTitle(){var parts=[];var fullnameEl=document.getElementById('personal_fullname');var amkaEl=document.getElementById('personal_amka');var daySel=document.getElementById('personal_birth_day');var monthSel=document.getElementById('personal_birth_month');var yearSel=document.getElementById('personal_birth_year');var name=(fullnameEl&&fullnameEl.value)?fullnameEl.value.trim():'';if(name)parts.push(name);var d=daySel?parseInt(daySel.value,10):0;var m=monthSel?parseInt(monthSel.value,10):0;var y=yearSel?parseInt(yearSel.value,10):0;if(d&&m&&y){var birth=new Date(y,m-1,d);var today=new Date();if(birth<=today){var age=(today-birth)/(365.25*24*60*60*1000);parts.push(age.toFixed(2).replace('.',',')+' Ετών σήμερα');}}var amka=(amkaEl&&amkaEl.value)?amkaEl.value.trim():'';if(amka)parts.push(amka);var line=parts.join('   ·   ');var titleEl=document.getElementById('main-title-person');if(titleEl)titleEl.textContent=line;if(typeof _clientName!=='undefined')_clientName=line;}
 function initPersonalForm(){var i,y,o,o2;var daySel=document.getElementById('personal_birth_day');var monthSel=document.getElementById('personal_birth_month');var yearSel=document.getElementById('personal_birth_year');var cDay=document.getElementById('personal_child_birth_day');var cMonth=document.getElementById('personal_child_birth_month');var cYear=document.getElementById('personal_child_birth_year');var resSel=document.getElementById('personal_years_residence');if(!daySel)return;function gv(s){return s&&s.value!=null?String(s.value):'';}var saved={bd:gv(daySel),bm:gv(monthSel),by:gv(yearSel),cd:cDay?gv(cDay):'',cm:cMonth?gv(cMonth):'',cy:cYear?gv(cYear):'',yr:resSel&&gv(resSel)!==''?gv(resSel):'40'};function clr(s){if(s)while(s.firstChild)s.removeChild(s.firstChild);}clr(daySel);clr(monthSel);clr(yearSel);if(cDay)clr(cDay);if(cMonth)clr(cMonth);if(cYear)clr(cYear);if(resSel)clr(resSel);var o0=document.createElement('option');o0.value='';o0.textContent='ημ';daySel.appendChild(o0);var m0=document.createElement('option');m0.value='';m0.textContent='— Μήνας —';var y0=document.createElement('option');y0.value='';y0.textContent='— Έτος —';for(i=1;i<=31;i++){o=document.createElement('option');o.value=i;o.textContent=i;daySel.appendChild(o);if(cDay){o2=document.createElement('option');o2.value=i;o2.textContent=i;cDay.appendChild(o2);}}var months=[['1','Ιαν'],['2','Φεβ'],['3','Μαρ'],['4','Απρ'],['5','Μαϊ'],['6','Ιουν'],['7','Ιουλ'],['8','Αυγ'],['9','Σεπ'],['10','Οκτ'],['11','Νοε'],['12','Δεκ']];for(i=0;i<12;i++){o=document.createElement('option');o.value=months[i][0];o.textContent=months[i][1];monthSel.appendChild(o);if(cMonth){o2=document.createElement('option');o2.value=months[i][0];o2.textContent=months[i][1];cMonth.appendChild(o2);}}monthSel.insertBefore(m0,monthSel.firstChild);var thisYear=new Date().getFullYear();for(y=thisYear;y>=1900;y--){o=document.createElement('option');o.value=y;o.textContent=y;yearSel.appendChild(o);if(cYear){o2=document.createElement('option');o2.value=y;o2.textContent=y;cYear.appendChild(o2);}}yearSel.insertBefore(y0,yearSel.firstChild);if(resSel){for(i=0;i<=40;i++){o=document.createElement('option');o.value=i;o.textContent=i;resSel.appendChild(o);}resSel.value=saved.yr;}daySel.value=saved.bd;monthSel.value=saved.bm;yearSel.value=saved.by;if(cDay)cDay.value=saved.cd;if(cMonth)cMonth.value=saved.cm;if(cYear)cYear.value=saved.cy;function updateAge(){var d=parseInt(daySel.value,10);var m=parseInt(monthSel.value,10);var y2=parseInt(yearSel.value,10);var out=document.getElementById('personal_age_display');if(!out)return;if(!d||!m||!y2){out.textContent='';return;}var birth=new Date(y2,m-1,d);var today=new Date();if(birth>today){out.textContent='';return;}var age=(today-birth)/(365.25*24*60*60*1000);out.textContent=age.toFixed(2).replace('.',',')+' Ετών σήμερα';}daySel.addEventListener('change',updateAge);monthSel.addEventListener('change',updateAge);yearSel.addEventListener('change',updateAge);updateAge();updatePersonalTitle();var fullnameEl=document.getElementById('personal_fullname');var amkaEl=document.getElementById('personal_amka');if(fullnameEl)fullnameEl.addEventListener('input',updatePersonalTitle);if(amkaEl)amkaEl.addEventListener('input',updatePersonalTitle);daySel.addEventListener('change',updatePersonalTitle);monthSel.addEventListener('change',updatePersonalTitle);yearSel.addEventListener('change',updatePersonalTitle);}
-function showTab(tabId){document.querySelectorAll('.tab-pane').forEach(function(p){p.classList.remove('active');});document.querySelectorAll('.nav-item').forEach(function(a){a.classList.remove('active');});var pane=document.getElementById('pane-'+tabId);var link=document.querySelector('.nav-item[data-tab="'+tabId+'"]');if(pane)pane.classList.add('active');if(link)link.classList.add('active');var main=document.querySelector('.main-content');if(main){if(pane&&pane.querySelector('.atlas-tab-layout')){main.classList.add('atlas-scroll-tab-active');main.classList.add('count-tab-active');}else{main.classList.remove('atlas-scroll-tab-active');main.classList.remove('count-tab-active');}}var tip=document.getElementById('apodoxes-tooltip');if(tip){tip.classList.remove('visible');tip.setAttribute('aria-hidden','true');}var tipP=document.getElementById('tl-paketo-tooltip');if(tipP){tipP.classList.remove('visible');tipP.setAttribute('aria-hidden','true');}if(tabId==='count')applyApodoxesTooltips();if(tabId==='timeline'){buildPaketoTimeline();}}
+function showTab(tabId){document.querySelectorAll('.tab-pane').forEach(function(p){p.classList.remove('active');});document.querySelectorAll('.nav-item').forEach(function(a){a.classList.remove('active');});var pane=document.getElementById('pane-'+tabId);var link=document.querySelector('.nav-item[data-tab="'+tabId+'"]');if(pane)pane.classList.add('active');if(link)link.classList.add('active');var main=document.querySelector('.main-content');if(main){if(pane&&pane.querySelector('.atlas-tab-layout')&&tabId!=='totals'){main.classList.add('atlas-scroll-tab-active');main.classList.add('count-tab-active');}else{main.classList.remove('atlas-scroll-tab-active');main.classList.remove('count-tab-active');}}var tip=document.getElementById('apodoxes-tooltip');if(tip){tip.classList.remove('visible');tip.setAttribute('aria-hidden','true');}var tipP=document.getElementById('tl-paketo-tooltip');if(tipP){tipP.classList.remove('visible');tipP.setAttribute('aria-hidden','true');}if(tabId==='count')applyApodoxesTooltips();if(tabId==='timeline'){buildPaketoTimeline();}}
 document.addEventListener('DOMContentLoaded',function(){applyApodoxesTooltips();applyDescriptionColumn();initPersonalForm();buildPaketoTimeline();});
 function buildSinglePrintDoc(title,bodyContent){var styles=typeof _printStyles==='string'?_printStyles:'';var name=(typeof _clientName==='string'?_clientName:'').trim();var fullTitle=(name?name+' - '+(title||'')+' - ':(title||'ATLAS')+' - ')+(typeof _printBrandSuffix==='string'?_printBrandSuffix:'Atlas');var safeTitle=fullTitle.replace(/</g,'&lt;').replace(/"/g,'&quot;');var safeName=name.replace(/</g,'&lt;').replace(/&/g,'&amp;');var nameBlock=name?'<div class="prt-name">'+safeName+'</div>':'';return'<!DOCTYPE html><html lang="el"><head><meta charset="utf-8"><title>'+safeTitle+'</title><link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,200..900;1,200..900&display=swap" rel="stylesheet"><link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700;800&display=swap" rel="stylesheet"><style>'+styles+'</style></head><body>'+nameBlock+'<div class="prt-title">Ασφαλιστικό Βιογραφικό '+(typeof _printBrandSuffix==='string'?_printBrandSuffix:'Atlas')+'</div>'+bodyContent+'<div style="margin-top:12px;font-size:9px;color:#888;text-align:left;">© Syntaksi Pro - my advisor</div></body></html>';}
 function buildSyntaksiPrintDoc(title,bodyContent){var styles=typeof _printStyles==='string'?_printStyles:'';var name=(typeof _clientName==='string'?_clientName:'').trim().replace(/</g,'&lt;').replace(/&/g,'&amp;');var safeTitle=((name?name+' - ':'')+(title||'Συντάξιμες Αποδοχές')).replace(/"/g,'&quot;');var nameBlock=name?'<div class="print-client-name">'+name+'</div>':'';return'<!DOCTYPE html><html lang="el"><head><meta charset="utf-8"><title>'+safeTitle+'</title><link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700;800&display=swap" rel="stylesheet"><style>'+styles+'</style></head><body class="syntaksi-print-doc">'+nameBlock+bodyContent+'</body></html>';}
@@ -7075,14 +7438,14 @@ function printSection(el){if(typeof updatePersonalTitle==='function')updatePerso
 function openTableFs(el){var overlay=document.createElement('div');overlay.className='table-fullscreen';overlay.id='fs-overlay';var section=el.classList.contains('print-section')?el:el.closest('.print-section');var source=section||el;var heading=source.querySelector?source.querySelector('h2'):null;var titleText=heading?heading.textContent:'Πίνακας';var hasInteractive=source.querySelector&&source.querySelector('script');var toolbar=document.createElement('div');toolbar.className='fs-toolbar';toolbar.innerHTML='<span class="fs-title">'+titleText+'</span>';var actions=document.createElement('div');actions.className='fs-toolbar-actions';var printBtn=document.createElement('button');printBtn.className='fs-print-btn';printBtn.innerHTML='🖨 Εκτύπωση';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(){var bodyEl=overlay.querySelector('.fs-body');if(bodyEl){var apdSec=bodyEl.querySelector('#apd-section');if(apdSec){_openPrintWindow(buildSinglePrintDoc(titleText,_apdPrintSectionContent(apdSec)));return;}var synSec=bodyEl.querySelector('#syntaksi-section');if(synSec){_openPrintWindow(buildSyntaksiPrintDoc(titleText,_syntaksiPrintSectionContent(synSec)));return;}if(typeof persistInteractiveValues==='function')persistInteractiveValues(bodyEl);var clone=bodyEl.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var totalsTable=clone.querySelector('#totals-filter-table');var bodyContent=totalsTable?'<div class="print-section"><h2>'+(titleText.replace(/</g,'&lt;')||'Σύνολα')+'</h2>'+totalsTable.outerHTML+'</div>':clone.innerHTML;_openPrintWindow(buildSinglePrintDoc(titleText,bodyContent));}};actions.appendChild(printBtn);var closeBtn=document.createElement('button');closeBtn.className='fs-close';closeBtn.innerHTML='✕';closeBtn.title='Κλείσιμο (Esc)';closeBtn.onclick=closeTableFs;actions.appendChild(closeBtn);toolbar.appendChild(actions);var body=document.createElement('div');body.className='fs-body';if(hasInteractive){var placeholder=document.createElement('div');placeholder.id='fs-placeholder';placeholder.style.display='none';source.parentNode.insertBefore(placeholder,source);body.appendChild(source);overlay._fsSource=source;overlay._fsPlaceholder=placeholder;}else{body.appendChild(source.cloneNode(true));}overlay.appendChild(toolbar);overlay.appendChild(body);document.body.appendChild(overlay);document.body.style.overflow='hidden';}
 function closeTableFs(){var overlay=document.getElementById('fs-overlay');if(overlay){if(overlay._fsSource&&overlay._fsPlaceholder){overlay._fsPlaceholder.parentNode.insertBefore(overlay._fsSource,overlay._fsPlaceholder);overlay._fsPlaceholder.remove();}overlay.remove();document.body.style.overflow='';}}
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeTableFs();});
-function _patchSyntaksiInPrintHtml(html){var live=document.getElementById('syntaksi-section');if(!live||typeof html!=='string'||!html)return html||'';var pb=(typeof window._atlasSyntaksiGetPrintBody==='function')?window._atlasSyntaksiGetPrintBody():null;if(!pb||!pb.ok)return html;try{var doc=new DOMParser().parseFromString(html,'text/html');var sec=doc.getElementById('syntaksi-section');if(!sec)return html;var printMount=doc.getElementById('syntaksi-table-mount');if(printMount){printMount.innerHTML=pb.tableHtml;printMount.removeAttribute('hidden');printMount.classList.add('syntaksi-print-table-mount');}var pe=doc.getElementById('syntaksi-empty');if(pe)pe.setAttribute('hidden','hidden');var fb=doc.getElementById('syntaksi-filters-bar');if(fb)fb.setAttribute('hidden','hidden');var act=doc.querySelector('.syntaksi-actions');if(act)act.setAttribute('hidden','hidden');var liveMetrics=sec.querySelector('#syntaksi-metrics-wrap');if(liveMetrics)liveMetrics.setAttribute('hidden','hidden');var sumMount=sec.querySelector('.syntaksi-print-summary-mount');if(!sumMount){sumMount=doc.createElement('div');sumMount.className='syntaksi-print-summary-mount syntaksi-print';var mnt=sec.querySelector('#syntaksi-table-mount');if(mnt)sec.insertBefore(sumMount,mnt);else sec.appendChild(sumMount);}sumMount.innerHTML=pb.summaryHtml;sec.classList.add('syntaksi-print');var h2=sec.querySelector('h2');if(h2&&!sec.querySelector('h1.syntaksi-print-h1')){var h1=doc.createElement('h1');h1.className='syntaksi-print-h1';h1.textContent=h2.textContent;h2.replaceWith(h1);}var oldDesc=sec.querySelector('p.print-description:not(.syntaksi-print-calc-note)');if(oldDesc)oldDesc.setAttribute('hidden','hidden');if(!sec.querySelector('.syntaksi-print-disclaimer')&&pb.disclaimerHtml){var disc=doc.createElement('div');disc.className='syntaksi-print-disclaimer';disc.innerHTML=pb.disclaimerHtml;sec.appendChild(disc);}return'<!DOCTYPE html>\n'+doc.documentElement.outerHTML;}catch(e){return html;}}
+function _patchSyntaksiInPrintHtml(html){var live=document.getElementById('syntaksi-section');if(!live||typeof html!=='string'||!html)return html||'';var pb=(typeof window._atlasSyntaksiGetPrintBody==='function')?window._atlasSyntaksiGetPrintBody():null;if(!pb||!pb.ok)return html;try{var doc=new DOMParser().parseFromString(html,'text/html');var sec=doc.getElementById('syntaksi-section');if(!sec)return html;var printMount=doc.getElementById('syntaksi-table-mount');if(printMount){printMount.innerHTML=pb.tableHtml;printMount.removeAttribute('hidden');printMount.classList.add('syntaksi-print-table-mount');}var pe=doc.getElementById('syntaksi-empty');if(pe)pe.setAttribute('hidden','hidden');var fb=doc.getElementById('syntaksi-filters-bar');if(fb)fb.setAttribute('hidden','hidden');var act=doc.getElementById('syntaksi-json-dl');if(act)act.setAttribute('hidden','hidden');var liveMetrics=sec.querySelector('#syntaksi-metrics-wrap');if(liveMetrics)liveMetrics.setAttribute('hidden','hidden');var sumMount=sec.querySelector('.syntaksi-print-summary-mount');if(!sumMount){sumMount=doc.createElement('div');sumMount.className='syntaksi-print-summary-mount syntaksi-print';var mnt=sec.querySelector('#syntaksi-table-mount');if(mnt)sec.insertBefore(sumMount,mnt);else sec.appendChild(sumMount);}sumMount.innerHTML=pb.summaryHtml;sec.classList.add('syntaksi-print');var h2=sec.querySelector('h2');if(h2&&!sec.querySelector('h1.syntaksi-print-h1')){var h1=doc.createElement('h1');h1.className='syntaksi-print-h1';h1.textContent=h2.textContent;h2.replaceWith(h1);}var oldDesc=sec.querySelector('p.print-description:not(.syntaksi-print-calc-note)');if(oldDesc)oldDesc.setAttribute('hidden','hidden');if(!sec.querySelector('.syntaksi-print-disclaimer')&&pb.disclaimerHtml){var disc=doc.createElement('div');disc.className='syntaksi-print-disclaimer';disc.innerHTML=pb.disclaimerHtml;sec.appendChild(disc);}return'<!DOCTYPE html>\n'+doc.documentElement.outerHTML;}catch(e){return html;}}
 function openPrint(){if(typeof updatePersonalTitle==='function')updatePersonalTitle();if(typeof persistInteractiveValues==='function')persistInteractiveValues(document.body);var safeName=(typeof _clientName==='string'?_clientName:'').trim().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');var html=_printHtml;if(typeof _patchApdInPrintHtml==='function')html=_patchApdInPrintHtml(html);if(typeof _patchSyntaksiInPrintHtml==='function')html=_patchSyntaksiInPrintHtml(html);if(safeName)html=html.replace(/<body>/,'<body><div class="prt-name">'+safeName+'</div>');var blob=new Blob([html],{type:'text/html;charset=utf-8'});var url=URL.createObjectURL(blob);window.open(url,'_blank');}
 function getFullSaveFilename(){var n=document.getElementById('personal_fullname');var t=document.getElementById('personal_tameio');var ak=document.getElementById('personal_amka');var name=(n&&n.value)?n.value.trim():'';var tameio=(t&&t.options[t.selectedIndex])?t.options[t.selectedIndex].text.trim():'';var amka=(ak&&ak.value)?ak.value.trim():'';function sanitize(s){return (s||'').replace(/[\s\/\\:*?"<>|]+/g,' ').trim().replace(/\s+/g,'_')||'';}var a=sanitize(name),b=sanitize(tameio),c=sanitize(amka);var parts=[a,b,c].filter(Boolean);var ds=document.body&&document.body.getAttribute('data-atlas-save-file');var suf=(ds&&String(ds).trim())?String(ds).trim():((typeof _fullSaveSuffix==='string'&&_fullSaveSuffix)?_fullSaveSuffix:'ATLAS Pro.html');return (parts.length?parts.join('_')+'_':'')+suf;}
 function persistInteractiveValues(root){var r=root||document.body;if(!r||!r.querySelectorAll)return;r.querySelectorAll('input').forEach(function(inp){var t=(inp.type||'').toLowerCase();if(t==='checkbox'||t==='radio'){if(inp.checked)inp.setAttribute('checked','checked');else inp.removeAttribute('checked');}else if(t!=='file'&&t!=='button'&&t!=='submit'&&t!=='image'){inp.setAttribute('value',inp.value);}});r.querySelectorAll('textarea').forEach(function(ta){ta.textContent=ta.value;});r.querySelectorAll('select').forEach(function(sel){Array.from(sel.options).forEach(function(opt){if(opt.selected)opt.setAttribute('selected','selected');else opt.removeAttribute('selected');});});}
 function downloadFullHtml(){persistInteractiveValues(document.body);var html='<!DOCTYPE html>\n'+document.documentElement.outerHTML;var blob=new Blob([html],{type:'text/html;charset=utf-8'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=(typeof getFullSaveFilename==='function'?getFullSaveFilename():_downloadFilename);a.click();URL.revokeObjectURL(a.href);}
 function showToast(message){var container=document.getElementById('toast-container');var toast=document.createElement('div');toast.className='toast';toast.textContent=message;container.appendChild(toast);void toast.offsetWidth;toast.classList.add('show');setTimeout(function(){toast.classList.remove('show');setTimeout(function(){if(container.contains(toast))container.removeChild(toast);},300);},2000);}
 document.addEventListener('click',function(e){var target=e.target.closest('.copy-target');if(!target||target.closest('#pane-synopsis'))return;var text=target.innerText.trim();if(text&&text!=='-'&&text!==''){navigator.clipboard.writeText(text).then(function(){showToast('Αντιγράφηκε: '+text);}).catch(function(err){console.error('Copy failed:',err);});}});
-document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.print-section').forEach(function(sec){if(sec.closest('#pane-personal'))return;var actions=document.createElement('div');actions.className='section-actions';var printBtn=document.createElement('button');printBtn.className='btn-print-tab';printBtn.innerHTML='🖨';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(e){e.stopPropagation();printSection(sec);};actions.appendChild(printBtn);if(!sec.closest('#pane-synopsis')){var fsBtn=document.createElement('button');fsBtn.className='btn-fs';fsBtn.innerHTML='⛶';fsBtn.title='Πλήρης οθόνη';fsBtn.onclick=function(e){e.stopPropagation();openTableFs(sec);};actions.appendChild(fsBtn);}sec.appendChild(actions);});
+document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.print-section').forEach(function(sec){if(sec.closest('#pane-personal'))return;var actions=document.createElement('div');actions.className='section-actions';if(sec.id==='syntaksi-section'){var jsonBtn=sec.querySelector('#syntaksi-json-dl');if(jsonBtn){jsonBtn.removeAttribute('hidden');actions.appendChild(jsonBtn);}}var printBtn=document.createElement('button');printBtn.className='btn-print-tab';printBtn.innerHTML='🖨';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(e){e.stopPropagation();printSection(sec);};actions.appendChild(printBtn);if(!sec.closest('#pane-synopsis')){var fsBtn=document.createElement('button');fsBtn.className='btn-fs';fsBtn.innerHTML='⛶';fsBtn.title='Πλήρης οθόνη';fsBtn.onclick=function(e){e.stopPropagation();openTableFs(sec);};actions.appendChild(fsBtn);}sec.appendChild(actions);});
 document.querySelectorAll('table.print-table').forEach(function(tbl){if(tbl.closest('.print-section'))return;var wrapper=document.createElement('div');wrapper.className='table-container';tbl.parentNode.insertBefore(wrapper,tbl);wrapper.appendChild(tbl);var actions=document.createElement('div');actions.className='section-actions';var printBtn=document.createElement('button');printBtn.className='btn-print-tab';printBtn.innerHTML='🖨';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(e){e.stopPropagation();printSection(tbl);};var fsBtn=document.createElement('button');fsBtn.className='btn-fs';fsBtn.innerHTML='⛶';fsBtn.title='Πλήρης οθόνη';fsBtn.onclick=function(e){e.stopPropagation();openTableFs(tbl);};actions.appendChild(printBtn);actions.appendChild(fsBtn);wrapper.appendChild(actions);});
 var targetColumns=['Συνολικές ημέρες','Μικτές αποδοχές','Συνολικές εισφορές','ΣΥΝΟΛΟ','ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ','ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ','ΑΠΟΔΟΧΕΣ','ΕΙΣΦΟΡΕΣ','Ημέρες Ασφ.','Σύνολο','Μικτές Αποδοχές','Συνολικές Εισφορές'];
 var tables=document.querySelectorAll('table.print-table');tables.forEach(function(table){var headers=table.querySelectorAll('thead th');var targetIndices=[];headers.forEach(function(th,index){var headerText=th.textContent.trim();if(targetColumns.some(function(col){return headerText.indexOf(col)!==-1;})){targetIndices.push(index);}});if(targetIndices.length>0){var rows=table.querySelectorAll('tbody tr');rows.forEach(function(row){var cells=row.querySelectorAll('td');targetIndices.forEach(function(index){if(cells[index]){cells[index].classList.add('copy-target');cells[index].title='Κλικ για αντιγραφή';}});});}});
