@@ -58,20 +58,16 @@ def main() -> None:
         1,
     )
 
-    # Μετά την επεξεργασία: μόνο ένα κουμπί (νέο UI Pro/HTML, παλιό Pro+Lite, ή τριών στηλών)
-    new_a = """            if st.button("Άνοιγμα / Προβολή", type="primary", use_container_width=True, key="open_html_btn"):
-                st.session_state['open_html_report'] = True
-
-            if st.session_state.get('open_html_report'):
-                _atlas_render_full_html_report_open_tab(df)
-                st.session_state['open_html_report'] = False
+    # Μετά την επεξεργασία: μόνο ένα κουμπί (ATLAS Lite)
+    new_a = """            _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
+            with _pp_mid:
+                if st.button("Άνοιγμα / Προβολή", type="primary", use_container_width=True, key="open_html_btn"):
+                    _atlas_open_html_report_now(df, wait_slot=_html_wait_ph)
 """
-    new_b = """                    if st.button("Άνοιγμα / Προβολή", type="primary", use_container_width=True, key="open_html_btn"):
-                        st.session_state['open_html_report'] = True
-
-                if st.session_state.get('open_html_report'):
-                    _atlas_render_full_html_report_open_tab(df)
-                    st.session_state['open_html_report'] = False
+    new_b = """                    _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
+                    with _pp_mid:
+                        if st.button("Άνοιγμα / Προβολή", type="primary", use_container_width=True, key="open_html_btn"):
+                            _atlas_open_html_report_now(df, wait_slot=_html_wait_ph)
 """
 
     def _btn_kw(width_stretch: bool) -> str:
@@ -88,7 +84,7 @@ def main() -> None:
                         key="open_html_pro_btn",
                         help="Πλήρης HTML αναφορά Pro σε νέα καρτέλα (επιτρέψτε pop-ups).",
                     ):
-                        st.session_state['open_html_report_pro'] = True
+                        _atlas_open_html_report_now(df, edition="pro", wait_slot=_html_wait_ph)
                 with _pp_b2:
                     if st.button(
                         "ATLAS Pro\\n(παλιότερο)",
@@ -100,10 +96,6 @@ def main() -> None:
                         st.session_state['show_results'] = True
                         st.rerun()
             _atlas_inject_post_process_choice_buttons_style()
-
-            if st.session_state.get('open_html_report_pro'):
-                _atlas_render_full_html_report_open_tab(df, edition="pro")
-                st.session_state['open_html_report_pro'] = False
 """
     pro_html_b = """                    _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
                     with _pp_mid:
@@ -116,7 +108,7 @@ def main() -> None:
                                 key="open_html_pro_btn",
                                 help="Πλήρης HTML αναφορά Pro σε νέα καρτέλα (επιτρέψτε pop-ups).",
                             ):
-                                st.session_state['open_html_report_pro'] = True
+                                _atlas_open_html_report_now(df, edition="pro", wait_slot=_html_wait_ph)
                         with _pp_b2:
                             if st.button(
                                 "ATLAS Pro\\n(παλιότερο)",
@@ -128,10 +120,6 @@ def main() -> None:
                                 st.session_state['show_results'] = True
                                 st.rerun()
                     _atlas_inject_post_process_choice_buttons_style()
-
-                if st.session_state.get('open_html_report_pro'):
-                    _atlas_render_full_html_report_open_tab(df, edition="pro")
-                    st.session_state['open_html_report_pro'] = False
 """
     if pro_html_a in body and pro_html_b in body:
         body = body.replace(pro_html_a, new_a, 1)
@@ -302,6 +290,49 @@ def main() -> None:
     body = body.replace(
         "                            'show_results', 'filename',\n",
         "                            'filename',\n",
+        1,
+    )
+
+    # Στη Lite: χωρίς μήνυμα σύστασης ATLAS Pro
+    body = body.replace(
+        "            st.warning(_ATLAS_PRO_HTML_RECOMMEND_MSG)\n            \n", "", 1
+    )
+    body = body.replace(
+        "                    st.warning(_ATLAS_PRO_HTML_RECOMMEND_MSG)\n", "", 1
+    )
+
+    body = body.replace(
+        """def _atlas_open_html_report_now(
+    df: pd.DataFrame,
+    *,
+    edition: str = "pro",
+    wait_slot=None,
+) -> None:
+    \"\"\"Ένα κλικ: μήνυμα αναμονής ψηλά + παραγωγή HTML (χωρίς deferred session flag).\"\"\"
+    if wait_slot is not None:
+        with wait_slot.container():
+            _atlas_show_html_wait_top()
+        _atlas_render_full_html_report_open_tab(df, edition=edition)
+        wait_slot.empty()
+    else:
+        _atlas_show_html_wait_top()
+        _atlas_render_full_html_report_open_tab(df, edition=edition)
+""",
+        """def _atlas_open_html_report_now(
+    df: pd.DataFrame,
+    *,
+    wait_slot=None,
+) -> None:
+    \"\"\"Ένα κλικ: μήνυμα αναμονής ψηλά + παραγωγή HTML (ATLAS Lite).\"\"\"
+    if wait_slot is not None:
+        with wait_slot.container():
+            _atlas_show_html_wait_top()
+        _atlas_render_full_html_report_open_tab(df)
+        wait_slot.empty()
+    else:
+        _atlas_show_html_wait_top()
+        _atlas_render_full_html_report_open_tab(df)
+""",
         1,
     )
 

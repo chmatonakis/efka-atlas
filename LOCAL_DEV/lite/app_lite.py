@@ -115,8 +115,7 @@ def _atlas_render_full_html_report_open_tab(df: pd.DataFrame) -> None:
         "full_save_suffix": "ATLAS_Lite.html",
     }
     _report_kwargs["edition"] = "lite"
-    with st.spinner("Παραγωγή της HTML αναφοράς — παρακαλώ περιμένετε…"):
-        viewer_html, _ = generate_full_html_report(df, **_report_kwargs)
+    viewer_html, _ = generate_full_html_report(df, **_report_kwargs)
     js_content = json.dumps(viewer_html).replace("</script>", "<\\/script>")
     components.html(
         f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
@@ -7388,19 +7387,18 @@ def _main_inner():
             df = st.session_state['extracted_data']
             
             st.markdown("### Επεξεργασία Ολοκληρώθηκε")
+
+            _html_wait_ph = st.empty()
             
             st.info(
                 "**Πριν την προβολή:** Αν δεν εμφανίζεται η ανάλυση ή η HTML αναφορά, ελέγξτε αν ο browser αποκλείει **αναδυόμενα παράθυρα** (pop-ups). "
                 "Δείτε το σχετικό [βίντεο οδηγίες](https://www.loom.com/share/9b9fe5f9300f42a7a1cfd1315f629145)."
             )
-            
-            if st.button("Άνοιγμα / Προβολή", type="primary", use_container_width=True, key="open_html_btn"):
-                st.session_state['open_html_report'] = True
+            _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
+            with _pp_mid:
+                if st.button("Άνοιγμα / Προβολή", type="primary", use_container_width=True, key="open_html_btn"):
+                    _atlas_open_html_report_now(df, wait_slot=_html_wait_ph)
 
-            if st.session_state.get('open_html_report'):
-                _atlas_render_full_html_report_open_tab(df)
-                st.session_state['open_html_report'] = False
-            
             st.success(f"Εξήχθησαν {len(df)} γραμμές δεδομένων από {df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες")
         else:
             # Πρώτη φορά - κάνουμε επεξεργασία
@@ -7424,6 +7422,8 @@ def _main_inner():
                 # Ενημέρωση header
                 with header_placeholder.container():
                     st.markdown("### Επεξεργασία Ολοκληρώθηκε")
+
+                _html_wait_ph = st.empty()
                 
                 # Εμφάνιση μηνύματος + κουμπιών
                 with button_placeholder.container():
@@ -7431,12 +7431,10 @@ def _main_inner():
                         "**Πριν την προβολή:** Αν δεν εμφανίζεται η ανάλυση ή η HTML αναφορά, ελέγξτε αν ο browser αποκλείει **αναδυόμενα παράθυρα** (pop-ups). "
                         "Δείτε το σχετικό [βίντεο οδηγίες](https://www.loom.com/share/9b9fe5f9300f42a7a1cfd1315f629145)."
                     )
-                    if st.button("Άνοιγμα / Προβολή", type="primary", use_container_width=True, key="open_html_btn"):
-                        st.session_state['open_html_report'] = True
-
-                if st.session_state.get('open_html_report'):
-                    _atlas_render_full_html_report_open_tab(df)
-                    st.session_state['open_html_report'] = False
+                    _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
+                    with _pp_mid:
+                        if st.button("Άνοιγμα / Προβολή", type="primary", use_container_width=True, key="open_html_btn"):
+                            _atlas_open_html_report_now(df, wait_slot=_html_wait_ph)
 
                 # Εμφάνιση summary
                 with summary_placeholder.container():
