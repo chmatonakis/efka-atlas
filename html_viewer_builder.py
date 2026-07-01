@@ -6677,13 +6677,16 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .totals-exceeded-modal-btn {
   flex: 0 0 auto;
   margin-left: auto;
-  padding: 12px 21px;
-  font-size: 19.5px;
+  padding: 5px 11px;
+  font-size: 13px;
   font-weight: 600;
+  font-family: inherit;
+  line-height: 1.25;
+  white-space: nowrap;
   color: #78350f;
   background: #fff;
   border: 1px solid #d97706;
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
 }
 .totals-exceeded-modal-btn:hover { background: #fffbeb; }

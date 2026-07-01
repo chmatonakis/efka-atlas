@@ -82,23 +82,23 @@ def main() -> None:
                 _pp_b1, _pp_b2 = st.columns(2, vertical_alignment="center")
                 with _pp_b1:
                     if st.button(
-                        "ATLAS Pro\\n(πλήρες)",
+                        "ATLAS Pro\\n(νέο)",
                         type="primary",
+                        use_container_width=True,
+                        key="open_html_pro_btn",
+                        help="Πλήρης HTML αναφορά Pro σε νέα καρτέλα (επιτρέψτε pop-ups).",
+                    ):
+                        st.session_state['open_html_report_pro'] = True
+                with _pp_b2:
+                    if st.button(
+                        "ATLAS Pro\\n(παλιότερο)",
+                        type="secondary",
                         use_container_width=True,
                         key="show_results_btn",
                         help="Πλήρης ανάλυση στην εφαρμογή (όλες οι καρτέλες).",
                     ):
                         st.session_state['show_results'] = True
                         st.rerun()
-                with _pp_b2:
-                    if st.button(
-                        "ATLAS Pro\\n(HTML)",
-                        type="secondary",
-                        use_container_width=True,
-                        key="open_html_pro_btn",
-                        help="Πλήρης HTML αναφορά Pro σε νέα καρτέλα (επιτρέψτε pop-ups).",
-                    ):
-                        st.session_state['open_html_report_pro'] = True
             _atlas_inject_post_process_choice_buttons_style()
 
             if st.session_state.get('open_html_report_pro'):
@@ -110,23 +110,23 @@ def main() -> None:
                         _pp_b1, _pp_b2 = st.columns(2, vertical_alignment="center")
                         with _pp_b1:
                             if st.button(
-                                "ATLAS Pro\\n(πλήρες)",
+                                "ATLAS Pro\\n(νέο)",
                                 type="primary",
+                                use_container_width=True,
+                                key="open_html_pro_btn",
+                                help="Πλήρης HTML αναφορά Pro σε νέα καρτέλα (επιτρέψτε pop-ups).",
+                            ):
+                                st.session_state['open_html_report_pro'] = True
+                        with _pp_b2:
+                            if st.button(
+                                "ATLAS Pro\\n(παλιότερο)",
+                                type="secondary",
                                 use_container_width=True,
                                 key="show_results_btn",
                                 help="Πλήρης ανάλυση στην εφαρμογή (όλες οι καρτέλες).",
                             ):
                                 st.session_state['show_results'] = True
                                 st.rerun()
-                        with _pp_b2:
-                            if st.button(
-                                "ATLAS Pro\\n(HTML)",
-                                type="secondary",
-                                use_container_width=True,
-                                key="open_html_pro_btn",
-                                help="Πλήρης HTML αναφορά Pro σε νέα καρτέλα (επιτρέψτε pop-ups).",
-                            ):
-                                st.session_state['open_html_report_pro'] = True
                     _atlas_inject_post_process_choice_buttons_style()
 
                 if st.session_state.get('open_html_report_pro'):
@@ -145,7 +145,7 @@ def main() -> None:
                 _pp_b1, _pp_b2 = st.columns(2, vertical_alignment="center")
                 with _pp_b1:
                     if st.button(
-                        "ATLAS Pro\\n(πλήρες)",
+                        "ATLAS Pro\\n(παλιότερο)",
                         type="primary",
                         {kw},
                         key="show_results_btn",
@@ -169,7 +169,7 @@ def main() -> None:
                         _pp_b1, _pp_b2 = st.columns(2, vertical_alignment="center")
                         with _pp_b1:
                             if st.button(
-                                "ATLAS Pro\\n(πλήρες)",
+                                "ATLAS Pro\\n(παλιότερο)",
                                 type="primary",
                                 {kw},
                                 key="show_results_btn",

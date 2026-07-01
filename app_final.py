@@ -115,8 +115,7 @@ def _atlas_render_full_html_report_open_tab(df: pd.DataFrame, edition: str = "li
     }
     if "edition" in inspect.signature(generate_full_html_report).parameters:
         _report_kwargs["edition"] = edition
-    with st.spinner("Παραγωγή της HTML αναφοράς — παρακαλώ περιμένετε…"):
-        viewer_html, _ = generate_full_html_report(df, **_report_kwargs)
+    viewer_html, _ = generate_full_html_report(df, **_report_kwargs)
     js_content = json.dumps(viewer_html).replace("</script>", "<\\/script>")
     components.html(
         f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
@@ -136,17 +135,20 @@ def _atlas_inject_post_process_choice_buttons_style() -> None:
           var doc = (window.parent && window.parent.document) ? window.parent.document : document;
           function isPostProcessChoiceBtn(b) {
             var flat = (b.innerText || "").replace(/\s+/g, " ").trim();
-            return (flat.indexOf("ATLAS Pro") >= 0 && flat.indexOf("(πλήρες)") >= 0) ||
-              (flat.indexOf("ATLAS Pro") >= 0 && flat.indexOf("(HTML)") >= 0);
+            return (flat.indexOf("ATLAS Pro") >= 0 && flat.indexOf("(παλιότερο)") >= 0) ||
+              (flat.indexOf("ATLAS Pro") >= 0 && flat.indexOf("(νέο)") >= 0);
+          }
+          function isNewBtn(flat) {
+            return flat.indexOf("ATLAS Pro") >= 0 && flat.indexOf("(νέο)") >= 0;
           }
           function run() {
             doc.querySelectorAll("button").forEach(function (b) {
               if (!isPostProcessChoiceBtn(b)) return;
               var flat = (b.innerText || "").replace(/\s+/g, " ").trim();
-              if (flat.indexOf("ATLAS Pro") >= 0 && flat.indexOf("(πλήρες)") >= 0) {
-                b.textContent = "ATLAS Pro" + "\n" + "(πλήρες)";
-              } else if (flat.indexOf("ATLAS Pro") >= 0 && flat.indexOf("(HTML)") >= 0) {
-                b.textContent = "ATLAS Pro" + "\n" + "(HTML)";
+              if (flat.indexOf("ATLAS Pro") >= 0 && flat.indexOf("(παλιότερο)") >= 0) {
+                b.textContent = "ATLAS Pro" + "\n" + "(παλιότερο)";
+              } else if (isNewBtn(flat)) {
+                b.textContent = "ATLAS Pro" + "\n" + "(νέο)";
               }
               b.style.setProperty("white-space", "pre-line", "important");
               b.style.setProperty("text-align", "center", "important");
@@ -159,6 +161,13 @@ def _atlas_inject_post_process_choice_buttons_style() -> None:
               b.style.setProperty("font-size", "1.02rem", "important");
               b.style.setProperty("line-height", "1.35", "important");
               b.style.setProperty("box-sizing", "border-box", "important");
+              if (isNewBtn(flat)) {
+                b.style.setProperty("font-weight", "700", "important");
+                b.style.setProperty("box-shadow", "0 2px 8px rgba(255,75,75,0.35)", "important");
+              } else {
+                b.style.setProperty("font-weight", "600", "important");
+                b.style.setProperty("opacity", "0.88", "important");
+              }
               var col = b.closest('[data-testid="column"]');
               if (col) {
                 col.style.setProperty("display", "flex", "important");
@@ -181,6 +190,57 @@ def _atlas_inject_post_process_choice_buttons_style() -> None:
         height=0,
     )
 
+
+_ATLAS_PRO_HTML_RECOMMEND_MSG = (
+    "**Σημαντικό:** Προτείνουμε να χρησιμοποιείτε πλέον τη νέα έκδοση ATLAS Pro "
+    "που είναι ταχύτερη και πιο ευέλικτη. Σύντομα αυτή θα είναι το βασικό μας εργαλείο."
+)
+
+_ATLAS_HTML_WAIT_MSG = "Περιμένετε...."
+
+
+def _atlas_show_html_wait_top() -> None:
+    """Εμφανίζει έντονο μήνυμα αναμονής με spinner μέσα στο πλαίσιο."""
+    st.markdown(
+        f"""
+        <style>
+        @keyframes atlasHtmlWaitSpin {{
+            to {{ transform: rotate(360deg); }}
+        }}
+        </style>
+        <div style="background:#fff8e6;border-radius:10px;padding:1rem 1.25rem;
+        margin:0.35rem 0 1rem;display:flex;align-items:center;justify-content:center;gap:0.85rem;">
+        <div style="width:1.35rem;height:1.35rem;border:3px solid #e8d9a8;
+        border-top-color:#7a5a00;border-radius:50%;flex-shrink:0;
+        animation:atlasHtmlWaitSpin 0.75s linear infinite;"></div>
+        <span style="font-size:1.4rem;font-weight:700;color:#7a5a00;letter-spacing:0.02em;">
+        {_ATLAS_HTML_WAIT_MSG}
+        </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    components.html(
+        "<script>try{(window.parent||window).scrollTo({top:0,behavior:'smooth'});}catch(e){}</script>",
+        height=0,
+    )
+
+
+def _atlas_open_html_report_now(
+    df: pd.DataFrame,
+    *,
+    edition: str = "pro",
+    wait_slot=None,
+) -> None:
+    """Ένα κλικ: μήνυμα αναμονής ψηλά + παραγωγή HTML (χωρίς deferred session flag)."""
+    if wait_slot is not None:
+        with wait_slot.container():
+            _atlas_show_html_wait_top()
+        _atlas_render_full_html_report_open_tab(df, edition=edition)
+        wait_slot.empty()
+    else:
+        _atlas_show_html_wait_top()
+        _atlas_render_full_html_report_open_tab(df, edition=edition)
 
 # Ρύθμιση σελίδας (Κυρία)
 st.set_page_config(
@@ -7492,6 +7552,8 @@ def show_results_page(df, filename):
         st.session_state["_pending_apd_klados_sync"] = out
         return True
     
+    _html_wait_ph = st.empty()
+
     # Professional Header (Compact)
     header_client_name = st.session_state.get('print_client_name', '').strip()
     header_birthdate = st.session_state.get('print_client_birthdate', '').strip()
@@ -7526,7 +7588,7 @@ def show_results_page(df, filename):
             key="atlas_results_float_html_report",
             help="Πλήρης HTML αναφορά σε νέα καρτέλα (επιτρέψτε pop-ups).",
         ):
-            st.session_state["open_html_report"] = True
+            _atlas_open_html_report_now(df, edition="lite", wait_slot=_html_wait_ph)
     with _hdr_pro:
         if st.button(
             "Άνοιγμα ATLAS Pro",
@@ -7535,15 +7597,7 @@ def show_results_page(df, filename):
             key="atlas_results_float_html_report_pro",
             help="HTML αναφορά Pro (με επιπλέον καρτέλες) σε νέα καρτέλα (επιτρέψτε pop-ups).",
         ):
-            st.session_state["open_html_report_pro"] = True
-
-    if st.session_state.get("open_html_report"):
-        _atlas_render_full_html_report_open_tab(df)
-        st.session_state["open_html_report"] = False
-
-    if st.session_state.get("open_html_report_pro"):
-        _atlas_render_full_html_report_open_tab(df, edition="pro")
-        st.session_state["open_html_report_pro"] = False
+            _atlas_open_html_report_now(df, edition="pro", wait_slot=_html_wait_ph)
 
     components.html(
         r"""
@@ -13496,40 +13550,39 @@ def _main_inner():
             df = st.session_state['extracted_data']
             
             st.markdown("### Επεξεργασία Ολοκληρώθηκε")
+
+            _html_wait_ph = st.empty()
             
             st.info(
                 "**Πριν την προβολή:** Αν δεν εμφανίζεται η ανάλυση ή η HTML αναφορά, ελέγξτε αν ο browser αποκλείει **αναδυόμενα παράθυρα** (pop-ups). "
                 "Δείτε το σχετικό [βίντεο οδηγίες](https://www.loom.com/share/9b9fe5f9300f42a7a1cfd1315f629145)."
             )
+            st.warning(_ATLAS_PRO_HTML_RECOMMEND_MSG)
             
             _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
             with _pp_mid:
                 _pp_b1, _pp_b2 = st.columns(2, vertical_alignment="center")
                 with _pp_b1:
                     if st.button(
-                        "ATLAS Pro\n(πλήρες)",
+                        "ATLAS Pro\n(νέο)",
                         type="primary",
+                        use_container_width=True,
+                        key="open_html_pro_btn",
+                        help="Πλήρης HTML αναφορά Pro σε νέα καρτέλα (επιτρέψτε pop-ups).",
+                    ):
+                        _atlas_open_html_report_now(df, edition="pro", wait_slot=_html_wait_ph)
+                with _pp_b2:
+                    if st.button(
+                        "ATLAS Pro\n(παλιότερο)",
+                        type="secondary",
                         use_container_width=True,
                         key="show_results_btn",
                         help="Πλήρης ανάλυση στην εφαρμογή (όλες οι καρτέλες).",
                     ):
                         st.session_state['show_results'] = True
                         st.rerun()
-                with _pp_b2:
-                    if st.button(
-                        "ATLAS Pro\n(HTML)",
-                        type="secondary",
-                        use_container_width=True,
-                        key="open_html_pro_btn",
-                        help="Πλήρης HTML αναφορά Pro σε νέα καρτέλα (επιτρέψτε pop-ups).",
-                    ):
-                        st.session_state['open_html_report_pro'] = True
             _atlas_inject_post_process_choice_buttons_style()
 
-            if st.session_state.get('open_html_report_pro'):
-                _atlas_render_full_html_report_open_tab(df, edition="pro")
-                st.session_state['open_html_report_pro'] = False
-            
             st.success(f"Εξήχθησαν {len(df)} γραμμές δεδομένων από {df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες")
         else:
             # Πρώτη φορά - κάνουμε επεξεργασία
@@ -13553,6 +13606,8 @@ def _main_inner():
                 # Ενημέρωση header
                 with header_placeholder.container():
                     st.markdown("### Επεξεργασία Ολοκληρώθηκε")
+
+                _html_wait_ph = st.empty()
                 
                 # Εμφάνιση μηνύματος + κουμπιών
                 with button_placeholder.container():
@@ -13560,33 +13615,30 @@ def _main_inner():
                         "**Πριν την προβολή:** Αν δεν εμφανίζεται η ανάλυση ή η HTML αναφορά, ελέγξτε αν ο browser αποκλείει **αναδυόμενα παράθυρα** (pop-ups). "
                         "Δείτε το σχετικό [βίντεο οδηγίες](https://www.loom.com/share/9b9fe5f9300f42a7a1cfd1315f629145)."
                     )
+                    st.warning(_ATLAS_PRO_HTML_RECOMMEND_MSG)
                     _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
                     with _pp_mid:
                         _pp_b1, _pp_b2 = st.columns(2, vertical_alignment="center")
                         with _pp_b1:
                             if st.button(
-                                "ATLAS Pro\n(πλήρες)",
+                                "ATLAS Pro\n(νέο)",
                                 type="primary",
+                                use_container_width=True,
+                                key="open_html_pro_btn",
+                                help="Πλήρης HTML αναφορά Pro σε νέα καρτέλα (επιτρέψτε pop-ups).",
+                            ):
+                                _atlas_open_html_report_now(df, edition="pro", wait_slot=_html_wait_ph)
+                        with _pp_b2:
+                            if st.button(
+                                "ATLAS Pro\n(παλιότερο)",
+                                type="secondary",
                                 use_container_width=True,
                                 key="show_results_btn",
                                 help="Πλήρης ανάλυση στην εφαρμογή (όλες οι καρτέλες).",
                             ):
                                 st.session_state['show_results'] = True
                                 st.rerun()
-                        with _pp_b2:
-                            if st.button(
-                                "ATLAS Pro\n(HTML)",
-                                type="secondary",
-                                use_container_width=True,
-                                key="open_html_pro_btn",
-                                help="Πλήρης HTML αναφορά Pro σε νέα καρτέλα (επιτρέψτε pop-ups).",
-                            ):
-                                st.session_state['open_html_report_pro'] = True
                     _atlas_inject_post_process_choice_buttons_style()
-
-                if st.session_state.get('open_html_report_pro'):
-                    _atlas_render_full_html_report_open_tab(df, edition="pro")
-                    st.session_state['open_html_report_pro'] = False
 
                 # Εμφάνιση summary
                 with summary_placeholder.container():
