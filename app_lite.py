@@ -125,6 +125,51 @@ var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
         height=40,
     )
 
+_ATLAS_HTML_WAIT_MSG = "Περιμένετε...."
+
+
+def _atlas_show_html_wait_top() -> None:
+    """Εμφανίζει έντονο μήνυμα αναμονής με spinner μέσα στο πλαίσιο."""
+    st.markdown(
+        f"""
+        <style>
+        @keyframes atlasHtmlWaitSpin {{
+            to {{ transform: rotate(360deg); }}
+        }}
+        </style>
+        <div style="background:#fff8e6;border-radius:10px;padding:1rem 1.25rem;
+        margin:0.35rem 0 1rem;display:flex;align-items:center;justify-content:center;gap:0.85rem;">
+        <div style="width:1.35rem;height:1.35rem;border:3px solid #e8d9a8;
+        border-top-color:#7a5a00;border-radius:50%;flex-shrink:0;
+        animation:atlasHtmlWaitSpin 0.75s linear infinite;"></div>
+        <span style="font-size:1.4rem;font-weight:700;color:#7a5a00;letter-spacing:0.02em;">
+        {_ATLAS_HTML_WAIT_MSG}
+        </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    components.html(
+        "<script>try{(window.parent||window).scrollTo({top:0,behavior:'smooth'});}catch(e){}</script>",
+        height=0,
+    )
+
+
+def _atlas_open_html_report_now(
+    df: pd.DataFrame,
+    *,
+    wait_slot=None,
+) -> None:
+    """Ένα κλικ: μήνυμα αναμονής ψηλά + παραγωγή HTML (ATLAS Lite)."""
+    if wait_slot is not None:
+        with wait_slot.container():
+            _atlas_show_html_wait_top()
+        _atlas_render_full_html_report_open_tab(df)
+        wait_slot.empty()
+    else:
+        _atlas_show_html_wait_top()
+        _atlas_render_full_html_report_open_tab(df)
+
 # Ρύθμιση σελίδας (ATLAS Lite)
 st.set_page_config(
     page_title="ATLAS Lite",

@@ -336,14 +336,24 @@ def main() -> None:
         1,
     )
 
-    # Στη Lite δεν χρειάζεται JS styling για τα δύο κουμπιά (μένει μόνο «Άνοιγμα / Προβολή»)
+    # Στη Lite: μόνο αφαίρεση JS styling δύο κουμπιών (κρατάμε wait helpers)
     inj = "def _atlas_inject_post_process_choice_buttons_style() -> None:"
     inj_i = body.find(inj)
     if inj_i != -1:
-        inj_j = body.find("# Ρύθμιση σελίδας", inj_i)
+        inj_j = body.find("_ATLAS_PRO_HTML_RECOMMEND_MSG", inj_i)
         if inj_j == -1:
-            raise SystemExit("Lite build: δεν βρέθηκε # Ρύθμιση σελίδας μετά το _atlas_inject")
+            inj_j = body.find("_ATLAS_HTML_WAIT_MSG", inj_i)
+        if inj_j == -1:
+            raise SystemExit("Lite build: δεν βρέθηκε _ATLAS_HTML_WAIT_MSG μετά το _atlas_inject")
         body = body[:inj_i].rstrip() + "\n\n" + body[inj_j:]
+        body = body.replace(
+            "_ATLAS_PRO_HTML_RECOMMEND_MSG = (\n"
+            '    "**Σημαντικό:** Προτείνουμε να χρησιμοποιείτε πλέον τη νέα έκδοση ATLAS Pro "\n'
+            '    "που είναι ταχύτερη και πιο ευέλικτη. Σύντομα αυτή θα είναι το βασικό μας εργαλείο."\n'
+            ")\n\n",
+            "",
+            1,
+        )
 
     LITE_OUT.write_text(body, encoding="utf-8")
     (ROOT / "app_lite.py").write_text(body, encoding="utf-8")
