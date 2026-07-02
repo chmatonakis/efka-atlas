@@ -5443,9 +5443,23 @@ def tameio_monthly_cap_days_count(tameio_val: str) -> float:
     return 25.0
 
 
+def _atlas_is_missing_cell(val) -> bool:
+    """True για None, κενό ή pandas NA (χωρίς ambiguous bool σε pd.NA)."""
+    if val is None:
+        return True
+    try:
+        if pd.isna(val):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return val == ''
+
+
 def format_count_days_display(val) -> str:
     """Μορφοποίηση ημερών — ίδια με γραμμές ΣΥΝΟΛΟ της καταμέτρησης."""
-    if val == 0 or val == '' or pd.isna(val):
+    if _atlas_is_missing_cell(val):
+        return ''
+    if val == 0:
         return ''
     try:
         v = float(val)

@@ -5515,9 +5515,23 @@ def tameio_monthly_cap_days_count(tameio_val: str) -> float:
     return 25.0
 
 
+def _atlas_is_missing_cell(val) -> bool:
+    """True για None, κενό ή pandas NA (χωρίς ambiguous bool σε pd.NA)."""
+    if val is None:
+        return True
+    try:
+        if pd.isna(val):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return val == ''
+
+
 def format_count_days_display(val) -> str:
     """Μορφοποίηση ημερών — ίδια με γραμμές ΣΥΝΟΛΟ της καταμέτρησης."""
-    if val == 0 or val == '' or pd.isna(val):
+    if _atlas_is_missing_cell(val):
+        return ''
+    if val == 0:
         return ''
     try:
         v = float(val)
@@ -11366,7 +11380,7 @@ def show_results_page(df, filename):
                             return format_count_days_display(x)
 
                         def _syntaksi_fmt_dtk_cell(x):
-                            if x is None or (isinstance(x, float) and pd.isna(x)):
+                            if _atlas_is_missing_cell(x):
                                 return ''
                             try:
                                 if float(x) == 0:
@@ -11376,7 +11390,7 @@ def show_results_page(df, filename):
                             return format_number_greek(float(x), decimals=5)
 
                         def _syntaksi_fmt_etos_cell(x):
-                            if pd.isna(x) or x == '' or x is None:
+                            if _atlas_is_missing_cell(x):
                                 return ''
                             if isinstance(x, str):
                                 return x.strip()
@@ -11405,7 +11419,7 @@ def show_results_page(df, filename):
                         ]:
                             if _c in disp_syn.columns:
                                 disp_syn[_c] = disp_syn[_c].apply(
-                                    lambda x: format_currency(x) if pd.notna(x) and x != '' else ''
+                                    lambda x: format_currency(x) if not _atlas_is_missing_cell(x) else ''
                                 )
                         if 'ΔΤΚ' in disp_syn.columns:
                             disp_syn['ΔΤΚ'] = disp_syn['ΔΤΚ'].apply(_syntaksi_fmt_dtk_cell)
