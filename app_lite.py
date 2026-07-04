@@ -137,12 +137,15 @@ def _atlas_show_html_wait_top() -> None:
             to {{ transform: rotate(360deg); }}
         }}
         </style>
-        <div style="background:#fff8e6;border-radius:10px;padding:1rem 1.25rem;
-        margin:0.35rem 0 1rem;display:flex;align-items:center;justify-content:center;gap:0.85rem;">
-        <div style="width:1.35rem;height:1.35rem;border:3px solid #e8d9a8;
-        border-top-color:#7a5a00;border-radius:50%;flex-shrink:0;
-        animation:atlasHtmlWaitSpin 0.75s linear infinite;"></div>
-        <span style="font-size:1.4rem;font-weight:700;color:#7a5a00;letter-spacing:0.02em;">
+        <div style="background:linear-gradient(135deg,#5b21b6 0%,#7c3aed 48%,#a855f7 100%);
+        border-radius:14px;padding:1.05rem 1.35rem;margin:0.35rem 0 1rem;
+        display:flex;align-items:center;justify-content:center;gap:0.9rem;
+        box-shadow:0 8px 28px rgba(91,33,182,0.28);border:1px solid rgba(255,255,255,0.18);">
+        <div style="width:1.4rem;height:1.4rem;border:3px solid rgba(255,255,255,0.35);
+        border-top-color:#fff;border-radius:50%;flex-shrink:0;
+        animation:atlasHtmlWaitSpin 0.7s linear infinite;"></div>
+        <span style="font-size:1.35rem;font-weight:700;color:#fff;letter-spacing:0.03em;
+        text-shadow:0 1px 2px rgba(0,0,0,0.12);">
         {_ATLAS_HTML_WAIT_MSG}
         </span>
         </div>
@@ -160,7 +163,7 @@ def _atlas_open_html_report_now(
     *,
     wait_slot=None,
 ) -> None:
-    """Ένα κλικ: μήνυμα αναμονής ψηλά + παραγωγή HTML (ATLAS Lite)."""
+    """Ένα κλικ: μήνυμα αναμονής + παραγωγή HTML (ATLAS Lite)."""
     if wait_slot is not None:
         with wait_slot.container():
             _atlas_show_html_wait_top()
@@ -169,6 +172,38 @@ def _atlas_open_html_report_now(
     else:
         _atlas_show_html_wait_top()
         _atlas_render_full_html_report_open_tab(df)
+
+
+def _atlas_show_post_extract_choices(
+    df: pd.DataFrame,
+    *,
+    html_btn_key: str = "open_html_btn",
+    streamlit_btn_key: str = "show_results_btn",
+) -> None:
+    """Οθόνη επιλογής μετά την εξαγωγή PDF (ATLAS Lite)."""
+    st.markdown("### Επεξεργασία Ολοκληρώθηκε")
+
+    st.info(
+        "**Πριν την προβολή:** Αν δεν εμφανίζεται η ανάλυση ή η HTML αναφορά, ελέγξτε αν ο browser αποκλείει **αναδυόμενα παράθυρα** (pop-ups). "
+        "Δείτε το σχετικό [βίντεο οδηγίες](https://www.loom.com/share/9b9fe5f9300f42a7a1cfd1315f629145)."
+    )
+
+    _html_wait_ph = st.empty()
+    _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
+    with _pp_mid:
+        if st.button(
+            "Άνοιγμα / Προβολή",
+            type="primary",
+            use_container_width=True,
+            key=html_btn_key,
+            help="Πλήρης HTML αναφορά σε νέα καρτέλα (επιτρέψτε pop-ups).",
+        ):
+            _atlas_open_html_report_now(df, wait_slot=_html_wait_ph)
+
+    st.success(
+        f"Εξήχθησαν {len(df)} γραμμές δεδομένων από "
+        f"{df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες"
+    )
 
 # Ρύθμιση σελίδας (ATLAS Lite)
 st.set_page_config(
@@ -1881,7 +1916,7 @@ def clean_numeric_value(value, exclude_drx=False):
             return 0.0
         
         # Αφαίρεση κειμένου όπως "ΔΡΧ", "€", κλπ
-        clean_value = clean_value.replace('ΔΡΧ', '').replace('€', '').replace(' ', '')
+        clean_value = clean_value.replace('ΔΡΧ', '').replace('€', '').replace('%', '').replace(' ', '')
         
         # Αφαίρεση όλων των γραμμάτων
         import re
@@ -1896,33 +1931,150 @@ def clean_numeric_value(value, exclude_drx=False):
         # Έλεγχος για ελληνικό format (κόμμα ως διαχωριστικός χιλιάδων, τελεία ως δεκαδικός)
         # π.χ. "1,234.56" ή "1234.56" ή "1,234"
         if ',' in clean_value and '.' in clean_value:
-            # Format: 1,234.56 (κόμμα χιλιάδες, τελεία δεκαδικά)
-            clean_value = clean_value.replace(',', '')
-            return float(clean_value)
+            if clean_value.rfind(',') > clean_value.rfind('.'):
+                # Ελληνικό: 1.234,56 (τελεία χιλιάδες, κόμμα δεκαδικά)
+                clean_value = clean_value.replace('.', '').replace(',', '.')
+            else:
+                # US: 1,234.56
+                clean_value = clean_value.replace(',', '')
+            result = float(clean_value)
+            return -result if is_negative else result
         elif ',' in clean_value:
-            # Ελέγχουμε αν το κόμμα είναι διαχωριστικός χιλιάδων ή δεκαδικών
             parts = clean_value.split(',')
             if len(parts) == 2:
-                # Αν το δεύτερο μέρος έχει 3 ψηφία, είναι πιθανώς χιλιάδες
-                # Αν έχει 1-2 ψηφία, είναι πιθανώς δεκαδικά
                 if len(parts[1]) == 3 and parts[1].isdigit():
-                    # Κόμμα ως διαχωριστικός χιλιάδων: 1,234 -> 1234
                     clean_value = clean_value.replace(',', '')
                 elif len(parts[1]) <= 2:
-                    # Κόμμα ως δεκαδικός διαχωριστικός: 1,23 -> 1.23
                     clean_value = clean_value.replace(',', '.')
                 else:
-                    # Αφαίρεση κόμματος (χιλιάδες)
                     clean_value = clean_value.replace(',', '')
             else:
-                # Πολλά κόμματα, αφαίρεση όλων (χιλιάδες)
                 clean_value = clean_value.replace(',', '')
+        elif re.fullmatch(r'\d{1,3}(?:\.\d{3})+', clean_value):
+            clean_value = clean_value.replace('.', '')
         
         # Μετατροπή σε float
         result = float(clean_value)
         return -result if is_negative else result
     except (ValueError, TypeError):
         return 0.0
+
+
+def _atlas_excel_parse_cell(value, *, exclude_drx=False):
+    """Μετατροπή κελιού (display string ή αριθμός) σε τύπο κατάλληλο για Excel."""
+    if pd.isna(value) or value is None:
+        return pd.NA
+    if isinstance(value, pd.Timestamp):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    s = str(value).strip()
+    if s in ('', '-', '—'):
+        return pd.NA
+    if s.upper() == 'ΚΕΝΟ ΔΙΑΣΤΗΜΑ':
+        return s
+    if re.fullmatch(r'\d{1,2}/\d{1,2}/\d{4}', s):
+        dt = pd.to_datetime(s, format='%d/%m/%Y', errors='coerce')
+        return dt if pd.notna(dt) else s
+    if not re.search(r'\d', s):
+        return s
+    cleaned = re.sub(r'[a-zA-Zα-ωΑ-Ω]+', ' ', s)
+    cleaned = cleaned.replace('%', '').replace('€', '').replace('ΔΡΧ', '').strip()
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    if not cleaned or not re.search(r'\d', cleaned):
+        return s
+    if re.fullmatch(r'\d{1,3}(?:\.\d{3})+', cleaned):
+        cleaned = cleaned.replace('.', '')
+    return float(clean_numeric_value(cleaned, exclude_drx=exclude_drx))
+
+
+def _atlas_should_skip_excel_text_col(col_name: str) -> bool:
+    low = str(col_name).lower().strip()
+    if 'αποδοχ' in low and any(x in low for x in ('τύπος', 'τυπος', 'κωδ', 'γραφ', 'περιγραφ')):
+        return True
+    skip = (
+        'περιγραφ', 'perigraf', 'ταμείο', 'ταμειο', 'τύπος ασφάλισης', 'ειδος ασφάλισης',
+        'φορέας', 'σχόλι', 'απασχ', 'μήνας', 'διάστημα', 'διαστημα', 'εργοδότης/πακ',
+    )
+    return any(tok in low for tok in skip)
+
+
+def _atlas_df_for_excel_export(df: pd.DataFrame) -> pd.DataFrame:
+    """DataFrame με αριθμούς/ημερομηνίες ως τύπους Excel (όχι formatted text)."""
+    if df is None or getattr(df, 'empty', True):
+        return df if df is not None else pd.DataFrame()
+
+    out = df.copy()
+
+    for col in out.columns:
+        if _atlas_should_skip_excel_text_col(col):
+            continue
+        low = str(col).lower().strip()
+        exclude_drx = ('αποδοχ' in low) or ('εισφορ' in low)
+
+        if low in ('από', 'έως', 'απο', 'εως') or 'ημερομην' in low:
+            out[col] = pd.to_datetime(out[col], format='%d/%m/%Y', errors='coerce')
+            continue
+
+        series = out[col]
+        if pd.api.types.is_numeric_dtype(series):
+            out[col] = pd.to_numeric(series, errors='coerce')
+            continue
+
+        converted = [_atlas_excel_parse_cell(v, exclude_drx=exclude_drx) for v in series]
+        s = pd.Series(converted, index=series.index)
+        orig_digits = series.astype(str).str.contains(r'\d', regex=True, na=False)
+        num = pd.to_numeric(s, errors='coerce')
+        if orig_digits.any() and num.notna().sum() >= max(int(orig_digits.sum()), 1) * 0.25:
+            out[col] = num
+            continue
+        ts = pd.to_datetime(s, errors='coerce')
+        if ts.notna().sum() >= max(len(s.dropna()), 1) * 0.5:
+            out[col] = ts
+
+    return out
+
+
+def _atlas_write_df_to_excel(writer, df: pd.DataFrame, sheet_name: str, *, index: bool = False) -> None:
+    """Εξαγωγή πίνακα στο Excel με σωστούς τύπους δεδομένων."""
+    export_df = _atlas_df_for_excel_export(df)
+    export_df.to_excel(writer, sheet_name=sheet_name, index=index)
+    ws = writer.sheets[sheet_name]
+    start_row = 2 if not index else 1
+    for col_idx, col_name in enumerate(export_df.columns, start=1):
+        series = export_df[col_name]
+        if pd.api.types.is_datetime64_any_dtype(series):
+            fmt = 'dd/mm/yyyy'
+        elif pd.api.types.is_numeric_dtype(series):
+            low = str(col_name).lower()
+            numeric_vals = pd.to_numeric(series, errors='coerce').dropna()
+            all_integer = bool(len(numeric_vals)) and bool(
+                (numeric_vals == numeric_vals.round(0)).all()
+            )
+            year_col = ('έτος' in low) or ('ετος' in low)
+            money_col = any(
+                k in low for k in ('αποδοχ', 'εισφορ', 'ποσ', 'τεκμαρτ', 'κερδ')
+            )
+            if year_col:
+                # Έτος: χωρίς διαχωριστικό χιλιάδων / δεκαδικά (π.χ. 2004, όχι 2.004,00)
+                fmt = '0'
+            elif all_integer and not money_col:
+                # Ακέραιες τιμές (ημέρες/έτη/μήνες/αριθμοί): χωρίς κρεμάμενο κόμμα
+                fmt = '#,##0'
+            else:
+                fmt = '#,##0.00'
+        else:
+            continue
+        for row_idx, val in enumerate(series, start=start_row):
+            if pd.isna(val):
+                continue
+            cell = ws.cell(row=row_idx, column=col_idx)
+            if pd.api.types.is_datetime64_any_dtype(series):
+                cell.value = val.to_pydatetime() if hasattr(val, 'to_pydatetime') else val
+            else:
+                cell.value = float(val)
+            cell.number_format = fmt
+
 
 def get_negative_amount_sign(gross_val, contrib_val) -> int:
     """Επιστρέφει -1 όταν υπάρχουν αρνητικά ποσά (διαγραφή εγγραφής)."""
@@ -2133,13 +2285,6 @@ def find_zero_duration_intervals(df: pd.DataFrame) -> pd.DataFrame:
     drop_helpers = [c for c in zero_display_df.columns if c.startswith('__')]
     zero_display_df = zero_display_df.drop(columns=drop_helpers, errors='ignore')
 
-    if 'Έτη' in zero_display_df.columns:
-        zero_display_df['Έτη'] = zero_display_df['Έτη'].apply(lambda x: format_number_greek(x, decimals=1) if str(x).strip() not in ['', '-'] else '')
-    if 'Μήνες' in zero_display_df.columns:
-        zero_display_df['Μήνες'] = zero_display_df['Μήνες'].apply(lambda x: format_number_greek(x, decimals=1) if str(x).strip() not in ['', '-'] else '')
-    if 'Ημέρες' in zero_display_df.columns:
-        zero_display_df['Ημέρες'] = zero_display_df['Ημέρες'].apply(lambda x: format_number_greek(x, decimals=0) if str(x).strip() not in ['', '-'] else '')
-
     return zero_display_df
 
 
@@ -2256,14 +2401,62 @@ def normalize_column_names(df):
     
     return df
 
+class _AtlasPdfUpload:
+    """Bytes + όνομα αρχείου — σταθερό στο session (όχι widget UploadedFile)."""
+
+    __slots__ = ("name", "_bytes")
+
+    def __init__(self, data: bytes, name: str):
+        self._bytes = data
+        self.name = name
+
+    def getvalue(self) -> bytes:
+        return self._bytes
+
+
+def _atlas_store_uploaded_pdf(uploaded_file) -> None:
+    """Αποθήκευση PDF bytes στο session."""
+    pdf_bytes = uploaded_file.getvalue()
+    st.session_state["uploaded_file_bytes"] = pdf_bytes
+    st.session_state["filename"] = uploaded_file.name
+    st.session_state["uploaded_file"] = _AtlasPdfUpload(pdf_bytes, uploaded_file.name)
+    st.session_state["file_uploaded"] = True
+    for _k in ("_atlas_extract_in_progress", "_atlas_pending_html_edition", "extracted_data", "processing_done"):
+        st.session_state.pop(_k, None)
+
+
+def _atlas_reset_upload_session() -> None:
+    for key in [
+        "file_uploaded", "processing_done", "uploaded_file", "uploaded_file_bytes",
+        "extracted_data", "show_results", "filename",
+        "_atlas_extract_in_progress", "_atlas_pending_html_edition",
+        "_atlas_analytics_sig", "_atlas_cached_gaps", "_atlas_cached_zero_duration",
+        "_atlas_cached_audit", "ai_chat_context", "ai_chat_history", "main_ai_summary_result",
+        "atlas_view_exports", "atlas_export_main_df", "atlas_export_extra_columns",
+        "atlas_export_extra_df", "atlas_export_apd_df", "_atlas_pension_tab_visible_snap",
+    ]:
+        st.session_state.pop(key, None)
+
+
 def extract_efka_data(uploaded_file):
     """
     Εξαγωγή δεδομένων από PDF αρχείο
     """
-    
+    try:
+        if isinstance(uploaded_file, (bytes, bytearray)):
+            pdf_bytes = bytes(uploaded_file)
+        elif hasattr(uploaded_file, "getvalue"):
+            pdf_bytes = uploaded_file.getvalue()
+        else:
+            st.error("Μη έγκυρο αρχείο PDF για ανάλυση.")
+            return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Δεν ήταν δυνατή η ανάγνωση του PDF: {e}")
+        return pd.DataFrame()
+
     # Δημιουργούμε ένα προσωρινό αρχείο
     with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-        tmp_file.write(uploaded_file.getvalue())
+        tmp_file.write(pdf_bytes)
         tmp_path = tmp_file.name
     
     try:
@@ -3438,7 +3631,7 @@ def compute_complex_file_metrics(data_df: pd.DataFrame) -> tuple[int, int, int, 
         n_limits_25 = len(capped) if capped else 0
     except Exception:
         pass
-    # 3. Απλήρωτοι μήνες (από καταμέτρηση, 1995+, K/ΚΣ/ΜΕ + ΕΤΑΑ-ΤΑΝ/ΚΕΑΔ Κ)
+    # 3. Απλήρωτοι μήνες (από καταμέτρηση, 1995+, K/ΚΣ/ΜΕ + ΕΤΑΑ + ΕΦΚΑ Κ)
     try:
         days_df, contrib_df = get_count_allocation(data_df)
         if not days_df.empty and not contrib_df.empty:
@@ -3451,13 +3644,15 @@ def compute_complex_file_metrics(data_df: pd.DataFrame) -> tuple[int, int, int, 
             contrib_df = contrib_df[mask_1995].reset_index(drop=True)
             if not days_df.empty:
                 K = days_df['ΚΛΑΔΟΣ/ΠΑΚΕΤΟ'].astype(str).str.strip().str.upper()
-                T = days_df['Ταμείο'].astype(str).str.strip().str.upper()
+                _tameio_col = 'ΤΑΜΕΙΟ' if 'ΤΑΜΕΙΟ' in days_df.columns else 'Ταμείο'
+                T = days_df[_tameio_col].astype(str).str.strip().str.upper()
                 cond_oaee = (K.isin(['K', 'Κ'])) & (T.str.contains('OAEE|ΟΑΕΕ|TEBE|ΤΕΒΕ|TAE|ΤΑΕ', na=False))
                 cond_tsmede = (K.isin(['ΚΣ', 'KS'])) & (T.str.contains('ΤΣΜΕΔΕ|TSMEDE', na=False))
                 cond_oga = (K.isin(['K', 'Κ'])) & (T.str.contains('ΟΓΑ|OGA', na=False))
                 cond_tsay = (K.isin(['ME', 'ΜΕ'])) & (T.str.contains('ΤΣΑΥ|TSAY', na=False))
                 cond_etaa_tan = (K.isin(['K', 'Κ'])) & (T.str.contains('ΕΤΑΑ-ΤΑΝ|ETAA-TAN', na=False))
                 cond_etaa_kead = (K.isin(['K', 'Κ'])) & (T.str.contains('ΕΤΑΑ-ΚΕΑΔ|ETAA-KEAD', na=False))
+                cond_efka = (K.isin(['K', 'Κ'])) & (T.str.contains('ΕΦΚΑ|EFKA', na=False))
                 month_cols_int = [c for c in days_df.columns if isinstance(c, int)] or list(range(1, 13))
                 def _count_unpaid(days_row, contrib_row):
                     cnt = 0
@@ -3469,7 +3664,7 @@ def compute_complex_file_metrics(data_df: pd.DataFrame) -> tuple[int, int, int, 
                         except (TypeError, ValueError): d_val, c_val = 0, 0
                         if d_val > 0 and (c_val == 0 or abs(c_val) < 1e-6): cnt += 1
                     return cnt
-                for cond in [cond_oaee, cond_tsmede, cond_oga, cond_tsay, cond_etaa_tan, cond_etaa_kead]:
+                for cond in [cond_oaee, cond_tsmede, cond_oga, cond_tsay, cond_etaa_tan, cond_etaa_kead, cond_efka]:
                     if cond.any():
                         sub_d = days_df.loc[cond].reset_index(drop=True)
                         sub_c = contrib_df.loc[cond].reset_index(drop=True)
@@ -4419,6 +4614,7 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
                 cond_tsay = (K.isin(['ME', 'ΜΕ'])) & (T.str.contains('ΤΣΑΥ|TSAY', na=False))
                 cond_etaa_tan = (K.isin(['K', 'Κ'])) & (T.str.contains('ΕΤΑΑ-ΤΑΝ|ETAA-TAN', na=False))
                 cond_etaa_kead = (K.isin(['K', 'Κ'])) & (T.str.contains('ΕΤΑΑ-ΚΕΑΔ|ETAA-KEAD', na=False))
+                cond_efka = (K.isin(['K', 'Κ'])) & (T.str.contains('ΕΦΚΑ|EFKA', na=False))
                 month_cols_int = [c for c in days_df.columns if isinstance(c, int)]
                 if not month_cols_int:
                     month_cols_int = list(range(1, 13))
@@ -4455,10 +4651,11 @@ def generate_audit_report(data_df: pd.DataFrame, extra_data_df: pd.DataFrame | N
                 f_tsay = _sum_unpaid_for_cond(cond_tsay, "ΤΣΑΥ (ΜΕ)")
                 f_etaa_tan = _sum_unpaid_for_cond(cond_etaa_tan, "ΕΤΑΑ-ΤΑΝ (Κ)")
                 f_etaa_kead = _sum_unpaid_for_cond(cond_etaa_kead, "ΕΤΑΑ-ΚΕΑΔ (Κ)")
-                all_funds = [x for x in [f_oaee, f_tsmede, f_oga, f_tsay, f_etaa_tan, f_etaa_kead] if x]
+                f_efka = _sum_unpaid_for_cond(cond_efka, "ΕΦΚΑ (Κ)")
+                all_funds = [x for x in [f_oaee, f_tsmede, f_oga, f_tsay, f_etaa_tan, f_etaa_kead, f_efka] if x]
                 if all_funds:
                     details_msg = ", ".join(all_funds) + " με ημέρες αλλά χωρίς εισφορές."
-                    any_cond = cond_oaee | cond_tsmede | cond_oga | cond_tsay | cond_etaa_tan | cond_etaa_kead
+                    any_cond = cond_oaee | cond_tsmede | cond_oga | cond_tsay | cond_etaa_tan | cond_etaa_kead | cond_efka
                     sample_d = days_df.loc[any_cond].reset_index(drop=True)
                     sample_c = contrib_df.loc[any_cond].reset_index(drop=True)
                     unpaid_pairs = []  # (year, month) για ταξινόμηση
@@ -7304,7 +7501,7 @@ def render_totals_tab(
 
     st.dataframe(display_summary, width="stretch")
     if register_view_fn is not None:
-        register_view_fn("Συνολα - Ομαδοποίηση", display_summary)
+        register_view_fn("Συνολα - Ομαδοποίηση", display_summary, export_data=summary_final)
     render_print_button(
         f"{key_prefix}_print",
         "Σύνολα - Ομαδοποίηση κατά Κλάδο/Πακέτο (και Ταμείο)",
@@ -7400,14 +7597,12 @@ def _main_inner():
         )
         
         if uploaded_file is not None:
-            st.session_state['uploaded_file'] = uploaded_file
-            st.session_state['filename'] = uploaded_file.name
-            st.session_state['file_uploaded'] = True
-            st.session_state['processing_done'] = True
+            _atlas_store_uploaded_pdf(uploaded_file)
             st.rerun()
-        
-        # Οδηγίες σε πλαίσιο
-        st.markdown('''
+
+        if not st.session_state['file_uploaded']:
+            # Οδηγίες σε πλαίσιο
+            st.markdown('''
             <div class="instructions-box">
                 <div class="instructions-title">Γενικές Οδηγίες Χρήσης</div>
                 <div class="instructions-list">
@@ -7423,100 +7618,66 @@ def _main_inner():
             </div>
         ''', unsafe_allow_html=True)
 
-        # Footer
-        st.markdown('''
-            <div class="main-footer">
-                <div class="footer-disclaimer">
-                    <strong>ΑΠΟΠΟΙΗΣΗ ΕΥΘΥΝΗΣ:</strong> Η παρούσα εφαρμογή αποτελεί εργαλείο ιδιωτικής πρωτοβουλίας για την διευκόλυνση ανάγνωσης του ασφαλιστικού βιογραφικού. 
-                    Δεν συνδέεται με τον e-ΕΦΚΑ ή άλλο δημόσιο φορέα. 
-                    Τα αποτελέσματα παράγονται βάσει των δεδομένων του αρχείου PDF που εισάγετε και ενδέχεται να περιέχουν ανακρίβειες. 
-                    Για επίσημη πληροφόρηση και θέματα συνταξιοδότησης, απευθυνθείτε αποκλειστικά στον e-ΕΦΚΑ.
+            # Footer
+            st.markdown('''
+                <div class="main-footer">
+                    <div class="footer-disclaimer">
+                        <strong>ΑΠΟΠΟΙΗΣΗ ΕΥΘΥΝΗΣ:</strong> Η παρούσα εφαρμογή αποτελεί εργαλείο ιδιωτικής πρωτοβουλίας για την διευκόλυνση ανάγνωσης του ασφαλιστικού βιογραφικού. 
+                        Δεν συνδέεται με τον e-ΕΦΚΑ ή άλλο δημόσιο φορέα. 
+                        Τα αποτελέσματα παράγονται βάσει των δεδομένων του αρχείου PDF που εισάγετε και ενδέχεται να περιέχουν ανακρίβειες. 
+                        Για επίσημη πληροφόρηση και θέματα συνταξιοδότησης, απευθυνθείτε αποκλειστικά στον e-ΕΦΚΑ.
+                    </div>
+                    <div class="footer-copyright">
+                        © 2026 Χαράλαμπος Ματωνάκης - myadvisor 
+                    </div>
                 </div>
-                <div class="footer-copyright">
-                    © 2026 Χαράλαμπος Ματωνάκης - myadvisor 
-                </div>
-            </div>
-        ''', unsafe_allow_html=True)
-    
+            ''', unsafe_allow_html=True)
+            return
+
     # Επεξεργασία και εμφάνιση αποτελεσμάτων (ξεκινά αυτόματα μετά το ανέβασμα)
-    else:
-        # Ελέγχουμε αν τα δεδομένα υπάρχουν ήδη (για να μην ξανακάνουμε επεξεργασία)
-        if 'extracted_data' in st.session_state and not st.session_state['extracted_data'].empty:
-            # Τα δεδομένα υπάρχουν ήδη - εμφάνιση κουμπιού απευθείας
-            df = st.session_state['extracted_data']
-            
-            st.markdown("### Επεξεργασία Ολοκληρώθηκε")
+    if 'extracted_data' in st.session_state and not st.session_state['extracted_data'].empty:
+        _atlas_show_post_extract_choices(
+            st.session_state['extracted_data'],
+            html_btn_key="open_html_pro_btn",
+            streamlit_btn_key="show_results_btn",
+        )
+    elif st.session_state.get("file_uploaded"):
+        if st.session_state.get("_atlas_extract_in_progress"):
+            st.markdown("### Επεξεργασία σε εξέλιξη…")
+            st.info("Ανάλυση PDF — παρακαλώ περιμένετε…")
+            st.stop()
 
-            _html_wait_ph = st.empty()
-            
-            st.info(
-                "**Πριν την προβολή:** Αν δεν εμφανίζεται η ανάλυση ή η HTML αναφορά, ελέγξτε αν ο browser αποκλείει **αναδυόμενα παράθυρα** (pop-ups). "
-                "Δείτε το σχετικό [βίντεο οδηγίες](https://www.loom.com/share/9b9fe5f9300f42a7a1cfd1315f629145)."
+        upload_src = st.session_state.get("uploaded_file")
+        if upload_src is None and st.session_state.get("uploaded_file_bytes"):
+            upload_src = _AtlasPdfUpload(
+                st.session_state["uploaded_file_bytes"],
+                st.session_state.get("filename", "upload.pdf"),
             )
-            _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
-            with _pp_mid:
-                if st.button("Άνοιγμα / Προβολή", type="primary", use_container_width=True, key="open_html_btn"):
-                    _atlas_open_html_report_now(df, wait_slot=_html_wait_ph)
+            st.session_state["uploaded_file"] = upload_src
+        if upload_src is None:
+            st.error("Δεν βρέθηκε το αρχείο PDF. Ανεβάστε ξανά το αρχείο.")
+            st.session_state["file_uploaded"] = False
+            return
 
-            st.success(f"Εξήχθησαν {len(df)} γραμμές δεδομένων από {df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες")
+        st.markdown("### Επεξεργασία σε εξέλιξη…")
+        st.session_state["_atlas_extract_in_progress"] = True
+        try:
+            with st.spinner("Ανάλυση PDF…"):
+                df = extract_efka_data(upload_src)
+        finally:
+            st.session_state["_atlas_extract_in_progress"] = False
+
+        if not df.empty:
+            st.session_state["extracted_data"] = df
+            st.session_state["processing_done"] = True
+            st.rerun()
         else:
-            # Πρώτη φορά - κάνουμε επεξεργασία
-            # Δημιουργία placeholders για ελεγχόμενη σειρά εμφάνισης
-            header_placeholder = st.empty()
-            button_placeholder = st.empty()
-            summary_placeholder = st.empty()
-            messages_placeholder = st.empty()
-            
-            # Εμφάνιση header
-            with header_placeholder.container():
-                st.markdown("### Επεξεργασία σε εξέλιξη...")
-            
-            # Container για μηνύματα επεξεργασίας (θα εμφανιστούν κάτω)
-            with messages_placeholder.container():
-                df = extract_efka_data(st.session_state['uploaded_file'])
-            
-            if not df.empty:
-                st.session_state['extracted_data'] = df
-                
-                # Ενημέρωση header
-                with header_placeholder.container():
-                    st.markdown("### Επεξεργασία Ολοκληρώθηκε")
-
-                _html_wait_ph = st.empty()
-                
-                # Εμφάνιση μηνύματος + κουμπιών
-                with button_placeholder.container():
-                    st.info(
-                        "**Πριν την προβολή:** Αν δεν εμφανίζεται η ανάλυση ή η HTML αναφορά, ελέγξτε αν ο browser αποκλείει **αναδυόμενα παράθυρα** (pop-ups). "
-                        "Δείτε το σχετικό [βίντεο οδηγίες](https://www.loom.com/share/9b9fe5f9300f42a7a1cfd1315f629145)."
-                    )
-                    _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
-                    with _pp_mid:
-                        if st.button("Άνοιγμα / Προβολή", type="primary", use_container_width=True, key="open_html_btn"):
-                            _atlas_open_html_report_now(df, wait_slot=_html_wait_ph)
-
-                # Εμφάνιση summary
-                with summary_placeholder.container():
-                    st.success(f"Εξήχθησαν {len(df)} γραμμές δεδομένων από {df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες")
-            else:
-                st.error("Δεν βρέθηκαν δεδομένα για εξαγωγή")
-                
-                # Reset button
-                col1, col2, col3 = st.columns([1, 1, 1])
-                with col2:
-                    if st.button("Δοκιμάστε Ξανά", use_container_width=True):
-                        # Reset session state
-                        for key in [
-                            'file_uploaded', 'processing_done', 'uploaded_file', 'extracted_data',
-                            'filename',
-                            '_atlas_analytics_sig', '_atlas_cached_gaps', '_atlas_cached_zero_duration',
-                            '_atlas_cached_audit', 'ai_chat_context', 'ai_chat_history', 'main_ai_summary_result',
-                            'atlas_view_exports', 'atlas_export_main_df', 'atlas_export_extra_columns',
-                            'atlas_export_extra_df', 'atlas_export_apd_df', '_atlas_pension_tab_visible_snap',
-                        ]:
-                            if key in st.session_state:
-                                del st.session_state[key]
-                        st.rerun()
+            st.error("Δεν βρέθηκαν δεδομένα για εξαγωγή")
+            col1, col2, col3 = st.columns([1, 1, 1])
+            with col2:
+                if st.button("Δοκιμάστε Ξανά", use_container_width=True):
+                    _atlas_reset_upload_session()
+                    st.rerun()
 
 if __name__ == "__main__":
     main()

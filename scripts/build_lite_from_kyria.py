@@ -15,6 +15,63 @@ def main() -> None:
         raise SystemExit(f"Δεν βρέθηκαν σημεία τομής (i={i}, j={j})")
     body = text[:i] + text[j + 1 :]
 
+    # Αντικατάσταση ροής HTML μετά την εξαγωγή (πριν από άλλα replaces στο page config marker)
+    _lite_html_flow = '''def _atlas_open_html_report_now(
+    df: pd.DataFrame,
+    *,
+    wait_slot=None,
+) -> None:
+    """Ένα κλικ: μήνυμα αναμονής + παραγωγή HTML (ATLAS Lite)."""
+    if wait_slot is not None:
+        with wait_slot.container():
+            _atlas_show_html_wait_top()
+        _atlas_render_full_html_report_open_tab(df)
+        wait_slot.empty()
+    else:
+        _atlas_show_html_wait_top()
+        _atlas_render_full_html_report_open_tab(df)
+
+
+def _atlas_show_post_extract_choices(
+    df: pd.DataFrame,
+    *,
+    html_btn_key: str = "open_html_btn",
+    streamlit_btn_key: str = "show_results_btn",
+) -> None:
+    """Οθόνη επιλογής μετά την εξαγωγή PDF (ATLAS Lite)."""
+    st.markdown("### Επεξεργασία Ολοκληρώθηκε")
+
+    st.info(
+        "**Πριν την προβολή:** Αν δεν εμφανίζεται η ανάλυση ή η HTML αναφορά, ελέγξτε αν ο browser αποκλείει **αναδυόμενα παράθυρα** (pop-ups). "
+        "Δείτε το σχετικό [βίντεο οδηγίες](https://www.loom.com/share/9b9fe5f9300f42a7a1cfd1315f629145)."
+    )
+
+    _html_wait_ph = st.empty()
+    _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
+    with _pp_mid:
+        if st.button(
+            "Άνοιγμα / Προβολή",
+            type="primary",
+            use_container_width=True,
+            key=html_btn_key,
+            help="Πλήρης HTML αναφορά σε νέα καρτέλα (επιτρέψτε pop-ups).",
+        ):
+            _atlas_open_html_report_now(df, wait_slot=_html_wait_ph)
+
+    st.success(
+        f"Εξήχθησαν {len(df)} γραμμές δεδομένων από "
+        f"{df['Σελίδα'].nunique() if 'Σελίδα' in df.columns else 0} σελίδες"
+    )
+
+'''
+    _flow_start = "def _atlas_open_html_report_now("
+    _flow_end = "# Ρύθμιση σελίδας (Κυρία)"
+    _a = body.find(_flow_start)
+    _b = body.find(_flow_end, _a)
+    if _a == -1 or _b == -1:
+        raise SystemExit("Lite build: δεν βρέθηκε μπλοκ _atlas_open_html_report_now / post_extract")
+    body = body[:_a] + _lite_html_flow + body[_b:]
+
     body = body.replace(
         '"""\ne-EFKA PDF Data Extractor - Final Version\nΤελική, σταθερή έκδοση με multi-page functionality\n"""',
         '"""\nATLAS Lite — αυτόνομη Streamlit εφαρμογή\n\n'
@@ -57,159 +114,6 @@ def main() -> None:
         "        '<div class=\"purple-header\">ATLAS Lite</div>',",
         1,
     )
-
-    # Μετά την επεξεργασία: μόνο ένα κουμπί (ATLAS Lite)
-    new_a = """            _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
-            with _pp_mid:
-                if st.button("Άνοιγμα / Προβολή", type="primary", use_container_width=True, key="open_html_btn"):
-                    _atlas_open_html_report_now(df, wait_slot=_html_wait_ph)
-"""
-    new_b = """                    _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
-                    with _pp_mid:
-                        if st.button("Άνοιγμα / Προβολή", type="primary", use_container_width=True, key="open_html_btn"):
-                            _atlas_open_html_report_now(df, wait_slot=_html_wait_ph)
-"""
-
-    def _btn_kw(width_stretch: bool) -> str:
-        return 'width="stretch"' if width_stretch else "use_container_width=True"
-
-    pro_html_a = """            _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
-            with _pp_mid:
-                _pp_b1, _pp_b2 = st.columns(2, vertical_alignment="center")
-                with _pp_b1:
-                    if st.button(
-                        "ATLAS Pro\\n(νέο)",
-                        type="primary",
-                        use_container_width=True,
-                        key="open_html_pro_btn",
-                        help="Πλήρης HTML αναφορά Pro σε νέα καρτέλα (επιτρέψτε pop-ups).",
-                    ):
-                        _atlas_open_html_report_now(df, edition="pro", wait_slot=_html_wait_ph)
-                with _pp_b2:
-                    if st.button(
-                        "ATLAS Pro\\n(παλιότερο)",
-                        type="secondary",
-                        use_container_width=True,
-                        key="show_results_btn",
-                        help="Πλήρης ανάλυση στην εφαρμογή (όλες οι καρτέλες).",
-                    ):
-                        st.session_state['show_results'] = True
-                        st.rerun()
-            _atlas_inject_post_process_choice_buttons_style()
-"""
-    pro_html_b = """                    _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
-                    with _pp_mid:
-                        _pp_b1, _pp_b2 = st.columns(2, vertical_alignment="center")
-                        with _pp_b1:
-                            if st.button(
-                                "ATLAS Pro\\n(νέο)",
-                                type="primary",
-                                use_container_width=True,
-                                key="open_html_pro_btn",
-                                help="Πλήρης HTML αναφορά Pro σε νέα καρτέλα (επιτρέψτε pop-ups).",
-                            ):
-                                _atlas_open_html_report_now(df, edition="pro", wait_slot=_html_wait_ph)
-                        with _pp_b2:
-                            if st.button(
-                                "ATLAS Pro\\n(παλιότερο)",
-                                type="secondary",
-                                use_container_width=True,
-                                key="show_results_btn",
-                                help="Πλήρης ανάλυση στην εφαρμογή (όλες οι καρτέλες).",
-                            ):
-                                st.session_state['show_results'] = True
-                                st.rerun()
-                    _atlas_inject_post_process_choice_buttons_style()
-"""
-    if pro_html_a in body and pro_html_b in body:
-        body = body.replace(pro_html_a, new_a, 1)
-        body = body.replace(pro_html_b, new_b, 1)
-    else:
-        # Νεότερη Κυρία (παλιό): κεντραρισμένα δύο κουμπιά (ATLAS Pro / ATLAS Lite)
-        for stretch in (True, False):
-            kw = _btn_kw(stretch)
-            new_ui_a = f"""            _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
-            with _pp_mid:
-                _pp_b1, _pp_b2 = st.columns(2, vertical_alignment="center")
-                with _pp_b1:
-                    if st.button(
-                        "ATLAS Pro\\n(παλιότερο)",
-                        type="primary",
-                        {kw},
-                        key="show_results_btn",
-                        help="Πλήρης ανάλυση στην εφαρμογή (όλες οι καρτέλες).",
-                    ):
-                        st.session_state['show_results'] = True
-                        st.rerun()
-                with _pp_b2:
-                    if st.button(
-                        "ATLAS Lite\\n(γρήγορο)",
-                        type="secondary",
-                        {kw},
-                        key="open_html_btn",
-                        help="Γρήγορη πλήρης HTML αναφορά σε νέα καρτέλα (pop-ups).",
-                    ):
-                        st.session_state['open_html_report'] = True
-            _atlas_inject_post_process_choice_buttons_style()
-"""
-            new_ui_b = f"""                    _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
-                    with _pp_mid:
-                        _pp_b1, _pp_b2 = st.columns(2, vertical_alignment="center")
-                        with _pp_b1:
-                            if st.button(
-                                "ATLAS Pro\\n(παλιότερο)",
-                                type="primary",
-                                {kw},
-                                key="show_results_btn",
-                                help="Πλήρης ανάλυση στην εφαρμογή (όλες οι καρτέλες).",
-                            ):
-                                st.session_state['show_results'] = True
-                                st.rerun()
-                        with _pp_b2:
-                            if st.button(
-                                "ATLAS Lite\\n(γρήγορο)",
-                                type="secondary",
-                                {kw},
-                                key="open_html_btn",
-                                help="Γρήγορη πλήρης HTML αναφορά σε νέα καρτέλα (pop-ups).",
-                            ):
-                                st.session_state['open_html_report'] = True
-                    _atlas_inject_post_process_choice_buttons_style()
-"""
-            if new_ui_a in body and new_ui_b in body:
-                body = body.replace(new_ui_a, new_a, 1)
-                body = body.replace(new_ui_b, new_b, 1)
-                break
-        else:
-            # Παλιότερη Κυρία: τρεις στήλες, «Προβολή Αποτελεσμάτων» / «Γρήγορη Προβολή - HTML»
-            for stretch in (True, False):
-                kw = _btn_kw(stretch)
-                old_a = f"""            col1, col2, col3 = st.columns([1, 1, 1])
-            with col1:
-                if st.button("Προβολή Αποτελεσμάτων", type="primary", {kw}, key="show_results_btn"):
-                    st.session_state['show_results'] = True
-                    st.rerun()
-            with col2:
-                if st.button("Γρήγορη Προβολή - HTML", type="secondary", {kw}, key="open_html_btn"):
-                    st.session_state['open_html_report'] = True
-"""
-                old_b = f"""                    col1, col2, col3 = st.columns([1, 1, 1])
-                    with col1:
-                        if st.button("Προβολή Αποτελεσμάτων", type="primary", {kw}, key="show_results_btn"):
-                            st.session_state['show_results'] = True
-                            st.rerun()
-                    with col2:
-                        if st.button("Γρήγορη Προβολή - HTML", type="secondary", {kw}, key="open_html_btn"):
-                            st.session_state['open_html_report'] = True
-"""
-                if old_a in body and old_b in body:
-                    body = body.replace(old_a, new_a, 1)
-                    body = body.replace(old_b, new_b, 1)
-                    break
-            else:
-                raise SystemExit(
-                    "Δεν βρέθηκαν μπλοκ κουμπιών (Pro/HTML, Pro+Lite ή παλιό τριών στηλών)"
-                )
 
     body = body.replace(
         '    _app_title = "ATLAS Pro" if edition == "pro" else "ATLAS"\n'
@@ -300,41 +204,7 @@ def main() -> None:
     body = body.replace(
         "                    st.warning(_ATLAS_PRO_HTML_RECOMMEND_MSG)\n", "", 1
     )
-
-    body = body.replace(
-        """def _atlas_open_html_report_now(
-    df: pd.DataFrame,
-    *,
-    edition: str = "pro",
-    wait_slot=None,
-) -> None:
-    \"\"\"Ένα κλικ: μήνυμα αναμονής ψηλά + παραγωγή HTML (χωρίς deferred session flag).\"\"\"
-    if wait_slot is not None:
-        with wait_slot.container():
-            _atlas_show_html_wait_top()
-        _atlas_render_full_html_report_open_tab(df, edition=edition)
-        wait_slot.empty()
-    else:
-        _atlas_show_html_wait_top()
-        _atlas_render_full_html_report_open_tab(df, edition=edition)
-""",
-        """def _atlas_open_html_report_now(
-    df: pd.DataFrame,
-    *,
-    wait_slot=None,
-) -> None:
-    \"\"\"Ένα κλικ: μήνυμα αναμονής ψηλά + παραγωγή HTML (ATLAS Lite).\"\"\"
-    if wait_slot is not None:
-        with wait_slot.container():
-            _atlas_show_html_wait_top()
-        _atlas_render_full_html_report_open_tab(df)
-        wait_slot.empty()
-    else:
-        _atlas_show_html_wait_top()
-        _atlas_render_full_html_report_open_tab(df)
-""",
-        1,
-    )
+    body = body.replace("    st.warning(_ATLAS_PRO_HTML_RECOMMEND_MSG)\n\n", "", 1)
 
     # Στη Lite: μόνο αφαίρεση JS styling δύο κουμπιών (κρατάμε wait helpers)
     inj = "def _atlas_inject_post_process_choice_buttons_style() -> None:"

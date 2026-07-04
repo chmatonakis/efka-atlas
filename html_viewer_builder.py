@@ -18,7 +18,9 @@ if _kyria.exists():
     sys.path.insert(0, _kp)
 
 import datetime
+import base64
 import html as html_mod
+import io
 import json
 import re
 import unicodedata
@@ -31,6 +33,7 @@ from app_final import (
     build_yearly_print_html,
     build_count_report,
     build_count_c_dataframe,
+    build_syntaksi_annual_table,
     build_description_map,
     build_parallel_print_df,
     build_parallel_2017_print_df,
@@ -46,6 +49,7 @@ from app_final import (
     get_print_disclaimer_html,
     should_show_complex_file_warning,
     clean_numeric_value,
+    _atlas_write_df_to_excel,
     apply_negative_time_sign,
     insurance_kind_classify_count,
     format_number_greek,
@@ -67,6 +71,21 @@ from app_final import (
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+
+def _load_sheetjs_source() -> str:
+    """Διαβάζει τη vendored SheetJS (xlsx.full.min.js) για ενσωμάτωση offline."""
+    for cand in (_root / "vendor" / "xlsx.full.min.js",):
+        try:
+            if cand.exists():
+                txt = cand.read_text(encoding="utf-8")
+                # Ασφαλές embed μέσα σε <script> ... </script>
+                return txt.replace("</script>", "<\\/script>")
+        except Exception:
+            continue
+    return ""
+
+
+SHEETJS_JS = _load_sheetjs_source()
 
 EXCLUDED_PACKAGES = {"Α", "Λ", "Υ", "Ο", "Χ", "026", "899"}
 EXCLUDED_PACKAGES_LABEL = ", ".join(sorted(EXCLUDED_PACKAGES))
@@ -719,7 +738,9 @@ def build_timeline_html(source_df):
                 f'<div class="tl-ref-vline"></div></div>'
             )
 
-    period_str = f"{global_min.strftime('%d/%m/%Y')} — {global_max.strftime('%d/%m/%Y')}"
+    period_from = f"{global_min.day}/{global_min.month}/{global_min.year}"
+    period_to = f"{global_max.day}/{global_max.month}/{global_max.year}"
+    period_str = f"Περίοδος {period_from} έως {period_to}"
 
     # Δεύτερο χρονολόγιο (πακέτα): στατικό HTML ώστε η συνολική εκτύπωση να το περιλαμβάνει
     # (το JS buildPaketoTimeline τρέχει μόνο στο live viewer).
@@ -730,7 +751,8 @@ def build_timeline_html(source_df):
     return f"""
     <section class="print-section">
       <h2>Ιστορικό Ασφάλισης</h2>
-      <p class="print-description">Οπτική απεικόνιση χρονικών περιόδων ασφάλισης ανά Ταμείο. Περίοδος: {html_mod.escape(period_str)}</p>
+      <p class="print-description">Οπτική απεικόνιση χρονικών περιόδων ασφάλισης ανά Ταμείο.</p>
+      <p class="tl-period-range">{html_mod.escape(period_str)}</p>
       <div class="tl-zoom-wrapper">
         <div class="tl-zoom-controls">
           <span class="tl-zoom-label">Εστίαση:</span>
@@ -799,7 +821,8 @@ body { margin: 0; padding: 12px 14px; font-family: -apple-system, BlinkMacSystem
 .atlas-streamlit-timeline-host .tl-axis { margin-left: calc(var(--tl-label-w) + 14px); }
 .print-section { margin-bottom: 16px; }
 .print-section h2 { font-size: 1.2rem; font-weight: 700; color: #0f172a; margin: 0 0 8px 0; padding-bottom: 6px; border-bottom: 1.5px solid #e2e8f0; }
-.print-description { font-size: 13px; color: #64748b; margin: 0 0 14px 0; line-height: 1.45; }
+.print-description { font-size: 13px; color: #64748b; margin: 0 0 8px 0; line-height: 1.45; }
+.tl-period-range { text-align: center; font-size: 17px; font-weight: 700; color: #1e293b; margin: 0 0 16px 0; letter-spacing: 0.01em; }
 .tl-container { position: relative; padding-bottom: 36px; padding-top: 26px; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
 .tl-row { display: flex; align-items: center; margin-bottom: 8px; min-height: 28px; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
 .tl-label { font-size: 13px; font-weight: 600; color: #334155; text-align: right; padding-right: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; box-sizing: border-box; }
@@ -5078,13 +5101,138 @@ def _build_syntaksi_filter_js():
 """
 
 
-def _append_pro_tab_entries(df, description_map, tab_entries):
+def _sanitize_excel_sheet_name(label: str, used: set) -> str:
+    """Excel sheet name: max 31 chars, χωρίς \\ / ? * [ ] :"""
+    s = re.sub(r'[\[\]:*?/\\]', '_', str(label).strip())
+    s = (s[:31] if s else "Sheet").strip() or "Sheet"
+    base = s
+    n = 1
+    while s in used:
+        suffix = f"_{n}"
+        max_base = 31 - len(suffix)
+        s = (base[:max_base] if len(base) > max_base else base) + suffix
+        n += 1
+    used.add(s)
+    return s
+
+
+def _excel_df_copy(df):
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return None
+    try:
+        return df.copy()
+    except Exception:
+        return pd.DataFrame(df)
+
+
+def _build_excel_workbook_bytes(sheet_pairs: list) -> bytes | None:
+    """sheet_pairs: λίστα (τίτλος φύλλου, DataFrame)."""
+    if not sheet_pairs:
+        return None
+    buf = io.BytesIO()
+    used_names: set = set()
+    wrote = False
+    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+        for label, df in sheet_pairs:
+            export_df = _excel_df_copy(df)
+            if export_df is None:
+                continue
+            sheet_name = _sanitize_excel_sheet_name(label, used_names)
+            # Ίδια λογική με το Streamlit: σωστοί τύποι κελιών (αριθμός/ημερομηνία)
+            # αντί για formatted text, ώστε η εξαγωγή HTML→Excel να ταιριάζει.
+            _atlas_write_df_to_excel(writer, export_df, sheet_name, index=False)
+            wrote = True
+    if not wrote:
+        return None
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _build_apd_export_df(df, description_map=None):
+    apd_df = _build_apd_base_df(df)
+    if apd_df is None or apd_df.empty:
+        return pd.DataFrame()
+    earnings_col = _apd_earnings_col(apd_df)
+    col_order = _apd_column_order(apd_df, earnings_col)
+    records = _apd_build_records(apd_df, earnings_col, description_map)
+    if not records:
+        return pd.DataFrame()
+    default_plafond = "palios" if _apd_is_palios(df) else "neos"
+    default_params = {
+        "plafond": default_plafond,
+        "from_i": 20020101, "to_i": 0,
+        "tameio": [], "klados": [], "apodox": [],
+        "ret_mode": "all", "ret_thr": 18.0, "highlight": 21.0,
+        "totals_only": False,
+    }
+    static_rows = _apd_compute_display_rows(records, col_order, default_params)
+    rows = []
+    for r in static_rows:
+        if r.get("kind") == "empty":
+            continue
+        cells = r.get("cells") or {}
+        rows.append({c: cells.get(c, "") for c in col_order})
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+def _build_syntaksi_export_df(df, description_map=None):
+    count_df = filter_count_df(df)
+    c_df = build_count_c_dataframe(count_df, description_map or {})
+    if c_df is None or c_df.empty:
+        return pd.DataFrame()
+    try:
+        return build_syntaksi_annual_table(c_df)
+    except Exception:
+        return pd.DataFrame()
+
+
+def _count_df_for_excel(count_display_df):
+    if count_display_df is None or count_display_df.empty:
+        return pd.DataFrame()
+    _renames = {
+        'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ': 'ΑΠΟΔΟΧΕΣ',
+        'ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ': 'ΕΙΣΦΟΡΕΣ',
+        'ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ': '%',
+    }
+    out = count_display_df.rename(
+        columns={k: v for k, v in _renames.items() if k in count_display_df.columns}
+    )
+    return out.copy()
+
+
+def _excel_sheets_from_tab_order(tab_entries, excel_by_tid, audit_df):
+    """Σειρά φύλλων Excel όπως η σειρά καρτελών (χωρίς Προσωπικά / Ιστορικό)."""
+    skip_tids = {"personal", "timeline"}
+    pairs = []
+    for tid, label, _ in tab_entries:
+        if tid in skip_tids:
+            continue
+        if tid == "synopsis":
+            syn = _excel_df_copy(audit_df)
+            if syn is not None:
+                pairs.append(("Σύνοψη", syn))
+            continue
+        entry = excel_by_tid.get(tid)
+        if entry is None:
+            continue
+        if isinstance(entry, list):
+            pairs.extend(entry)
+        else:
+            pairs.append(entry)
+    return pairs
+
+
+def _append_pro_tab_entries(df, description_map, tab_entries, excel_by_tid=None):
     """Προσθέτει τις Pro-only καρτέλες στο tab_entries (σταδιακή μεταφορά από την Κυρία)."""
+    excel_by_tid = excel_by_tid if excel_by_tid is not None else {}
     # -- ΑΠΔ / Πλαφόν --
     try:
         apd_html = build_apd_with_filters(df, description_map)
         if apd_html:
             tab_entries.append(("apd", "ΑΠΔ/Πλαφόν", apd_html))
+            apd_x = _build_apd_export_df(df, description_map)
+            if apd_x is not None and not apd_x.empty:
+                excel_by_tid["apd"] = ("ΑΠΔ Πλαφόν", apd_x)
     except Exception:
         pass
 
@@ -5104,6 +5252,7 @@ def _append_pro_tab_entries(df, description_map, tab_entries):
                     body_html=_build_maindata_table_html(main_df),
                 ),
             ))
+            excel_by_tid["maindata"] = ("Κύρια Δεδομένα", main_df.copy())
     except Exception:
         pass
 
@@ -5123,6 +5272,7 @@ def _append_pro_tab_entries(df, description_map, tab_entries):
                     body_html=_build_annex_table_html(annex_df),
                 ),
             ))
+            excel_by_tid["annex"] = ("Παράρτημα", annex_df.copy())
     except Exception:
         pass
 
@@ -5134,7 +5284,7 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
              "pro" → προσθήκη επιπλέον καρτελών (Κύρια Δεδομένα, Παράρτημα, κ.λπ.).
 
     Επιστρέφει (audit_df, display_summary, count_display_df, print_style_rows, tab_entries,
-              show_complex_warning, complex_modal_body_html).
+              show_complex_warning, complex_modal_body_html, excel_sheets).
     """
     if description_map is None:
         description_map = build_description_map(df)
@@ -5177,6 +5327,7 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
         pass
 
     tab_entries = []
+    excel_by_tid = {}
 
     # -- Detect warning types for totals --
     warning_types = []
@@ -5212,6 +5363,7 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
             warning_types=warning_types,
         )
         tab_entries.append(("totals", "Σύνολα", totals_html))
+        excel_by_tid["totals"] = ("Σύνολα", display_summary.copy())
 
     # -- Count --
     if not count_display_df.empty:
@@ -5222,6 +5374,9 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
             source_df=df,
         )
         tab_entries.append(("count", "Καταμέτρηση", count_html))
+        cnt_x = _count_df_for_excel(count_display_df)
+        if cnt_x is not None and not cnt_x.empty:
+            excel_by_tid["count"] = ("Καταμέτρηση", cnt_x)
 
     # -- Συντάξιμες (Pro) — αμέσως μετά την Καταμέτρηση, εκτός αν ΤΣΜΕΔΕ μισθωτή --
     if edition == "pro" and not count_display_df.empty:
@@ -5230,6 +5385,9 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
                 syntaksi_html = build_syntaksi_with_filters(df, description_map)
                 if syntaksi_html:
                     tab_entries.append(("syntaksi", "Συντάξιμες", syntaksi_html))
+                    syn_x = _build_syntaksi_export_df(df, description_map)
+                    if syn_x is not None and not syn_x.empty:
+                        excel_by_tid["syntaksi"] = ("Συντάξιμες", syn_x)
         except Exception:
             pass
 
@@ -5261,6 +5419,13 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
                 "καθώς μπορεί να επικαλύπτονται μερικώς από άλλες εγγραφές που να έχουν ημέρες "
                 "ασφάλισης. Απαιτείται λεπτομερής έλεγχος.</p>"
             )
+            _gaps_excel = []
+            if gaps_df is not None and not gaps_df.empty:
+                _gaps_excel.append(("Κενά Διαστήματα", gaps_df.copy()))
+            if zero_duration_df is not None and not zero_duration_df.empty:
+                _gaps_excel.append(("Χωρίς ημέρες ασφ.", zero_duration_df.copy()))
+            if _gaps_excel:
+                excel_by_tid["gaps"] = _gaps_excel
             _gaps_info_sections = [
                 (
                     "info",
@@ -5331,6 +5496,7 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
                 body_html=par_html,
             ),
         ))
+        excel_by_tid["parallel"] = ("Παράλληλη", parallel_df.copy())
 
     # -- Parallel 2017+ --
     if parallel_2017_df is not None and not parallel_2017_df.empty:
@@ -5371,6 +5537,7 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
                 body_html=par2017_html,
             ),
         ))
+        excel_by_tid["parallel2017"] = ("Παράλληλη 2017+", parallel_2017_df.copy())
 
     # -- Multi employment --
     if multi_df is not None and not multi_df.empty:
@@ -5394,10 +5561,11 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
                 body_html=multi_html,
             ),
         ))
+        excel_by_tid["multi"] = ("Πολλαπλή", multi_df.copy())
 
     # -- Pro-only tabs --
     if edition == "pro":
-        _append_pro_tab_entries(df, description_map, tab_entries)
+        _append_pro_tab_entries(df, description_map, tab_entries, excel_by_tid)
 
     # -- Synopsis cards --
     _check_to_tab = {
@@ -5436,6 +5604,11 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
     # Στην προβολή HTML εμφανίζονται μόνο οι ίδιες καρτέλες με τη Lite (όχι ΑΠΔ, Κύρια Δεδομένα, Αποζημίωση, Παράρτημα)
     # Περίπλοκο αρχείο: ενσωματώνεται στον viewer (μπάρα + modal) και στην εκτύπωση ξεχωριστά.
 
+    excel_sheets = (
+        _excel_sheets_from_tab_order(tab_entries, excel_by_tid, audit_df)
+        if edition == "pro" else []
+    )
+
     return (
         audit_df,
         display_summary,
@@ -5444,6 +5617,7 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
         tab_entries,
         show_complex_warning,
         complex_modal_body_html,
+        excel_sheets,
     )
 
 
@@ -5533,6 +5707,8 @@ def build_viewer_html_document(
     full_save_suffix="ATLAS Pro.html",
     show_complex_warning=False,
     complex_modal_body_html="",
+    excel_report_b64="",
+    excel_export_enabled=False,
 ):
     """Κατασκευή πλήρους interactive HTML viewer (sidebar + tabs + JS)."""
     safe_name = html_mod.escape(client_name.strip()) if client_name.strip() else ""
@@ -5589,6 +5765,19 @@ def build_viewer_html_document(
     _save_suffix_attr = html_mod.escape(
         (full_save_suffix or "ATLAS Pro.html").strip(), quote=True
     )
+    _excel_btn = ""
+    _excel_js_var = ""
+    _excel_on = bool(excel_export_enabled or excel_report_b64)
+    _sheetjs_script = (
+        f"<script>{SHEETJS_JS}</script>" if (_excel_on and SHEETJS_JS) else ""
+    )
+    if _excel_on:
+        _excel_btn = (
+            '<button type="button" class="btn-action btn-excel" '
+            'onclick="downloadExcelReport();" '
+            'title="Εξαγωγή όλων των καρτελών σε ένα Excel (όπως εμφανίζονται)">'
+            'Εξαγωγή Excel</button>'
+        )
 
     return f"""<!DOCTYPE html>
 <html lang="el">
@@ -5599,6 +5788,7 @@ def build_viewer_html_document(
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,200..900;1,200..900&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>{VIEWER_STYLES}</style>
+{_sheetjs_script}
 </head>
 <body data-atlas-save-file="{_save_suffix_attr}">
 <div class="app-layout">
@@ -5607,6 +5797,7 @@ def build_viewer_html_document(
     <div class="sidebar-nav">{nav_items}</div>
     <div class="sidebar-footer">
       <button type="button" class="btn-action btn-save" onclick="downloadFullHtml();">Πλήρης Αποθήκευση</button>
+      {_excel_btn}
       <button type="button" class="btn-action btn-print" onclick="openPrint();">Εκτύπωση</button>
       <div class="sidebar-footer-copyright">© Syntaksi Pro - my advisor</div>
     </div>
@@ -5634,7 +5825,7 @@ var _clientName = {client_name_js};
 var _downloadFilename = {download_filename_js};
 var _printBrandSuffix = {print_brand_suffix_js};
 var _fullSaveSuffix = {full_save_suffix_js};
-{VIEWER_JS}
+{_excel_js_var}{VIEWER_JS}
 </script>
 <script>
 {LITE_FILTER_MODAL_JS}
@@ -5667,7 +5858,13 @@ def generate_full_html_report(df, client_name="", app_title="ATLAS",
         tab_entries,
         show_complex_warning,
         complex_modal_body_html,
+        excel_sheets,
     ) = build_report_tab_entries(df, description_map=description_map, edition=edition)
+
+    # Η εξαγωγή Excel γίνεται πλέον ζωντανά (client-side, από το DOM) ώστε να
+    # αντικατοπτρίζει φίλτρα/σύνολα «όπως εμφανίζονται». Δεν χρειάζεται το
+    # προ-φτιαγμένο base64 workbook· κρατάμε μόνο flag ενεργοποίησης για Pro.
+    excel_export_enabled = bool(edition == "pro" and excel_sheets)
 
     print_html = build_print_html_document(
         tab_entries,
@@ -5696,6 +5893,7 @@ def generate_full_html_report(df, client_name="", app_title="ATLAS",
         full_save_suffix=full_save_suffix,
         show_complex_warning=show_complex_warning,
         complex_modal_body_html=complex_modal_body_html,
+        excel_export_enabled=excel_export_enabled,
     )
     return viewer_html, print_html
 
@@ -5929,6 +6127,7 @@ body { font-family: """ + FONT_MAIN + """; color: #1e293b; background: #fff; }
 .sidebar-footer-copyright { margin-top: auto; padding-top: 12px; font-size: 11px; color: #94a3b8; text-align: left; }
 .btn-action { width: 100%; border: none; padding: 10px 0; border-radius: 6px; font-size: 14px; font-weight: 700; font-family: """ + FONT_MAIN + """; cursor: pointer; transition: background .15s; }
 .btn-save { background: #2563eb; color: white; } .btn-save:hover { background: #1d4ed8; }
+.btn-excel { background: #059669; color: white; } .btn-excel:hover { background: #047857; }
 .btn-print { background: #dc3545; color: white; } .btn-print:hover { background: #b91c1c; }
 html, body { height: 100%; min-height: 100vh; overflow: hidden; }
 body { overflow-x: hidden; }
@@ -6402,6 +6601,9 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .btn-fs, .btn-print-tab { width: 40px; height: 40px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; border: 1px solid transparent; transition: opacity 0.2s, background 0.15s, transform 0.15s; font-size: 18px; line-height: 1; }
 .btn-fs { background: #e0e7ff; border-color: #a5b4fc; color: #4338ca; } .btn-fs:hover { background: #6366f1; color: #fff; border-color: #4f46e5; transform: scale(1.1); }
 .btn-print-tab { background: #f0fdf4; border-color: #86efac; color: #15803d; } .btn-print-tab:hover { background: #22c55e; color: #fff; border-color: #16a34a; transform: scale(1.1); }
+.btn-xls-tab { width: 40px; height: 40px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; border: 1px solid #6ee7b7; background: #ecfdf5; color: #047857; transition: opacity 0.2s, background 0.15s, transform 0.15s; font-size: 18px; line-height: 1; }
+.btn-xls-tab:hover { background: #059669; color: #fff; border-color: #047857; transform: scale(1.1); }
+@media print { .btn-xls-tab { display: none !important; } }
 .btn-json-syntaksi { height: 40px; padding: 0 14px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; border: 1px solid #93c5fd; background: #eff6ff; color: #1d4ed8; font-size: 13px; font-weight: 600; font-family: """ + FONT_MAIN + """; white-space: nowrap; transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.15s; }
 .btn-json-syntaksi:hover:not([disabled]) { background: #2563eb; color: #fff; border-color: #1d4ed8; transform: scale(1.03); }
 .btn-json-syntaksi[disabled] { opacity: 0.5; cursor: not-allowed; }
@@ -6412,6 +6614,9 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .table-fullscreen .fs-toolbar-actions { display: flex; align-items: center; gap: 10px; }
 .table-fullscreen .fs-print-btn { background: #dcfce7; border: 1px solid #86efac; border-radius: 8px; padding: 8px 16px; font-size: 14px; font-weight: 600; color: #15803d; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: background 0.15s, color 0.15s; }
 .table-fullscreen .fs-print-btn:hover { background: #22c55e; color: #fff; border-color: #16a34a; }
+.table-fullscreen .fs-json-btn { background: #eff6ff; border: 1px solid #93c5fd; border-radius: 8px; padding: 8px 16px; font-size: 14px; font-weight: 600; color: #1d4ed8; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: background 0.15s, color 0.15s; white-space: nowrap; }
+.table-fullscreen .fs-json-btn:hover:not([disabled]) { background: #2563eb; color: #fff; border-color: #1d4ed8; }
+.table-fullscreen .fs-json-btn[disabled] { opacity: 0.5; cursor: not-allowed; }
 .table-fullscreen .fs-close { background: #fee2e2; border: 1px solid #fca5a5; border-radius: 8px; width: 38px; height: 38px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #dc2626; transition: all 0.15s; }
 .table-fullscreen .fs-close:hover { background: #dc2626; color: #fff; }
 .table-fullscreen .fs-body { flex: 1; overflow: auto; padding: 16px 24px; display: flex; flex-direction: column; min-height: 0; }
@@ -6608,6 +6813,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .tl-gap { background: repeating-linear-gradient(45deg,#fca5a5,#fca5a5 3px,#fecaca 3px,#fecaca 6px) !important; border: 1px solid #ef4444; opacity: 0.7; }
 .tl-zero { background: repeating-linear-gradient(-45deg,#a8a29e,#a8a29e 3px,#d6d3d1 3px,#d6d3d1 6px) !important; border: 1px solid #78716c; opacity: 0.85; }
 .tl-legend-zero { background: repeating-linear-gradient(-45deg,#a8a29e,#a8a29e 3px,#d6d3d1 3px,#d6d3d1 6px) !important; border: 1px solid #78716c; }
+.tl-period-range { text-align: center; font-size: 18px; font-weight: 700; color: #1e293b; margin: 0 0 16px 0; letter-spacing: 0.01em; font-style: normal; }
 .tl-zoom-wrapper { margin-top: 8px; border: 1px solid #e2e8f0; border-radius: 10px; overflow-x: hidden; overflow-y: auto; max-height: 75vh; min-height: 420px; background: #fafafa; max-width: 100%; box-sizing: border-box; }
 .tl-zoom-controls { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #f1f5f9; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
 .tl-zoom-label { font-size: 13px; font-weight: 600; color: #475569; }
@@ -6812,13 +7018,14 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .totals-filters input.filter-date:hover { border-color: #6366f1 !important; }
 .totals-filters input.filter-date:focus { border: 1px solid #6366f1 !important; outline: none !important; box-shadow: none !important; }
 .totals-filters .filter-modal-group { min-width: 160px; flex: 1 1 180px; max-width: 320px; }
+.totals-filters > .filter-modal-group[data-filter-key="paketo"] { flex: 1 1 210px; max-width: 350px; }
 .totals-filters .filter-modal-trigger { display: inline-flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; min-width: 0; padding: 10px 14px; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 16px; color: #334155; cursor: pointer; user-select: none; font-family: inherit; text-align: left; transition: border-color .15s, background .15s, color .15s; }
 .totals-filters .filter-modal-trigger:hover { border-color: #6366f1; color: #4f46e5; background: #eef2ff; }
 .totals-filters .filter-modal-group.has-selection .filter-modal-trigger { border-color: #6366f1; background: #eef2ff; color: #4338ca; }
 .totals-filters .filter-modal-trigger-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .totals-filters .filter-modal-badge { flex-shrink: 0; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; background: #6366f1; color: #fff; font-size: 12px; font-weight: 700; line-height: 22px; text-align: center; }
 .count-filters { margin-bottom: 20px; padding: 16px 20px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
-.count-filters-grid { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)) minmax(170px, 1.15fr) 118px 118px auto; grid-template-rows: auto auto; gap: 12px 14px; align-items: start; }
+.count-filters-grid { display: grid; grid-template-columns: minmax(138px, 0.92fr) minmax(138px, 0.92fr) minmax(138px, 0.92fr) minmax(182px, 1.28fr) minmax(158px, 1.02fr) 118px 118px auto; grid-template-rows: auto auto; gap: 12px 14px; align-items: start; }
 .count-filters-grid > .filter-modal-group:nth-child(1) { grid-column: 1; grid-row: 1; }
 .count-filters-grid > .filter-modal-group:nth-child(2) { grid-column: 2; grid-row: 1; }
 .count-filters-grid > .filter-modal-group:nth-child(3) { grid-column: 3; grid-row: 1; }
@@ -6866,6 +7073,26 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .count-filters .filter-modal-group.has-selection .filter-modal-trigger { border-color: #6366f1; background: #eef2ff; color: #4338ca; }
 .count-filters .filter-modal-trigger-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .count-filters .filter-modal-badge { flex-shrink: 0; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; background: #6366f1; color: #fff; font-size: 12px; font-weight: 700; line-height: 22px; text-align: center; }
+.count-filters-grid > .filter-modal-group[data-filter-key="klados"] .filter-modal-trigger,
+.totals-filters > .filter-modal-group[data-filter-key="paketo"] .filter-modal-trigger {
+  background: #fecaca; border-color: #f87171; color: #991b1b; font-weight: 700;
+}
+.count-filters-grid > .filter-modal-group[data-filter-key="klados"] .filter-modal-trigger-label,
+.totals-filters > .filter-modal-group[data-filter-key="paketo"] .filter-modal-trigger-label { font-weight: 700; }
+.count-filters-grid > .filter-modal-group[data-filter-key="klados"] .filter-modal-trigger:hover,
+.totals-filters > .filter-modal-group[data-filter-key="paketo"] .filter-modal-trigger:hover {
+  background: #fca5a5; border-color: #ef4444; color: #7f1d1d;
+}
+.count-filters-grid > .filter-modal-group[data-filter-key="klados"].has-selection .filter-modal-trigger,
+.totals-filters > .filter-modal-group[data-filter-key="paketo"].has-selection .filter-modal-trigger {
+  background: #f87171; border-color: #dc2626; color: #fff;
+}
+.count-filters-grid > .filter-modal-group[data-filter-key="klados"].has-selection .filter-modal-trigger:hover,
+.totals-filters > .filter-modal-group[data-filter-key="paketo"].has-selection .filter-modal-trigger:hover {
+  background: #ef4444; border-color: #b91c1c; color: #fff;
+}
+.count-filters-grid > .filter-modal-group[data-filter-key="klados"] .filter-modal-badge,
+.totals-filters > .filter-modal-group[data-filter-key="paketo"] .filter-modal-badge { background: #dc2626; }
 .filter-selected-label { font-size: 1.3em; font-weight: 700; color: #334155; margin-top: 6px; line-height: 1.3; min-height: 1.3em; display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; overflow-x: auto; }
 .filter-selected-chip { display: inline-block; padding: 4px 10px; background: #dc3545; border: none; border-radius: 5px; color: #fff; font-size: 12.6px; font-weight: 400; cursor: pointer; font-family: inherit; transition: background .15s; }
 .filter-selected-chip:hover { background: #b02a37; }
@@ -7438,18 +7665,132 @@ function _syntaksiPrintSectionContent(sec){if(!sec)sec=document.getElementById('
 function _patchApdInPrintHtml(html){var live=document.getElementById('apd-section');if(!live||typeof html!=='string'||!html)return html||'';if(typeof window._atlasApdApply==='function')window._atlasApdApply();var liveMount=live.querySelector('#apd-tables-mount');if(!liveMount)return html;try{var doc=new DOMParser().parseFromString(html,'text/html');var printMount=doc.getElementById('apd-tables-mount');if(!printMount)return html;printMount.innerHTML=liveMount.innerHTML;var livePl=document.getElementById('apd-plafond');var printPl=doc.getElementById('apd-plafond');if(livePl&&printPl){printPl.value=livePl.value;Array.from(printPl.options).forEach(function(o){if(o.value===livePl.value)o.setAttribute('selected','selected');else o.removeAttribute('selected');});}return'<!DOCTYPE html>\n'+doc.documentElement.outerHTML;}catch(e){return html;}}
 function _openPrintWindow(printDoc){var w=window.open('','_blank');w.document.write(printDoc);w.document.close();w.focus();setTimeout(function(){w.print();w.close();},400);}
 function printSection(el){if(typeof updatePersonalTitle==='function')updatePersonalTitle();var source=el.classList&&el.classList.contains('print-section')?el:(el.closest&&el.closest('.print-section')||el);var apdSec=(source&&source.id==='apd-section')?source:(source&&source.querySelector?source.querySelector('#apd-section'):null)||(source&&source.closest?source.closest('#apd-section'):null);if(apdSec){var apdTitle=(apdSec.querySelector('h2')&&apdSec.querySelector('h2').textContent)||'ΑΠΔ/Πλαφόν';_openPrintWindow(buildSinglePrintDoc(apdTitle,_apdPrintSectionContent(apdSec)));return;}var synSec=(source&&source.id==='syntaksi-section')?source:(source&&source.querySelector?source.querySelector('#syntaksi-section'):null)||(source&&source.closest?source.closest('#syntaksi-section'):null);if(synSec){var synTitle=(synSec.querySelector('h2')&&synSec.querySelector('h2').textContent)||'Συντάξιμες Αποδοχές';_openPrintWindow(buildSyntaksiPrintDoc(synTitle,_syntaksiPrintSectionContent(synSec)));return;}if(typeof persistInteractiveValues==='function')persistInteractiveValues(source);var clone=source.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var title=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'ATLAS';var bodyContent;var totalsTable=clone.querySelector('#totals-filter-table');if(totalsTable){var h2Text=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'Σύνολα';bodyContent='<div class="print-section"><h2>'+h2Text.replace(/</g,'&lt;')+'</h2>'+totalsTable.outerHTML+'</div>';}else{bodyContent=clone.outerHTML;}_openPrintWindow(buildSinglePrintDoc(title,bodyContent));}
-function openTableFs(el){var overlay=document.createElement('div');overlay.className='table-fullscreen';overlay.id='fs-overlay';var section=el.classList.contains('print-section')?el:el.closest('.print-section');var source=section||el;var heading=source.querySelector?source.querySelector('h2'):null;var titleText=heading?heading.textContent:'Πίνακας';var hasInteractive=source.querySelector&&source.querySelector('script');var toolbar=document.createElement('div');toolbar.className='fs-toolbar';toolbar.innerHTML='<span class="fs-title">'+titleText+'</span>';var actions=document.createElement('div');actions.className='fs-toolbar-actions';var printBtn=document.createElement('button');printBtn.className='fs-print-btn';printBtn.innerHTML='🖨 Εκτύπωση';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(){var bodyEl=overlay.querySelector('.fs-body');if(bodyEl){var apdSec=bodyEl.querySelector('#apd-section');if(apdSec){_openPrintWindow(buildSinglePrintDoc(titleText,_apdPrintSectionContent(apdSec)));return;}var synSec=bodyEl.querySelector('#syntaksi-section');if(synSec){_openPrintWindow(buildSyntaksiPrintDoc(titleText,_syntaksiPrintSectionContent(synSec)));return;}if(typeof persistInteractiveValues==='function')persistInteractiveValues(bodyEl);var clone=bodyEl.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var totalsTable=clone.querySelector('#totals-filter-table');var bodyContent=totalsTable?'<div class="print-section"><h2>'+(titleText.replace(/</g,'&lt;')||'Σύνολα')+'</h2>'+totalsTable.outerHTML+'</div>':clone.innerHTML;_openPrintWindow(buildSinglePrintDoc(titleText,bodyContent));}};actions.appendChild(printBtn);var closeBtn=document.createElement('button');closeBtn.className='fs-close';closeBtn.innerHTML='✕';closeBtn.title='Κλείσιμο (Esc)';closeBtn.onclick=closeTableFs;actions.appendChild(closeBtn);toolbar.appendChild(actions);var body=document.createElement('div');body.className='fs-body';if(hasInteractive){var placeholder=document.createElement('div');placeholder.id='fs-placeholder';placeholder.style.display='none';source.parentNode.insertBefore(placeholder,source);body.appendChild(source);overlay._fsSource=source;overlay._fsPlaceholder=placeholder;}else{body.appendChild(source.cloneNode(true));}overlay.appendChild(toolbar);overlay.appendChild(body);document.body.appendChild(overlay);document.body.style.overflow='hidden';}
+function openTableFs(el){var overlay=document.createElement('div');overlay.className='table-fullscreen';overlay.id='fs-overlay';var section=el.classList.contains('print-section')?el:el.closest('.print-section');var source=section||el;var heading=source.querySelector?source.querySelector('h2'):null;var titleText=heading?heading.textContent:'Πίνακας';var hasInteractive=source.querySelector&&source.querySelector('script');var toolbar=document.createElement('div');toolbar.className='fs-toolbar';toolbar.innerHTML='<span class="fs-title">'+titleText+'</span>';var actions=document.createElement('div');actions.className='fs-toolbar-actions';var printBtn=document.createElement('button');printBtn.className='fs-print-btn';printBtn.innerHTML='🖨 Εκτύπωση';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(){var bodyEl=overlay.querySelector('.fs-body');if(bodyEl){var apdSec=bodyEl.querySelector('#apd-section');if(apdSec){_openPrintWindow(buildSinglePrintDoc(titleText,_apdPrintSectionContent(apdSec)));return;}var synSec=bodyEl.querySelector('#syntaksi-section');if(synSec){_openPrintWindow(buildSyntaksiPrintDoc(titleText,_syntaksiPrintSectionContent(synSec)));return;}if(typeof persistInteractiveValues==='function')persistInteractiveValues(bodyEl);var clone=bodyEl.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var totalsTable=clone.querySelector('#totals-filter-table');var bodyContent=totalsTable?'<div class="print-section"><h2>'+(titleText.replace(/</g,'&lt;')||'Σύνολα')+'</h2>'+totalsTable.outerHTML+'</div>':clone.innerHTML;_openPrintWindow(buildSinglePrintDoc(titleText,bodyContent));}};actions.appendChild(printBtn);if(typeof XLSX!=='undefined'){var xlsFsBtn=document.createElement('button');xlsFsBtn.className='fs-print-btn';xlsFsBtn.innerHTML='📊 Excel';xlsFsBtn.title='Εξαγωγή αυτού του πίνακα σε Excel (όπως εμφανίζεται)';xlsFsBtn.onclick=function(){var bodyEl=overlay.querySelector('.fs-body');if(bodyEl)exportTabExcel(bodyEl,titleText||'Πίνακας');};actions.appendChild(xlsFsBtn);}if(source&&source.id==='syntaksi-section'){var jsonFsBtn=document.createElement('button');jsonFsBtn.className='fs-json-btn';jsonFsBtn.innerHTML='JSON για Syntaksi Pro 3';jsonFsBtn.title='Εξαγωγή JSON για Syntaksi Pro 3';var liveJson=document.getElementById('syntaksi-json-dl');if(liveJson&&liveJson.disabled)jsonFsBtn.disabled=true;jsonFsBtn.onclick=function(){var dl=document.getElementById('syntaksi-json-dl');if(dl&&!dl.disabled)dl.click();else showToast('Δεν υπάρχουν δεδομένα για JSON.');};actions.appendChild(jsonFsBtn);}var closeBtn=document.createElement('button');closeBtn.className='fs-close';closeBtn.innerHTML='✕';closeBtn.title='Κλείσιμο (Esc)';closeBtn.onclick=closeTableFs;actions.appendChild(closeBtn);toolbar.appendChild(actions);var body=document.createElement('div');body.className='fs-body';if(hasInteractive){var placeholder=document.createElement('div');placeholder.id='fs-placeholder';placeholder.style.display='none';source.parentNode.insertBefore(placeholder,source);body.appendChild(source);overlay._fsSource=source;overlay._fsPlaceholder=placeholder;}else{body.appendChild(source.cloneNode(true));}overlay.appendChild(toolbar);overlay.appendChild(body);document.body.appendChild(overlay);document.body.style.overflow='hidden';}
 function closeTableFs(){var overlay=document.getElementById('fs-overlay');if(overlay){if(overlay._fsSource&&overlay._fsPlaceholder){overlay._fsPlaceholder.parentNode.insertBefore(overlay._fsSource,overlay._fsPlaceholder);overlay._fsPlaceholder.remove();}overlay.remove();document.body.style.overflow='';}}
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeTableFs();});
 function _patchSyntaksiInPrintHtml(html){var live=document.getElementById('syntaksi-section');if(!live||typeof html!=='string'||!html)return html||'';var pb=(typeof window._atlasSyntaksiGetPrintBody==='function')?window._atlasSyntaksiGetPrintBody():null;if(!pb||!pb.ok)return html;try{var doc=new DOMParser().parseFromString(html,'text/html');var sec=doc.getElementById('syntaksi-section');if(!sec)return html;var printMount=doc.getElementById('syntaksi-table-mount');if(printMount){printMount.innerHTML=pb.tableHtml;printMount.removeAttribute('hidden');printMount.classList.add('syntaksi-print-table-mount');}var pe=doc.getElementById('syntaksi-empty');if(pe)pe.setAttribute('hidden','hidden');var fb=doc.getElementById('syntaksi-filters-bar');if(fb)fb.setAttribute('hidden','hidden');var act=doc.getElementById('syntaksi-json-dl');if(act)act.setAttribute('hidden','hidden');var liveMetrics=sec.querySelector('#syntaksi-metrics-wrap');if(liveMetrics)liveMetrics.setAttribute('hidden','hidden');var sumMount=sec.querySelector('.syntaksi-print-summary-mount');if(!sumMount){sumMount=doc.createElement('div');sumMount.className='syntaksi-print-summary-mount syntaksi-print';var mnt=sec.querySelector('#syntaksi-table-mount');if(mnt)sec.insertBefore(sumMount,mnt);else sec.appendChild(sumMount);}sumMount.innerHTML=pb.summaryHtml;sec.classList.add('syntaksi-print');var h2=sec.querySelector('h2');if(h2&&!sec.querySelector('h1.syntaksi-print-h1')){var h1=doc.createElement('h1');h1.className='syntaksi-print-h1';h1.textContent=h2.textContent;h2.replaceWith(h1);}var oldDesc=sec.querySelector('p.print-description:not(.syntaksi-print-calc-note)');if(oldDesc)oldDesc.setAttribute('hidden','hidden');if(!sec.querySelector('.syntaksi-print-disclaimer')&&pb.disclaimerHtml){var disc=doc.createElement('div');disc.className='syntaksi-print-disclaimer';disc.innerHTML=pb.disclaimerHtml;sec.appendChild(disc);}return'<!DOCTYPE html>\n'+doc.documentElement.outerHTML;}catch(e){return html;}}
 function openPrint(){if(typeof updatePersonalTitle==='function')updatePersonalTitle();if(typeof persistInteractiveValues==='function')persistInteractiveValues(document.body);var safeName=(typeof _clientName==='string'?_clientName:'').trim().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');var html=_printHtml;if(typeof _patchApdInPrintHtml==='function')html=_patchApdInPrintHtml(html);if(typeof _patchSyntaksiInPrintHtml==='function')html=_patchSyntaksiInPrintHtml(html);if(safeName)html=html.replace(/<body>/,'<body><div class="prt-name">'+safeName+'</div>');var blob=new Blob([html],{type:'text/html;charset=utf-8'});var url=URL.createObjectURL(blob);window.open(url,'_blank');}
 function getFullSaveFilename(){var n=document.getElementById('personal_fullname');var t=document.getElementById('personal_tameio');var ak=document.getElementById('personal_amka');var name=(n&&n.value)?n.value.trim():'';var tameio=(t&&t.options[t.selectedIndex])?t.options[t.selectedIndex].text.trim():'';var amka=(ak&&ak.value)?ak.value.trim():'';function sanitize(s){return (s||'').replace(/[\s\/\\:*?"<>|]+/g,' ').trim().replace(/\s+/g,'_')||'';}var a=sanitize(name),b=sanitize(tameio),c=sanitize(amka);var parts=[a,b,c].filter(Boolean);var ds=document.body&&document.body.getAttribute('data-atlas-save-file');var suf=(ds&&String(ds).trim())?String(ds).trim():((typeof _fullSaveSuffix==='string'&&_fullSaveSuffix)?_fullSaveSuffix:'ATLAS Pro.html');return (parts.length?parts.join('_')+'_':'')+suf;}
 function persistInteractiveValues(root){var r=root||document.body;if(!r||!r.querySelectorAll)return;r.querySelectorAll('input').forEach(function(inp){var t=(inp.type||'').toLowerCase();if(t==='checkbox'||t==='radio'){if(inp.checked)inp.setAttribute('checked','checked');else inp.removeAttribute('checked');}else if(t!=='file'&&t!=='button'&&t!=='submit'&&t!=='image'){inp.setAttribute('value',inp.value);}});r.querySelectorAll('textarea').forEach(function(ta){ta.textContent=ta.value;});r.querySelectorAll('select').forEach(function(sel){Array.from(sel.options).forEach(function(opt){if(opt.selected)opt.setAttribute('selected','selected');else opt.removeAttribute('selected');});});}
+function getExcelSaveFilename(){var base=(typeof getFullSaveFilename==='function'?getFullSaveFilename():(_downloadFilename||'ATLAS Pro.html'));if(/\.html$/i.test(base))return base.replace(/\.html$/i,'.xlsx');return base.replace(/\.(xlsx)?$/i,'')+'.xlsx';}
+/* ===== Excel export (ζωντανό, από DOM, μέσω SheetJS) ===== */
+function _atlasExcelReady(){return typeof XLSX!=='undefined'&&XLSX&&XLSX.utils;}
+function _atlasCellText(td){return (td.textContent||'').replace(/\u00a0/g,' ').replace(/\s+/g,' ').trim();}
+function _atlasRowVisible(tr){if(!tr)return false;if(tr.hasAttribute('hidden'))return false;if(tr.getAttribute('aria-hidden')==='true')return false;var st=window.getComputedStyle(tr);if(st&&st.display==='none')return false;return true;}
+function _atlasCellVisible(td){var st=window.getComputedStyle(td);if(st&&(st.display==='none'||st.visibility==='hidden'))return false;return true;}
+function _atlasParseCell(raw){
+  if(raw==null)return {t:'s',v:''};
+  var s=String(raw).replace(/\u00a0/g,' ').replace(/\s+/g,' ').trim();
+  if(s===''||s==='-'||s==='—')return {t:'s',v:''};
+  var dm=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(dm){var dd=parseInt(dm[1],10),mm=parseInt(dm[2],10),yy=parseInt(dm[3],10);var dt=new Date(yy,mm-1,dd,12,0,0);if(!isNaN(dt.getTime()))return {t:'d',v:dt,z:'dd/mm/yyyy'};}
+  if(!/\d/.test(s))return {t:'s',v:s};
+  var body=s.replace(/€|ΔΡΧ|%/g,'').replace(/[A-Za-zΑ-Ωα-ωΆ-Ώά-ώ]/g,'').trim();
+  var neg=false;
+  if(/^\(.*\)$/.test(body)){neg=true;body=body.slice(1,-1).trim();}
+  body=body.replace(/\u2212/g,'-');
+  if(/^-/.test(body)){neg=true;body=body.replace(/^-+/,'').trim();}
+  if(/-$/.test(body)){neg=true;body=body.replace(/-+$/,'').trim();}
+  body=body.replace(/\s/g,'');
+  if(!/^[\d.,]+$/.test(body)||!/\d/.test(body))return {t:'s',v:s};
+  var hadGroup=false,decimals=0,numStr;
+  if(body.indexOf(',')>=0){
+    var parts=body.split(',');var intp=parts[0];var decp=parts.slice(1).join('');
+    hadGroup=/^\d{1,3}(\.\d{3})+$/.test(intp);intp=intp.replace(/\./g,'');decimals=decp.length;numStr=intp+'.'+decp;
+  }else if(body.indexOf('.')>=0){
+    if(/^\d{1,3}(\.\d{3})+$/.test(body)){hadGroup=true;numStr=body.replace(/\./g,'');decimals=0;}
+    else{numStr=body;decimals=(body.split('.')[1]||'').length;hadGroup=false;}
+  }else{numStr=body;decimals=0;hadGroup=false;}
+  var num=parseFloat(numStr);
+  if(isNaN(num))return {t:'s',v:s};
+  if(neg)num=-num;
+  var intFmt=hadGroup?'#,##0':'0';
+  var z=decimals>0?(intFmt+'.'+new Array(decimals+1).join('0')):intFmt;
+  return {t:'n',v:num,z:z};
+}
+function _atlasExtractTable(table){
+  var rowEls=[],headFlags=[];
+  function add(list,head){for(var i=0;i<list.length;i++){if(_atlasRowVisible(list[i])){rowEls.push(list[i]);headFlags.push(head);}}}
+  if(table.tHead)add(table.tHead.rows,true);
+  for(var b=0;b<table.tBodies.length;b++)add(table.tBodies[b].rows,false);
+  if(table.tFoot)add(table.tFoot.rows,false);
+  var cells=[],occ={};
+  for(var r=0;r<rowEls.length;r++){
+    var tds=rowEls[r].cells,c=0;
+    for(var k=0;k<tds.length;k++){
+      var td=tds[k];
+      if(!_atlasCellVisible(td))continue;
+      while(occ[r+'_'+c])c++;
+      var cs=td.colSpan||1,rs=td.rowSpan||1;
+      var val=headFlags[r]?{t:'s',v:_atlasCellText(td)}:_atlasParseCell(_atlasCellText(td));
+      for(var i=0;i<rs;i++){for(var j=0;j<cs;j++){var rr=r+i,cc=c+j;occ[rr+'_'+cc]=true;if(!cells[rr])cells[rr]=[];if(cells[rr][cc]===undefined)cells[rr][cc]=(i===0&&j===0)?val:null;}}
+      c+=cs;
+    }
+  }
+  return {cells:cells,headRows:(table.tHead&&table.tHead.rows.length?1:0)};
+}
+function _atlasHeaderSig(cells){if(!cells.length)return '';return (cells[0]||[]).map(function(o){return o&&o.v!=null?String(o.v):'';}).join('\u0001');}
+function _atlasCellsToSheet(cells){
+  var ws={},maxR=cells.length,maxC=0,r,c;
+  for(r=0;r<maxR;r++){if(cells[r]&&cells[r].length>maxC)maxC=cells[r].length;}
+  for(r=0;r<maxR;r++){var row=cells[r];if(!row)continue;for(c=0;c<row.length;c++){var cell=row[c];if(cell==null)continue;if(cell.t==='s'&&cell.v==='')continue;var addr=XLSX.utils.encode_cell({r:r,c:c});var o={t:cell.t,v:cell.v};if(cell.z)o.z=cell.z;ws[addr]=o;}}
+  ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:Math.max(maxR-1,0),c:Math.max(maxC-1,0)}});
+  return ws;
+}
+function _atlasSheetName(label,used){var s=String(label||'Φύλλο').replace(/[\[\]:*?\/\\]/g,'_').trim().slice(0,31)||'Φύλλο';var base=s,n=1;while(used[s]){var suf='_'+n;s=base.slice(0,31-suf.length)+suf;n++;}used[s]=true;return s;}
+function _atlasSanitizeFilename(s){return String(s||'ATLAS').replace(/[\/\\:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim();}
+function _atlasTabLabel(tid){var el=document.querySelector('.nav-item[data-tab="'+tid+'"]');return el?el.textContent.trim():tid;}
+function _atlasYearLabelBefore(table){var sec=table.closest?table.closest('.year-section'):null;if(sec){var h=sec.querySelector('.year-heading');if(h)return h.textContent.trim();}return '';}
+function _atlasPaneToSheets(root,label){
+  var tables=root.querySelectorAll('table.print-table');
+  var sheets=[],cur=null,curSig=null;
+  for(var i=0;i<tables.length;i++){
+    var ext=_atlasExtractTable(tables[i]);
+    if(!ext.cells.length)continue;
+    var sig=_atlasHeaderSig(ext.cells);
+    var yl=_atlasYearLabelBefore(tables[i]);
+    if(cur&&sig===curSig){
+      if(yl)cur.cells.push([{t:'s',v:yl}]);
+      for(var r=ext.headRows;r<ext.cells.length;r++)cur.cells.push(ext.cells[r]);
+    }else{
+      cur={name:label,cells:ext.cells.slice()};curSig=sig;sheets.push(cur);
+      if(yl)cur.cells.splice(ext.headRows,0,[{t:'s',v:yl}]);
+    }
+  }
+  if(sheets.length>1){for(var s=0;s<sheets.length;s++)sheets[s].name=label+' '+(s+1);}
+  return sheets;
+}
+function _atlasDownloadSheets(sheets,filename){
+  if(!_atlasExcelReady()){showToast('Δεν φορτώθηκε η βιβλιοθήκη Excel.');return;}
+  if(!sheets||!sheets.length){showToast('Δεν βρέθηκαν δεδομένα για εξαγωγή.');return;}
+  var wb=XLSX.utils.book_new(),used={};
+  sheets.forEach(function(sh){var ws=_atlasCellsToSheet(sh.cells);XLSX.utils.book_append_sheet(wb,ws,_atlasSheetName(sh.name,used));});
+  try{XLSX.writeFile(wb,filename,{cellDates:true});showToast('Λήφθηκε το Excel.');}catch(e){console.error(e);showToast('Σφάλμα εξαγωγής Excel.');}
+}
+function _atlasBaseName(){var base=(typeof getFullSaveFilename==='function'?getFullSaveFilename():(_downloadFilename||'ATLAS Pro.html'));return base.replace(/\.html$/i,'');}
+function exportTabExcel(sourceEl,label){
+  var sheets=_atlasPaneToSheets(sourceEl,label||'Πίνακας');
+  if(!sheets.length&&sourceEl.matches&&sourceEl.matches('table.print-table')){var ext=_atlasExtractTable(sourceEl);if(ext.cells.length)sheets=[{name:label||'Πίνακας',cells:ext.cells}];}
+  _atlasDownloadSheets(sheets,_atlasSanitizeFilename(_atlasBaseName()+' - '+(label||'Πίνακας'))+'.xlsx');
+}
+function downloadExcelReport(){
+  if(!_atlasExcelReady()){showToast('Δεν φορτώθηκε η βιβλιοθήκη Excel.');return;}
+  var sheets=[],panes=document.querySelectorAll('.tab-pane');
+  for(var i=0;i<panes.length;i++){
+    var pane=panes[i],tid=(pane.id||'').replace(/^pane-/,'');
+    if(tid==='personal'||tid==='timeline'||tid==='syntaksi')continue;
+    var label=_atlasTabLabel(tid)||tid;
+    var ps=_atlasPaneToSheets(pane,label);
+    for(var j=0;j<ps.length;j++)sheets.push(ps[j]);
+  }
+  if(!sheets.length){showToast('Δεν υπάρχουν δεδομένα για εξαγωγή.');return;}
+  _atlasDownloadSheets(sheets,(typeof getExcelSaveFilename==='function'?getExcelSaveFilename():'ATLAS Pro.xlsx'));
+}
 function downloadFullHtml(){persistInteractiveValues(document.body);var html='<!DOCTYPE html>\n'+document.documentElement.outerHTML;var blob=new Blob([html],{type:'text/html;charset=utf-8'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=(typeof getFullSaveFilename==='function'?getFullSaveFilename():_downloadFilename);a.click();URL.revokeObjectURL(a.href);}
 function showToast(message){var container=document.getElementById('toast-container');var toast=document.createElement('div');toast.className='toast';toast.textContent=message;container.appendChild(toast);void toast.offsetWidth;toast.classList.add('show');setTimeout(function(){toast.classList.remove('show');setTimeout(function(){if(container.contains(toast))container.removeChild(toast);},300);},2000);}
 document.addEventListener('click',function(e){var target=e.target.closest('.copy-target');if(!target||target.closest('#pane-synopsis'))return;var text=target.innerText.trim();if(text&&text!=='-'&&text!==''){navigator.clipboard.writeText(text).then(function(){showToast('Αντιγράφηκε: '+text);}).catch(function(err){console.error('Copy failed:',err);});}});
-document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.print-section').forEach(function(sec){if(sec.closest('#pane-personal'))return;var actions=document.createElement('div');actions.className='section-actions';if(sec.id==='syntaksi-section'){var jsonBtn=sec.querySelector('#syntaksi-json-dl');if(jsonBtn){jsonBtn.removeAttribute('hidden');actions.appendChild(jsonBtn);}}var printBtn=document.createElement('button');printBtn.className='btn-print-tab';printBtn.innerHTML='🖨';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(e){e.stopPropagation();printSection(sec);};actions.appendChild(printBtn);if(!sec.closest('#pane-synopsis')){var fsBtn=document.createElement('button');fsBtn.className='btn-fs';fsBtn.innerHTML='⛶';fsBtn.title='Πλήρης οθόνη';fsBtn.onclick=function(e){e.stopPropagation();openTableFs(sec);};actions.appendChild(fsBtn);}sec.appendChild(actions);});
-document.querySelectorAll('table.print-table').forEach(function(tbl){if(tbl.closest('.print-section'))return;var wrapper=document.createElement('div');wrapper.className='table-container';tbl.parentNode.insertBefore(wrapper,tbl);wrapper.appendChild(tbl);var actions=document.createElement('div');actions.className='section-actions';var printBtn=document.createElement('button');printBtn.className='btn-print-tab';printBtn.innerHTML='🖨';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(e){e.stopPropagation();printSection(tbl);};var fsBtn=document.createElement('button');fsBtn.className='btn-fs';fsBtn.innerHTML='⛶';fsBtn.title='Πλήρης οθόνη';fsBtn.onclick=function(e){e.stopPropagation();openTableFs(tbl);};actions.appendChild(printBtn);actions.appendChild(fsBtn);wrapper.appendChild(actions);});
+document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.print-section').forEach(function(sec){if(sec.closest('#pane-personal'))return;var actions=document.createElement('div');actions.className='section-actions';if(sec.id==='syntaksi-section'){var jsonBtn=sec.querySelector('#syntaksi-json-dl');if(jsonBtn){jsonBtn.removeAttribute('hidden');actions.appendChild(jsonBtn);}}var printBtn=document.createElement('button');printBtn.className='btn-print-tab';printBtn.innerHTML='🖨';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(e){e.stopPropagation();printSection(sec);};actions.appendChild(printBtn);if(!sec.closest('#pane-synopsis')){var fsBtn=document.createElement('button');fsBtn.className='btn-fs';fsBtn.innerHTML='⛶';fsBtn.title='Πλήρης οθόνη';fsBtn.onclick=function(e){e.stopPropagation();openTableFs(sec);};actions.appendChild(fsBtn);}if(typeof XLSX!=='undefined'&&(sec.querySelector('table.print-table')||sec.id==='syntaksi-section')){var xlsBtn=document.createElement('button');xlsBtn.className='btn-xls-tab';xlsBtn.innerHTML='📊';xlsBtn.title='Εξαγωγή αυτού του πίνακα σε Excel (όπως εμφανίζεται)';xlsBtn.onclick=function(e){e.stopPropagation();var pane=sec.closest('.tab-pane');var tid=pane?(pane.id||'').replace(/^pane-/,''):'';var lbl=_atlasTabLabel(tid);if(!lbl||lbl===tid){var h=sec.querySelector('h2');lbl=h?h.textContent.trim():(lbl||'Πίνακας');}exportTabExcel(sec,lbl);};actions.appendChild(xlsBtn);}sec.appendChild(actions);});
+document.querySelectorAll('table.print-table').forEach(function(tbl){if(tbl.closest('.print-section'))return;var wrapper=document.createElement('div');wrapper.className='table-container';tbl.parentNode.insertBefore(wrapper,tbl);wrapper.appendChild(tbl);var actions=document.createElement('div');actions.className='section-actions';var printBtn=document.createElement('button');printBtn.className='btn-print-tab';printBtn.innerHTML='🖨';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(e){e.stopPropagation();printSection(tbl);};var fsBtn=document.createElement('button');fsBtn.className='btn-fs';fsBtn.innerHTML='⛶';fsBtn.title='Πλήρης οθόνη';fsBtn.onclick=function(e){e.stopPropagation();openTableFs(tbl);};actions.appendChild(printBtn);actions.appendChild(fsBtn);if(typeof XLSX!=='undefined'){var xlsBtn2=document.createElement('button');xlsBtn2.className='btn-xls-tab';xlsBtn2.innerHTML='📊';xlsBtn2.title='Εξαγωγή αυτού του πίνακα σε Excel (όπως εμφανίζεται)';xlsBtn2.onclick=function(e){e.stopPropagation();var pane=tbl.closest('.tab-pane');var tid=pane?(pane.id||'').replace(/^pane-/,''):'';var lbl=_atlasTabLabel(tid)||'Πίνακας';exportTabExcel(tbl,lbl);};actions.appendChild(xlsBtn2);}wrapper.appendChild(actions);});
 var targetColumns=['Συνολικές ημέρες','Μικτές αποδοχές','Συνολικές εισφορές','ΣΥΝΟΛΟ','ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ','ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ','ΑΠΟΔΟΧΕΣ','ΕΙΣΦΟΡΕΣ','Ημέρες Ασφ.','Σύνολο','Μικτές Αποδοχές','Συνολικές Εισφορές'];
 var tables=document.querySelectorAll('table.print-table');tables.forEach(function(table){var headers=table.querySelectorAll('thead th');var targetIndices=[];headers.forEach(function(th,index){var headerText=th.textContent.trim();if(targetColumns.some(function(col){return headerText.indexOf(col)!==-1;})){targetIndices.push(index);}});if(targetIndices.length>0){var rows=table.querySelectorAll('tbody tr');rows.forEach(function(row){var cells=row.querySelectorAll('td');targetIndices.forEach(function(index){if(cells[index]){cells[index].classList.add('copy-target');cells[index].title='Κλικ για αντιγραφή';}});});}});
 var cardElements=document.querySelectorAll('.audit-card-result');cardElements.forEach(function(el){if(el.closest('#pane-synopsis'))return;el.classList.add('copy-target');el.title='Κλικ για αντιγραφή';});});
