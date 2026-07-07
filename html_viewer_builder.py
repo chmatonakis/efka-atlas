@@ -66,6 +66,10 @@ from app_final import (
     SYN_TEKMARK_RATE_LABELS,
     SYN_TEKMARK_RATE_DEFAULT,
     SYN_TEKMARK_OGA_LABEL,
+    _parallel_month_groups_until_2016,
+    _parallel_until_2016_month_match,
+    _is_tsay_misthoti_parallel_row,
+    _is_tsay_non_misthoti_parallel_row,
 )
 
 # ---------------------------------------------------------------------------
@@ -4388,6 +4392,51 @@ def _syntaksi_apd_by_klados(df, klados_codes, plafond_mode=None):
     return out
 
 
+def _syntaksi_parallel_years_by_side(df) -> tuple[list[int], list[int]]:
+    """Έτη (≤2016) παράλληλης ασφάλισης ανά πλευρά: (μισθωτού, ελ. επαγγελματία).
+
+    Βασίζεται στην ίδια λογική εντοπισμού με τον πίνακα «Παράλληλη Ασφάλιση»."""
+    misthoti_years: set[int] = set()
+    elep_years: set[int] = set()
+    try:
+        _, month_groups = _parallel_month_groups_until_2016(df)
+        if month_groups is None:
+            return [], []
+        for (year, _month), group in month_groups:
+            y = int(year)
+            if y > 2016:
+                continue
+            ika_d = float(group.loc[group["is_ika"], "Ημέρες"].sum())
+            oaee_d = min(float(group.loc[group["is_oaee"], "Ημέρες"].sum()), 25)
+            tsm_d = min(float(group.loc[group["is_tsm"], "Ημέρες"].sum()), 25)
+            oga_d = min(float(group.loc[group["is_oga"], "Ημέρες"].sum()), 25)
+            tsay_d = min(float(group.loc[group["is_tsay"], "Ημέρες"].sum()), 25)
+            tsay_mis_d = float(
+                group.loc[group.apply(_is_tsay_misthoti_parallel_row, axis=1), "Ημέρες"].sum()
+            )
+            tsay_elep_d = float(
+                group.loc[group.apply(_is_tsay_non_misthoti_parallel_row, axis=1), "Ημέρες"].sum()
+            )
+
+            has_ika = ika_d > 0
+            has_oaee = oaee_d > 0
+            has_tsm = tsm_d > 0
+            has_oga = oga_d > 0
+            has_tsay = tsay_d > 0
+
+            if not _parallel_until_2016_month_match(
+                has_ika, has_oaee, has_tsm, has_oga, has_tsay
+            ):
+                continue
+            if has_ika or tsay_mis_d > 0:
+                misthoti_years.add(y)
+            if has_oaee or has_tsm or has_oga or tsay_elep_d > 0:
+                elep_years.add(y)
+    except Exception:
+        return [], []
+    return sorted(misthoti_years), sorted(elep_years)
+
+
 def _syntaksi_build_payload(df, description_map):
     """Δεδομένα για τον client engine της καρτέλας Συντάξιμες (embedded JSON)."""
     desc_map = description_map or {}
@@ -4466,6 +4515,25 @@ def _syntaksi_build_payload(df, description_map):
     this_year = datetime.date.today().year
     exagora_year_opts = [str(y) for y in range(2002, this_year + 1)]
 
+    # Έτη (≤2016) με εντοπισμένη παράλληλη ασφάλιση από τον σχετικό πίνακα
+    parallel_years = []
+    parallel_years_misthoti, parallel_years_elep = _syntaksi_parallel_years_by_side(df)
+    try:
+        _par_res = build_parallel_print_df(df, desc_map, False)
+        _par_df = _par_res[0] if isinstance(_par_res, tuple) else _par_res
+        if _par_df is not None and not getattr(_par_df, "empty", True) and "Έτος" in _par_df.columns:
+            _yrs = set()
+            for _v in _par_df["Έτος"].tolist():
+                try:
+                    _yrs.add(int(str(_v).strip()))
+                except (TypeError, ValueError):
+                    continue
+            parallel_years = sorted(y for y in _yrs if y <= 2016)
+    except Exception:
+        parallel_years = []
+    if not parallel_years and (parallel_years_misthoti or parallel_years_elep):
+        parallel_years = sorted(set(parallel_years_misthoti) | set(parallel_years_elep))
+
     return {
         "cols": list(SYN_TAXI_HTML_COLUMNS),
         "colWidths": dict(SYN_TAXI_HTML_COL_WIDTHS),
@@ -4491,31 +4559,80 @@ def _syntaksi_build_payload(df, description_map):
         "calcFromDefault": "2002",
         "hideTab": bool(df_has_tsmede_misthoti_insurance(df)),
         "yearDays": 300.0,
+        "parallelYears": parallel_years,
+        "parallelYearsMisthoti": parallel_years_misthoti,
+        "parallelYearsElep": parallel_years_elep,
     }
 
 
 def build_syntaksi_with_filters(df, description_map=None):
-    """Καρτέλα «Συντάξιμες Αποδοχές» (Pro): client-side επανυπολογισμός συγχρονισμένος
-    με τα φίλτρα Καταμέτρησης (επιλεγμένα πακέτα κάλυψης)."""
+    """Κύρια καρτέλα «Συντάξιμες Αποδοχές» (Pro): client-side επανυπολογισμός
+    συγχρονισμένος με τα φίλτρα Καταμέτρησης (επιλεγμένα πακέτα κάλυψης)."""
     if df is None or getattr(df, "empty", True):
         return ""
     payload = _syntaksi_build_payload(df, description_map)
+    _has_par16 = bool(
+        payload.get("parallelYears")
+        or payload.get("parallelYearsMisthoti")
+        or payload.get("parallelYearsElep")
+    )
+    return _build_syntaksi_tab_html(
+        payload,
+        prefix="syntaksi",
+        tab_id="syntaksi",
+        title="Συντάξιμες Αποδοχές",
+        parallel_only=False,
+        par_exclude_until2016=_has_par16,
+        include_engine=True,
+    )
 
+
+def build_syntaksi_parallel_with_filters(df, description_map=None, payload=None):
+    """Καρτέλα «Συντάξιμες Παραλ.»: πανομοιότυπη με τη «Συντάξιμες», αλλά εμφανίζει
+    μόνο τα έτη (έως 2016) με εντοπισμένη παράλληλη ασφάλιση. Υπολογισμοί/σύνολα/metrics
+    ίδια με την κύρια καρτέλα. Επιστρέφει "" αν δεν υπάρχει παράλληλη ≤2016."""
+    if df is None or getattr(df, "empty", True):
+        return ""
+    if payload is None:
+        payload = _syntaksi_build_payload(df, description_map)
+    if not (
+        payload.get("parallelYears")
+        or payload.get("parallelYearsMisthoti")
+        or payload.get("parallelYearsElep")
+    ):
+        return ""
+    return _build_syntaksi_tab_html(
+        payload,
+        prefix="syntaksipar",
+        tab_id="syntaksipar",
+        title="Συντάξιμες αποδοχές παράλληλης ασφάλισης",
+        parallel_only=True,
+        include_engine=False,
+    )
+
+
+def _build_syntaksi_tab_html(
+    payload, *, prefix, tab_id, title, parallel_only,
+    par_exclude_until2016=False, include_engine,
+):
+    """Παράγει το HTML μιας καρτέλας Συντάξιμων για συγκεκριμένο id-prefix.
+    Ο ίδιος client engine (window.__atlasSyntaksiInit) οδηγεί κάθε instance μέσω CFG."""
+    show_par_dropdown = parallel_only or par_exclude_until2016
     payload_json = json.dumps(payload, ensure_ascii=False).replace("<", "\\u003c")
     payload_html = (
-        f'<script type="application/json" id="atlas-syntaksi-data-json">{payload_json}</script>'
+        f'<script type="application/json" id="atlas-{prefix}-data-json">{payload_json}</script>'
     )
 
     # Metrics bar (πακέτα + 3 μετρήσεις)
     metrics_html = (
         f"{payload_html}"
-        '<div class="totals-info-bar syntaksi-metrics atlas-header-split" id="syntaksi-metrics-wrap">'
+        f'<div class="totals-info-bar syntaksi-metrics atlas-header-split" id="{prefix}-metrics-wrap">'
         '<div class="atlas-header-info">'
         '<div class="atlas-info-box">'
         '<div class="atlas-info-box-title">Επιλεγμένα πακέτα κάλυψης</div>'
-        '<div class="atlas-info-box-body syntaksi-metrics-pk-txt" id="syntaksi-metrics-pk">—</div>'
+        f'<div class="atlas-info-box-body syntaksi-metrics-pk-txt" id="{prefix}-metrics-pk">—</div>'
         "</div></div>"
-        f'{build_atlas_metrics_frame_html("".join([_atlas_metric_cell_html("Μήνες", "•", "syntaksi-metric-months"), _atlas_metric_cell_html("Συντάξιμες αποδοχές", "•", "syntaksi-metric-apod"), _atlas_metric_cell_html("Συντάξιμος μισθός", "•", "syntaksi-metric-mis")]))}'
+        f'{build_atlas_metrics_frame_html("".join([_atlas_metric_cell_html("Μήνες", "•", f"{prefix}-metric-months"), _atlas_metric_cell_html("Συντάξιμες αποδοχές", "•", f"{prefix}-metric-apod"), _atlas_metric_cell_html("Συντάξιμος μισθός", "•", f"{prefix}-metric-mis")]))}'
         "</div>"
     )
 
@@ -4544,34 +4661,55 @@ def build_syntaksi_with_filters(df, description_map=None):
         f'{" selected" if o == payload["calcFromDefault"] else ""}>{html_mod.escape(o)}</option>'
         for o in payload["calcFromOptions"]
     )
+    par_mode_field = ""
+    filters_grid_cls = "syntaksi-filters-grid"
+    if parallel_only:
+        filters_grid_cls += " syntaksi-filters-grid--parallel syntaksi-filters-grid--no-tek"
+    elif show_par_dropdown:
+        filters_grid_cls += " syntaksi-filters-grid--parallel"
+    if show_par_dropdown:
+        par_mode_field = (
+            '<label class="apd-filter-field syntaksi-fld-par-mode">'
+            '<span class="apd-filter-field-label">Παράλληλη</span>'
+            f'<select id="{prefix}-par-mode" class="apd-filter-input apd-select">'
+            '<option value="misthoti" selected>Παράλληλη Μισθωτού</option>'
+            '<option value="elep">Παράλληλη ελ. επαγγελματία</option>'
+            "</select></label>"
+        )
+    tek_field = ""
+    if not parallel_only:
+        tek_field = (
+            '<label class="apd-filter-field syntaksi-fld-tek"><span class="apd-filter-field-label">Αναγωγή εισφορών</span>'
+            f'<select id="{prefix}-tek" class="apd-filter-input apd-select">{tek_opts_html}</select></label>'
+        )
     filter_bar = (
-        '<div class="count-filters syntaksi-filters" id="syntaksi-filters-bar">'
-        '<div class="atlas-locked-count-bar" id="syntaksi-locked-from-count">'
+        f'<div class="count-filters syntaksi-filters" id="{prefix}-filters-bar">'
+        f'<div class="atlas-locked-count-bar" id="{prefix}-locked-from-count">'
         '<div class="atlas-locked-count-title">Από Καταμέτρηση</div>'
         '<div class="atlas-locked-count-grid">'
         '<div class="atlas-locked-count-item"><span class="atlas-locked-count-sub">Διάστημα</span>'
-        '<span class="atlas-locked-count-val" id="syntaksi-lock-dates">—</span></div>'
+        f'<span class="atlas-locked-count-val" id="{prefix}-lock-dates">—</span></div>'
         '<div class="atlas-locked-count-item"><span class="atlas-locked-count-sub">Ταμείο</span>'
-        '<span class="atlas-locked-count-val" id="syntaksi-lock-tameio">—</span></div>'
+        f'<span class="atlas-locked-count-val" id="{prefix}-lock-tameio">—</span></div>'
         '</div></div>'
-        '<div class="syntaksi-filters-grid">'
+        f'<div class="{filters_grid_cls}">'
+        f"{par_mode_field}"
         '<label class="apd-filter-field"><span class="apd-filter-field-label">Υπολογισμός Από</span>'
-        f'<select id="syntaksi-calc-from" class="apd-filter-input apd-select" '
+        f'<select id="{prefix}-calc-from" class="apd-filter-input apd-select" '
         f'title="Από αυτό το έτος: ΣΥΝΟΛΟ, μήνες, συντάξιμες (η εξαγορά πάντα)">{calc_from_opts_html}</select></label>'
         '<label class="apd-filter-field"><span class="apd-filter-field-label">Έτος αναφοράς ΔΤΚ</span>'
-        f'<select id="syntaksi-dtk-ref" class="apd-filter-input apd-select">{ref_opts_html}</select></label>'
+        f'<select id="{prefix}-dtk-ref" class="apd-filter-input apd-select">{ref_opts_html}</select></label>'
         '<label class="apd-filter-field"><span class="apd-filter-field-label">Ποσό εξαγοράς</span>'
-        '<input type="text" id="syntaksi-exagora-poso" class="apd-filter-input" '
+        f'<input type="text" id="{prefix}-exagora-poso" class="apd-filter-input" '
         'placeholder="π.χ. 15.000,00 €" autocomplete="off"></label>'
         '<label class="apd-filter-field"><span class="apd-filter-field-label">Ημέρες εξαγοράς</span>'
-        '<input type="text" id="syntaksi-exagora-imres" class="apd-filter-input" '
+        f'<input type="text" id="{prefix}-exagora-imres" class="apd-filter-input" '
         'placeholder="π.χ. 300" autocomplete="off"></label>'
         '<label class="apd-filter-field"><span class="apd-filter-field-label">Έτος εξαγοράς</span>'
-        f'<select id="syntaksi-exagora-etos" class="apd-filter-input apd-select">{ex_year_opts_html}</select></label>'
+        f'<select id="{prefix}-exagora-etos" class="apd-filter-input apd-select">{ex_year_opts_html}</select></label>'
         '<label class="apd-filter-field"><span class="apd-filter-field-label">Κοινωνικοί Πόροι</span>'
-        f'<select id="syntaksi-koin" class="apd-filter-input apd-select">{koin_opts_html}</select></label>'
-        '<label class="apd-filter-field syntaksi-fld-tek"><span class="apd-filter-field-label">Αναγωγή εισφορών</span>'
-        f'<select id="syntaksi-tek" class="apd-filter-input apd-select">{tek_opts_html}</select></label>'
+        f'<select id="{prefix}-koin" class="apd-filter-input apd-select">{koin_opts_html}</select></label>'
+        f"{tek_field}"
         "</div></div>"
     )
 
@@ -4582,36 +4720,84 @@ def build_syntaksi_with_filters(df, description_map=None):
         ("info", "Τεκμαρτές = (εισφορές + κοιν. πόροι) ÷ ποσοστό. "
                  "Συνολικές αποδοχές = Συντ. αποδοχές + τεκμαρτές. Τελικές = Συνολικές × ΔΤΚ."),
     ]
+    if parallel_only:
+        info_sections.insert(0, (
+            "info",
+            "Επιλέξτε «Παράλληλη Μισθωτού» ή «Παράλληλη ελ. επαγγελματία». "
+            "Εμφανίζονται μόνο τα σχετικά έτη (έως 2016)· τα σύνολα και τα metrics "
+            "αφορούν αποκλειστικά τις στήλες της επιλεγμένης πλευράς. "
+            "Η αναγωγή εισφορών είναι σταθερά 20% (κύρια σύνταξη).",
+        ))
+        info_sections[3] = (
+            "info",
+            "Τεκμαρτές = (εισφορές + κοιν. πόροι) ÷ 20%. "
+            "Συνολικές αποδοχές = Συντ. αποδοχές + τεκμαρτές. Τελικές = Συνολικές × ΔΤΚ.",
+        )
+    elif par_exclude_until2016:
+        info_sections.insert(0, (
+            "info",
+            "Επιλέξτε «Παράλληλη Μισθωτού» ή «Παράλληλη ελ. επαγγελματία»: "
+            "στις παράλληλες χρονιές έως 2016 οι στήλες της επιλεγμένης πλευράς "
+            "εξαιρούνται από υπολογισμούς — συμπληρωματικά με την καρτέλα "
+            "«Συντάξιμες αποδοχές παράλληλης ασφάλισης» που τις περιλαμβάνει. "
+            "Από 2017+ εμφανίζονται και οι δύο τύποι ασφάλισης· "
+            "οι ημέρες ασφάλισης ανά έτος δεν υπερβαίνουν αθροιστικά τις 300.",
+        ))
     heading = _atlas_html_tab_heading_row_info(
-        "Συντάξιμες Αποδοχές",
-        "Πληροφορίες — Συντάξιμες Αποδοχές",
+        title,
+        f"Πληροφορίες — {title}",
         info_sections,
-        "atlas-info-store-syntaksi",
+        f"atlas-info-store-{prefix}",
     )
 
-    body_html = (
-        '<button type="button" class="btn-json-syntaksi" id="syntaksi-json-dl" '
-        'disabled hidden>JSON για Syntaksi Pro 3</button>'
-        '<div class="syntaksi-empty" id="syntaksi-empty">'
-        "Επιλέξτε πακέτα κάλυψης στην καρτέλα <strong>Καταμέτρηση</strong> "
-        "για να γεμίσει ο πίνακας.</div>"
-        '<div class="syntaksi-table-scroll" id="syntaksi-table-mount" hidden></div>'
-    )
-
-    js = _build_syntaksi_filter_js()
-
-    return _build_tab_page(
-        section_id="syntaksi-section",
-        extra_section_classes="syntaksi-layout",
-        heading_html=heading,
-        description_html=(
+    if parallel_only:
+        description_html = (
+            '<p class="print-description">Συντάξιμες αποδοχές για έτη (έως 2016) με παράλληλη '
+            "ασφάλιση, ανά πλευρά (μισθωτού / ελ. επαγγελματία). Τα σύνολα και τα metrics "
+            "αφορούν μόνο τις στήλες της επιλεγμένης πλευράς.</p>"
+        )
+        empty_msg = (
+            f'<div class="syntaksi-empty" id="{prefix}-empty">'
+            "Επιλέξτε πακέτα κάλυψης στην καρτέλα <strong>Καταμέτρηση</strong> "
+            "για να γεμίσει ο πίνακας.</div>"
+        )
+    else:
+        description_html = (
             '<p class="print-description">Συντάξιμες αποδοχές ανά έτος για τα επιλεγμένα '
             "πακέτα κάλυψης, με αναγωγή εισφορών, κοινωνικούς πόρους, ΔΤΚ και εξαγορά.</p>"
-        ),
+        )
+        empty_msg = (
+            f'<div class="syntaksi-empty" id="{prefix}-empty">'
+            "Επιλέξτε πακέτα κάλυψης στην καρτέλα <strong>Καταμέτρηση</strong> "
+            "για να γεμίσει ο πίνακας.</div>"
+        )
+
+    body_html = (
+        f'<button type="button" class="btn-json-syntaksi" id="{prefix}-json-dl" '
+        'disabled hidden>JSON για Syntaksi Pro 3</button>'
+        f"{empty_msg}"
+        f'<div class="syntaksi-table-scroll" id="{prefix}-table-mount" hidden></div>'
+    )
+
+    init_call = (
+        f"window.__atlasSyntaksiInit({{prefix:'{prefix}',tab:'{tab_id}',"
+        f"parallelOnly:{'true' if parallel_only else 'false'},"
+        f"parExcludeUntil2016:{'true' if par_exclude_until2016 else 'false'}}});"
+    )
+    if include_engine:
+        scripts_html = f"<script>{_build_syntaksi_filter_js()}\n{init_call}</script>"
+    else:
+        scripts_html = f"<script>{init_call}</script>"
+
+    return _build_tab_page(
+        section_id=f"{prefix}-section",
+        extra_section_classes="syntaksi-layout",
+        heading_html=heading,
+        description_html=description_html,
         metrics_html=metrics_html,
         filters_html=filter_bar,
         body_html=body_html,
-        scripts_html=f"<script>{js}</script>",
+        scripts_html=scripts_html,
     )
 
 
@@ -4619,10 +4805,16 @@ def _build_syntaksi_filter_js():
     """JS: πλήρης αγωγός Συντάξιμων (ίδια λογική με LOCAL_DEV/kyria/app_final.py),
     συγχρονισμένος με τα φίλτρα Καταμέτρησης (επιλεγμένα πακέτα + λοιπά φίλτρα)."""
     return r"""
-(function(){
-  var sec=document.getElementById('syntaksi-section');
+window.__atlasSyntaksiInit=window.__atlasSyntaksiInit||function(CFG){
+  CFG=CFG||{};
+  var PFX=CFG.prefix||'syntaksi';
+  var TAB=CFG.tab||PFX;
+  var PARONLY=!!CFG.parallelOnly;
+  var PAREXCLUDE16=!!CFG.parExcludeUntil2016;
+  var HASPARDROPDOWN=PARONLY||PAREXCLUDE16;
+  var sec=document.getElementById(PFX+'-section');
   if(!sec)return;
-  var dataEl=document.getElementById('atlas-syntaksi-data-json');
+  var dataEl=document.getElementById('atlas-'+PFX+'-data-json');
   if(!dataEl)return;
   var DATA={};
   try{DATA=JSON.parse(dataEl.textContent||'{}');}catch(e){return;}
@@ -4638,6 +4830,83 @@ def _build_syntaksi_filter_js():
   var OGA=DATA.ogaRates||{};
   var OGALABEL=DATA.ogaLabel||'';
   var YEARDAYS=parseFloat(DATA.yearDays)||300;
+  var PARYEARS={};(DATA.parallelYears||[]).forEach(function(y){PARYEARS[String(y)]=1;});
+  var TEK_LABEL_FIXED=PARONLY?(String(DATA.tekDefault||'').trim()||'20% — Κυρία σύνταξη'):'';
+
+  function resolveTekLabel(){
+    if(PARONLY)return TEK_LABEL_FIXED;
+    return val(PFX+'-tek');
+  }
+
+  function currentParMode(){
+    if(!HASPARDROPDOWN)return 'misthoti';
+    var el=document.getElementById(PFX+'-par-mode');
+    var v=el?String(el.value||'').trim():'misthoti';
+    return v==='elep'?'elep':'misthoti';
+  }
+  function activeParYears(){
+    return PARYEARS;
+  }
+  function recomputeSynTotals(row){
+    var dtk=row.dtk;
+    var hasApod=(row.synt!=null&&!isNaN(row.synt))||(row.tek!=null&&!isNaN(row.tek));
+    var syn=hasApod?(row.synt||0)+(row.tek||0):null;
+    return {
+      synolikes:syn,
+      telikes:(syn!=null&&dtk!=null&&!isNaN(dtk))?syn*dtk:null
+    };
+  }
+  function applyParSide(row,mode){
+    if(!PARONLY||!row||typeof row.year!=='number')return row;
+    var dtk=row.dtk;
+    if(mode==='misthoti'){
+      var synt=(row.synt!=null&&!isNaN(row.synt))?row.synt:null;
+      return {
+        year:row.year,dm:row.dm,dnm:null,gross:row.gross,synt:synt,contrib:null,
+        koin:null,tek:null,synolikes:synt,dtk:dtk,
+        telikes:(synt!=null&&dtk!=null&&!isNaN(dtk))?synt*dtk:null
+      };
+    }
+    var tek=(row.tek!=null&&!isNaN(row.tek))?row.tek:null;
+    return {
+      year:row.year,dm:null,dnm:row.dnm,gross:null,synt:null,contrib:row.contrib,
+      koin:row.koin,tek:tek,synolikes:tek,dtk:dtk,
+      telikes:(tek!=null&&dtk!=null&&!isNaN(dtk))?tek*dtk:null
+    };
+  }
+  function zeroParSide(row,mode){
+    var out;
+    if(mode==='misthoti'){
+      out={
+        year:row.year,dm:null,dnm:row.dnm,gross:null,synt:null,
+        contrib:row.contrib,koin:row.koin,tek:row.tek,dtk:row.dtk
+      };
+    }else{
+      out={
+        year:row.year,dm:row.dm,dnm:null,gross:row.gross,synt:row.synt,
+        contrib:null,koin:null,tek:null,dtk:row.dtk
+      };
+    }
+    var st=recomputeSynTotals(out);
+    out.synolikes=st.synolikes;
+    out.telikes=st.telikes;
+    return out;
+  }
+  function applyParExcludeUntil2016(row,mode){
+    if(!PAREXCLUDE16||!row||typeof row.year!=='number')return row;
+    if(!PARYEARS[String(row.year)])return row;
+    return zeroParSide(row,mode);
+  }
+  function adjustCoreForParallel(fullCore){
+    if(!PARONLY&&!PAREXCLUDE16)return fullCore;
+    var mode=currentParMode();
+    if(PARONLY){
+      return (fullCore||[]).filter(function(r){
+        return typeof r.year==='number'&&!!PARYEARS[String(r.year)];
+      }).map(function(r){return applyParSide(r,mode);});
+    }
+    return (fullCore||[]).map(function(r){return applyParExcludeUntil2016(r,mode);});
+  }
 
   var CUR_YEARS=['Συνολικές μικτές αποδοχές','Συντ. αποδοχές','Συνολικές εισφορές','Κοινωνικοί Πόροι','Τεκμαρτές αποδοχές','Συνολικές αποδοχές','Τελικές Συντ. Αποδοχές'];
   var DAY_COLS=['Σύνολο ημερών (μισθωτή)','Σύνολο ημερών (μη μισθωτή)'];
@@ -4858,9 +5127,9 @@ def _build_syntaksi_filter_js():
     return {lo:lo,hi:hi};
   }
   function setLockedFromCount(cs){
-    var de=document.getElementById('syntaksi-lock-dates');
+    var de=document.getElementById(PFX+'-lock-dates');
     if(de)de.textContent=fmtCountDateRange();
-    var te=document.getElementById('syntaksi-lock-tameio');
+    var te=document.getElementById(PFX+'-lock-tameio');
     if(te)te.textContent=fmtLockedList(cs.tameio);
   }
   // Δυναμικό πλαφόν: ακολουθεί το φίλτρο «Πλαφόν» της καρτέλας ΑΠΔ (#apd-plafond)
@@ -4998,8 +5267,11 @@ def _build_syntaksi_filter_js():
       rows.push(r);prevP=p;
     });
     if(!forPrint)rows.push({sep:true});
-    var exR=exagoraRow(posoRaw,imeresRaw,etosEx,dtkRef,tekLabel);
-    rows.push(exR);
+    var exR=null;
+    if(!PARONLY){
+      exR=exagoraRow(posoRaw,imeresRaw,etosEx,dtkRef,tekLabel);
+      rows.push(exR);
+    }
     var total=grandTotalRow(core,exR,calcFrom);
     rows.push(total);
     return {rows:rows,total:total,core:core,exRow:exR};
@@ -5012,7 +5284,7 @@ def _build_syntaksi_filter_js():
     return n>0?n:0;
   }
   function parseCalcFrom(){
-    var el=document.getElementById('syntaksi-calc-from');
+    var el=document.getElementById(PFX+'-calc-from');
     var y=el?parseInt(el.value,10):2002;
     if(isNaN(y)||y<1975||y>2002)return 2002;
     return y;
@@ -5102,7 +5374,7 @@ def _build_syntaksi_filter_js():
     var body='';
     disp.rows.forEach(function(r){
       if(r.sep){body+='<tr class="syn-sep">'+COLS.map(function(){return '<td></td>';}).join('')+'</tr>';return;}
-      var cls=r.isTotal?' class="syn-total"':(r.isExagora?' class="syn-exagora"':'');
+      var cls=r.isTotal?' class="syn-total"':(r.isExagora?' class="syn-exagora"':((typeof r.year==='number'&&activeParYears()[String(r.year)])?' class="syn-parallel"':''));
       body+='<tr'+cls+'>'+COLS.map(function(c){
         var v=colVal(c,r);
         var tdcls='';
@@ -5123,13 +5395,13 @@ def _build_syntaksi_filter_js():
     else el.textContent=fmtCurr(v);
   }
   function setMetrics(m){
-    var mo=document.getElementById('syntaksi-metric-months');
+    var mo=document.getElementById(PFX+'-metric-months');
     if(mo)mo.textContent=m?fmtNum1(m.months):'•';
-    setMetricCurr('syntaksi-metric-apod',m?m.tel:null);
-    setMetricCurr('syntaksi-metric-mis',m?m.sal:null);
+    setMetricCurr(PFX+'-metric-apod',m?m.tel:null);
+    setMetricCurr(PFX+'-metric-mis',m?m.sal:null);
   }
   function setPk(codes){
-    var el=document.getElementById('syntaksi-metrics-pk');
+    var el=document.getElementById(PFX+'-metrics-pk');
     if(!el)return;
     if(!codes||!codes.length){el.textContent='—';return;}
     el.innerHTML=codes.map(function(c){return '<span class="syntaksi-pk-chip">'+esc(KLABELS[c]||c)+'</span>';}).join('');
@@ -5137,10 +5409,10 @@ def _build_syntaksi_filter_js():
 
   // ---------- nav visibility ----------
   function setNavVisible(show){
-    var nav=document.querySelector('.nav-item[data-tab="syntaksi"]');
+    var nav=document.querySelector('.nav-item[data-tab="'+TAB+'"]');
     if(nav)nav.style.display=show?'':'none';
     if(!show){
-      var pane=document.getElementById('pane-syntaksi');
+      var pane=document.getElementById('pane-'+TAB);
       if(pane&&pane.classList.contains('active')&&typeof window.showTab==='function'){window.showTab('count');}
     }
   }
@@ -5178,6 +5450,43 @@ def _build_syntaksi_filter_js():
     jd['etos_ethnikis']={value:refY,type:'number'};
     return JSON.stringify(jd,null,2);
   }
+  function buildJsonSheet25Parallel(core,mode){
+    mode=mode==='elep'?'elep':'misthoti';
+    var byYear={};
+    (core||[]).forEach(function(r){
+      if(typeof r.year!=='number')return;
+      byYear[r.year]=r;
+    });
+    var jd={};
+    jd['s25r4c3']={
+      value:mode==='elep'?'Ελ. Επαγγελματίας':'Μισθωτός',
+      type:'text'
+    };
+    var totDays=0,totVal=0;
+    for(var y=2002;y<=2016;y++){
+      var row=8+(y-2002);
+      var r=byYear[y];
+      var days=0,val=0;
+      if(r){
+        if(mode==='misthoti'){
+          days=(r.dm!=null&&!isNaN(r.dm))?Math.round(r.dm):0;
+          val=(r.synt!=null&&!isNaN(r.synt))?r2(r.synt):0;
+        }else{
+          days=(r.dnm!=null&&!isNaN(r.dnm))?Math.round(r.dnm):0;
+          var c=(r.contrib!=null&&!isNaN(r.contrib))?Number(r.contrib):0;
+          var k=(r.koin!=null&&!isNaN(r.koin))?Number(r.koin):0;
+          val=r2(c+k);
+        }
+      }
+      jd['s25r'+row+'c3']={value:days,type:'number'};
+      jd['s25r'+row+'c4']={value:val,type:'number'};
+      totDays+=days;
+      totVal+=val;
+    }
+    jd['s25r24c3']={value:totDays,type:'number'};
+    jd['s25r24c4']={value:r2(totVal),type:'number'};
+    return JSON.stringify(jd,null,2);
+  }
 
   // ---------- inputs ----------
   function val(id){var el=document.getElementById(id);return el?el.value:'';}
@@ -5188,9 +5497,9 @@ def _build_syntaksi_filter_js():
     var cs=getCountState();
     setLockedFromCount(cs);
     var selCodes=cs.klados.slice();
-    var mount=document.getElementById('syntaksi-table-mount');
-    var empty=document.getElementById('syntaksi-empty');
-    var dlBtn=document.getElementById('syntaksi-json-dl');
+    var mount=document.getElementById(PFX+'-table-mount');
+    var empty=document.getElementById(PFX+'-empty');
+    var dlBtn=document.getElementById(PFX+'-json-dl');
     setNavVisible(selCodes.length>0);
     if(selCodes.length===0){
       if(mount){mount.hidden=true;mount.innerHTML='';}
@@ -5202,30 +5511,36 @@ def _build_syntaksi_filter_js():
     }
     if(empty)empty.hidden=true;
     var yr=yearRangeFromCount(cs);
-    var dtkRef=val('syntaksi-dtk-ref');
-    var kpType=val('syntaksi-koin');
-    var tekLabel=val('syntaksi-tek');
-    var posoRaw=val('syntaksi-exagora-poso');
-    var imeresRaw=val('syntaksi-exagora-imres');
-    var etosEx=val('syntaksi-exagora-etos');
+    var dtkRef=val(PFX+'-dtk-ref');
+    var kpType=val(PFX+'-koin');
+    var tekLabel=resolveTekLabel();
+    var posoRaw=val(PFX+'-exagora-poso');
+    var imeresRaw=val(PFX+'-exagora-imres');
+    var etosEx=val(PFX+'-exagora-etos');
     var calcFrom=parseCalcFrom();
     var res=computeCore(selCodes,yr.lo,yr.hi,cs,dtkRef,kpType,tekLabel);
-    var disp=buildDisplayRows(res.core,posoRaw,imeresRaw,etosEx,dtkRef,tekLabel,calcFrom);
+    var tableCore=adjustCoreForParallel(res.core);
+    var disp=buildDisplayRows(tableCore,posoRaw,imeresRaw,etosEx,dtkRef,tekLabel,calcFrom);
     if(mount){mount.hidden=false;mount.innerHTML=renderTable(disp,tekLabel);}
     setMetrics(metricsFromTotal(disp.total,disp.core,disp.exRow,calcFrom));
     setPk(selCodes);
     if(dlBtn)dlBtn.disabled=false;
-    _lastCore=res.core;
+    _lastCore=tableCore;
     _lastInputs={posoRaw:posoRaw,imeresRaw:imeresRaw,etosEx:etosEx,dtkRef:dtkRef,tekLabel:tekLabel};
   }
 
   // download
-  var dlBtn=document.getElementById('syntaksi-json-dl');
+  var dlBtn=document.getElementById(PFX+'-json-dl');
   if(dlBtn)dlBtn.addEventListener('click',function(){
     if(!_lastCore||!_lastInputs)return;
-    var txt=buildJson(_lastCore,_lastInputs.posoRaw,_lastInputs.imeresRaw,_lastInputs.etosEx,_lastInputs.dtkRef,_lastInputs.tekLabel);
+    var txt;
+    if(PARONLY){
+      txt=buildJsonSheet25Parallel(_lastCore,currentParMode());
+    }else{
+      txt=buildJson(_lastCore,_lastInputs.posoRaw,_lastInputs.imeresRaw,_lastInputs.etosEx,_lastInputs.dtkRef,_lastInputs.tekLabel);
+    }
     var blob=new Blob([txt],{type:'application/json;charset=utf-8'});
-    var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='efka_syntaksi_pro.json';a.click();URL.revokeObjectURL(a.href);
+    var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=(PARONLY?'efka_syntaksi_parallel.json':'efka_syntaksi_pro.json');a.click();URL.revokeObjectURL(a.href);
   });
 
   // debounce
@@ -5242,12 +5557,37 @@ def _build_syntaksi_filter_js():
   var apdSec=document.getElementById('apd-section');
   if(apdSec){apdSec.addEventListener('change',recomputeSoon);apdSec.addEventListener('input',recomputeSoon);}
   ['cnt-filter-from','cnt-filter-to'].forEach(function(id){var el=document.getElementById(id);if(el){el.addEventListener('input',recomputeSoon);el.addEventListener('change',recomputeSoon);}});
-  ['syntaksi-calc-from','syntaksi-dtk-ref','syntaksi-exagora-poso','syntaksi-exagora-imres','syntaksi-exagora-etos','syntaksi-koin','syntaksi-tek'].forEach(function(id){
+  [PFX+'-calc-from',PFX+'-dtk-ref',PFX+'-exagora-poso',PFX+'-exagora-imres',PFX+'-exagora-etos',PFX+'-koin',PFX+'-tek'].forEach(function(id){
     var el=document.getElementById(id);if(el){el.addEventListener('input',recomputeSoon);el.addEventListener('change',recomputeSoon);}
   });
+  if(HASPARDROPDOWN){
+    window._atlasSyntaksiParMode=window._atlasSyntaksiParMode||'misthoti';
+    window._atlasBroadcastParMode=window._atlasBroadcastParMode||function(mode,source){
+      mode=mode==='elep'?'elep':'misthoti';
+      window._atlasSyntaksiParMode=mode;
+      ['syntaksi','syntaksipar'].forEach(function(pfx){
+        var el=document.getElementById(pfx+'-par-mode');
+        if(el&&el.value!==mode)el.value=mode;
+        if(pfx===source)return;
+        var fn=window._atlasSyntaksiRecomputeMap&&window._atlasSyntaksiRecomputeMap[pfx];
+        if(typeof fn==='function')fn();
+      });
+    };
+    var parEl=document.getElementById(PFX+'-par-mode');
+    if(parEl){
+      if(PFX==='syntaksi'){
+        window._atlasSyntaksiParMode=parEl.value==='elep'?'elep':'misthoti';
+      }else if(parEl.value!==window._atlasSyntaksiParMode){
+        parEl.value=window._atlasSyntaksiParMode;
+      }
+      parEl.addEventListener('change',function(){
+        window._atlasBroadcastParMode(parEl.value,PFX);
+        recomputeSoon();
+      });
+    }
+  }
 
-  window._atlasSyntaksiRecompute=recompute;
-  window._atlasSyntaksiGetPrintBody=function(){
+  var getPrintBody=function(){
     recompute();
     var cs=getCountState();
     if(!cs.klados||!cs.klados.length)return {ok:false};
@@ -5263,9 +5603,17 @@ def _build_syntaksi_filter_js():
       disclaimerHtml:SYN_PRINT_DISCLAIMER
     };
   };
-  try{window._atlasSyntaksiDebug={computeCore:computeCore,buildDisplayRows:buildDisplayRows,buildJson:buildJson,metricsFromTotal:metricsFromTotal};}catch(e){}
+  window._atlasSyntaksiRecomputeMap=window._atlasSyntaksiRecomputeMap||{};
+  window._atlasSyntaksiRecomputeMap[PFX]=recompute;
+  window._atlasSyntaksiPrint=window._atlasSyntaksiPrint||{};
+  window._atlasSyntaksiPrint[PFX]=getPrintBody;
+  if(PFX==='syntaksi'){
+    window._atlasSyntaksiRecompute=recompute;
+    window._atlasSyntaksiGetPrintBody=getPrintBody;
+    try{window._atlasSyntaksiDebug={computeCore:computeCore,buildDisplayRows:buildDisplayRows,buildJson:buildJson,buildJsonSheet25Parallel:buildJsonSheet25Parallel,metricsFromTotal:metricsFromTotal};}catch(e){}
+  }
   recompute();
-})();
+};
 """
 
 
@@ -5550,12 +5898,35 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
     if edition == "pro" and not count_display_df.empty:
         try:
             if not df_has_tsmede_misthoti_insurance(df):
-                syntaksi_html = build_syntaksi_with_filters(df, description_map)
+                syn_payload = _syntaksi_build_payload(df, description_map)
+                _syn_has_par16 = bool(
+                    syn_payload.get("parallelYears")
+                    or syn_payload.get("parallelYearsMisthoti")
+                    or syn_payload.get("parallelYearsElep")
+                )
+                syntaksi_html = _build_syntaksi_tab_html(
+                    syn_payload, prefix="syntaksi", tab_id="syntaksi",
+                    title="Συντάξιμες Αποδοχές", parallel_only=False,
+                    par_exclude_until2016=_syn_has_par16,
+                    include_engine=True,
+                )
                 if syntaksi_html:
                     tab_entries.append(("syntaksi", "Συντάξιμες", syntaksi_html))
                     syn_x = _build_syntaksi_export_df(df, description_map)
                     if syn_x is not None and not syn_x.empty:
                         excel_by_tid["syntaksi"] = ("Συντάξιμες", syn_x)
+                    # Δεύτερη καρτέλα: μόνο έτη με παράλληλη ασφάλιση ≤2016 (ίδιοι υπολογισμοί)
+                    if (
+                        syn_payload.get("parallelYears")
+                        or syn_payload.get("parallelYearsMisthoti")
+                        or syn_payload.get("parallelYearsElep")
+                    ):
+                        syntaksi_par_html = _build_syntaksi_tab_html(
+                            syn_payload, prefix="syntaksipar", tab_id="syntaksipar",
+                            title="Συντάξιμες αποδοχές παράλληλης ασφάλισης", parallel_only=True, include_engine=False,
+                        )
+                        if syntaksi_par_html:
+                            tab_entries.append(("syntaksipar", "Συντάξιμες αποδοχές παράλληλης ασφάλισης", syntaksi_par_html))
         except Exception:
             pass
 
@@ -6279,9 +6650,10 @@ body.syntaksi-print-doc { font-family: "Fira Sans", -apple-system, Segoe UI, Rob
 .syntaksi-print table.print-table.syntaksi-table.wrap-cells thead th { line-height: 1.25; padding: 4px 3px; }
 .syntaksi-print table.print-table.syntaksi-table tbody tr:nth-child(even) td { background-color: #f9fafb; }
 .syntaksi-print table.print-table.syntaksi-table tbody td:first-child { font-weight: 700; }
+.syntaksi-print table.print-table.syntaksi-table tbody tr.syn-parallel td { background: #fefce8 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .syntaksi-print table.print-table.syntaksi-table tbody tr.syn-total td { background: #fafdfe !important; color: #000 !important; font-weight: 700 !important; border-top: 1px solid #c8dce8; }
-#syntaksi-section .syntaksi-print-summary-mount .print-synt-summary { display: grid !important; }
-#syntaksi-section .syntaksi-print-summary-mount .syntaksi-print-calc-note { display: block !important; }
+.syntaksi-layout .syntaksi-print-summary-mount .print-synt-summary { display: grid !important; }
+.syntaksi-layout .syntaksi-print-summary-mount .syntaksi-print-calc-note { display: block !important; }
 """
 
 VIEWER_STYLES = FONT_IMPORT + """
@@ -6977,7 +7349,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .apodoxes-tooltip.visible { opacity: 1; visibility: visible; transform: translateY(0); }
 .has-apodoxes-tooltip { cursor: help; }
 .cell-description { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
-@media print { .section-actions { display: none !important; } .btn-fs { display: none !important; } .btn-print-tab { display: none !important; } .apodoxes-tooltip { display: none !important; } #tl-paketo-tooltip { display: none !important; } .totals-filters { display: none !important; } .count-filters { display: none !important; } .count-date-presets-bar { display: none !important; } .totals-info-bar { display: none !important; } #syntaksi-metrics-wrap.totals-info-bar { display: flex !important; } .totals-exceeded-wrap, .totals-exceeded-modal-overlay { display: none !important; } .lite-filter-modal-overlay { display: none !important; } .complex-file-warning { display: none !important; } .atlas-tabinfo-btn { display: none !important; } .complex-file-readmore-btn { display: none !important; } .lite-exclusion-note { display: none !important; } .tl-zoom-controls { display: none !important; } #tl-zoom-inner, #tl-paketo-zoom-inner { transform: none !important; } .tl-zoom-wrapper, .tl-paketo-zoom-scroll { overflow-x: hidden !important; } .personal-form { display: none !important; } .personal-notes { display: none !important; } .synopsis-modal-overlay, .synopsis-expand-btn { display: none !important; } }
+@media print { .section-actions { display: none !important; } .btn-fs { display: none !important; } .btn-print-tab { display: none !important; } .apodoxes-tooltip { display: none !important; } #tl-paketo-tooltip { display: none !important; } .totals-filters { display: none !important; } .count-filters { display: none !important; } .count-date-presets-bar { display: none !important; } .totals-info-bar { display: none !important; } .syntaksi-metrics.totals-info-bar { display: flex !important; } .totals-exceeded-wrap, .totals-exceeded-modal-overlay { display: none !important; } .lite-filter-modal-overlay { display: none !important; } .complex-file-warning { display: none !important; } .atlas-tabinfo-btn { display: none !important; } .complex-file-readmore-btn { display: none !important; } .lite-exclusion-note { display: none !important; } .tl-zoom-controls { display: none !important; } #tl-zoom-inner, #tl-paketo-zoom-inner { transform: none !important; } .tl-zoom-wrapper, .tl-paketo-zoom-scroll { overflow-x: hidden !important; } .personal-form { display: none !important; } .personal-notes { display: none !important; } .synopsis-modal-overlay, .synopsis-expand-btn { display: none !important; } }
 .year-section { margin-bottom: 20px; }
 .year-heading { font-size: 15px; font-weight: 800; color: #1e293b; padding: 8px 0 4px 0; border-bottom: 2px solid #6366f1; margin-bottom: 6px; }
 .print-disclaimer { font-size: 12px; color: #64748b; margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; line-height: 1.6; }
@@ -7413,8 +7785,8 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 }
 /* ---- Συντάξιμες Αποδοχές (Pro) ---- */
 .atlas-tab-layout-body:has(.syntaksi-table-scroll) { overflow: hidden; display: flex; flex-direction: column; padding: 0; }
-#syntaksi-section { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
-#syntaksi-section .atlas-tab-layout-top, #syntaksi-section h2, #syntaksi-section .print-description { flex-shrink: 0; }
+.syntaksi-layout { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; --syn-par-highlight: #fefce8; }
+.syntaksi-layout .atlas-tab-layout-top, .syntaksi-layout h2, .syntaksi-layout .print-description { flex-shrink: 0; }
 .syntaksi-metrics.atlas-header-split { margin-bottom: 16px; background: transparent; padding: 0; }
 .syntaksi-metrics-pk { min-width: 0; }
 .syntaksi-metrics-pk-h { font-weight: 700; font-size: 13px; color: #1e293b; display: block; margin-bottom: 4px; }
@@ -7427,6 +7799,26 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
   gap: 12px 14px;
   align-items: start;
 }
+.syntaksi-filters .syntaksi-filters-grid.syntaksi-filters-grid--parallel {
+  grid-template-columns: minmax(150px, 1.35fr) minmax(100px, 0.78fr) minmax(100px, 0.82fr) minmax(120px, 1.05fr) minmax(100px, 0.78fr) minmax(100px, 0.75fr) minmax(110px, 0.88fr) minmax(150px, 1.25fr);
+}
+.syntaksi-filters .syntaksi-filters-grid.syntaksi-filters-grid--parallel.syntaksi-filters-grid--no-tek {
+  grid-template-columns: minmax(150px, 1.35fr) minmax(100px, 0.78fr) minmax(100px, 0.82fr) minmax(120px, 1.05fr) minmax(100px, 0.78fr) minmax(100px, 0.75fr) minmax(110px, 0.88fr);
+}
+.syntaksi-filters .syntaksi-fld-par-mode {
+  min-width: 0;
+  background: var(--syn-par-highlight);
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+.syntaksi-filters .syntaksi-fld-par-mode .apd-filter-field-label { color: #854d0e; }
+.syntaksi-filters .syntaksi-fld-par-mode .apd-select {
+  background: var(--syn-par-highlight);
+  border-color: #fde68a;
+}
+.syntaksi-filters .syntaksi-fld-par-mode .apd-select:hover { border-color: #ca8a04; }
+.syntaksi-filters .syntaksi-fld-par-mode .apd-select:focus { border-color: #ca8a04 !important; }
 .syntaksi-filters .syntaksi-filters-grid .apd-filter-field { min-width: 0; }
 .syntaksi-filters .syntaksi-filters-grid .apd-filter-input,
 .syntaksi-filters .syntaksi-filters-grid .apd-select { min-width: 0; }
@@ -7454,11 +7846,12 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .syntaksi-table-scroll table.print-table tr.syn-total td { background: #fafdfe !important; color: #000 !important; font-weight: 700 !important; border-top: 1px solid #c8dce8; }
 .syntaksi-table-scroll table.print-table tr.syn-sep td { height: 18px; background: transparent; border: 0; }
 .syntaksi-table-scroll table.print-table tr.syn-exagora td { font-weight: 600; }
+.syntaksi-table-scroll table.print-table tr.syn-parallel td { background: var(--syn-par-highlight) !important; }
 .syntaksi-note { margin-top: 10px; font-size: 11px; color: #64748b; }
 .table-fullscreen .syntaksi-table-scroll { flex: 1 !important; min-height: 0 !important; overflow: auto !important; }
 .table-fullscreen .syntaksi-table-scroll table.print-table { border-collapse: separate; border-spacing: 0; overflow: visible; box-shadow: none; border-radius: 0; }
 .table-fullscreen .syntaksi-table-scroll table.print-table thead th { position: sticky; top: 0; z-index: 3; background: #f8fafc; border-bottom: 2px solid #cbd5e1; }
-@media print { .btn-json-syntaksi, .syntaksi-empty, #syntaksi-filters-bar { display: none !important; } #syntaksi-metrics-wrap.syntaksi-metrics, .syntaksi-print #syntaksi-metrics-wrap { display: flex !important; } }
+@media print { .btn-json-syntaksi, .syntaksi-empty, .syntaksi-filters { display: none !important; } .syntaksi-metrics, .syntaksi-print .syntaksi-metrics { display: flex !important; } }
 /* Κλειδωμένο φίλτρο πακέτων ΑΠΔ (ακολουθεί την Καταμέτρηση) */
 .apd-klados-locked .filter-modal-trigger { opacity: 0.6; cursor: not-allowed; pointer-events: none; }
 .apd-klados-locked .filter-selected-chip { pointer-events: none; }
@@ -7852,14 +8245,16 @@ function buildSinglePrintDoc(title,bodyContent){var styles=typeof _printStyles==
 function buildSyntaksiPrintDoc(title,bodyContent){var styles=typeof _printStyles==='string'?_printStyles:'';var name=(typeof _clientName==='string'?_clientName:'').trim().replace(/</g,'&lt;').replace(/&/g,'&amp;');var safeTitle=((name?name+' - ':'')+(title||'Συντάξιμες Αποδοχές')).replace(/"/g,'&quot;');var nameBlock=name?'<div class="print-client-name">'+name+'</div>':'';return'<!DOCTYPE html><html lang="el"><head><meta charset="utf-8"><title>'+safeTitle+'</title><link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700;800&display=swap" rel="stylesheet"><style>'+styles+'</style></head><body class="syntaksi-print-doc">'+nameBlock+bodyContent+'</body></html>';}
 function _stripHiddenCountForPrint(root){if(!root||!root.querySelectorAll)return;var sec=root.id==='count-section'?root:root.querySelector('#count-section');if(!sec||!sec.querySelector('#count-tables-wrapper'))return;sec.querySelectorAll('script').forEach(function(s){s.remove();});sec.querySelectorAll('#count-tables-wrapper tbody tr').forEach(function(tr){if(tr.style.display==='none')tr.remove();});var wrap=sec.querySelector('#count-tables-wrapper');var uni=wrap&&wrap.querySelector('table.count-unified');if(uni){var thead=uni.querySelector('thead');var theadHTML=thead?thead.outerHTML:'';var groups=[];var cur=null;Array.prototype.forEach.call(uni.querySelectorAll('tbody > tr'),function(tr){if(tr.getAttribute('data-is-band')==='1'){cur={year:(tr.getAttribute('data-c-year')||(tr.textContent||'').trim()),rows:[]};groups.push(cur);return;}if(tr.getAttribute('data-is-sep')==='1')return;if(!cur){cur={year:(tr.getAttribute('data-c-year')||''),rows:[]};groups.push(cur);}cur.rows.push(tr.outerHTML);});var out='';groups.forEach(function(g){if(!g.rows.length)return;out+='<div class="year-section"><div class="year-heading">'+(g.year||'')+'</div><table class="print-table">'+theadHTML+'<tbody>'+g.rows.join('')+'</tbody></table></div>';});if(out)wrap.innerHTML=out;}}
 function _apdPrintSectionContent(sec){if(!sec)return'';if(typeof window._atlasApdApply==='function')window._atlasApdApply();var h2=sec.querySelector('h2');var desc=sec.querySelector('.print-description');var mount=sec.querySelector('#apd-tables-mount');var notes='';var plEl=document.getElementById('apd-plafond');if(plEl&&plEl.options&&plEl.options.length){var opt=plEl.options[plEl.selectedIndex];if(opt)notes+='<p class="print-description apd-print-plafond">Πλαφόν: '+String(opt.textContent||'').replace(/</g,'&lt;')+'</p>';}var toEl=document.getElementById('apd-totals-only');if(toEl&&toEl.checked)notes+='<p class="print-description">Μόνο ετήσιες γραμμές συνόλου</p>';return'<div class="print-section apd-layout">'+(h2?h2.outerHTML:'')+(desc?desc.outerHTML:'')+notes+(mount?'<div id="apd-tables-mount">'+mount.innerHTML+'</div>':'')+'</div>';}
-function _syntaksiPrintSectionContent(sec){if(!sec)sec=document.getElementById('syntaksi-section');var titleText=(sec&&sec.querySelector('h2')&&sec.querySelector('h2').textContent)||'Συντάξιμες Αποδοχές';var safeTitle=String(titleText).replace(/</g,'&lt;');var bodyFn=window._atlasSyntaksiGetPrintBody;if(typeof bodyFn!=='function'){return'<div class="syntaksi-print"><h1>'+safeTitle+'</h1></div>';}var pb=bodyFn();if(!pb||!pb.ok){return'<div class="syntaksi-print"><h1>'+safeTitle+'</h1><p class="print-description">Επιλέξτε πακέτα κάλυψης στην καρτέλα Καταμέτρηση.</p></div>';}return'<div class="syntaksi-print"><h1>'+safeTitle+'</h1>'+pb.summaryHtml+pb.tableHtml+(pb.disclaimerHtml||'')+'</div>';}
+function _syntaksiPrefixFromSection(sec){var id=(sec&&sec.id)||'syntaksi-section';return id.replace(/-section$/,'')||'syntaksi';}
+function _syntaksiPrintBodyFor(sec){var pfx=_syntaksiPrefixFromSection(sec);var map=window._atlasSyntaksiPrint||{};if(typeof map[pfx]==='function')return map[pfx];if(typeof window._atlasSyntaksiGetPrintBody==='function')return window._atlasSyntaksiGetPrintBody;return null;}
+function _syntaksiPrintSectionContent(sec){if(!sec)sec=document.getElementById('syntaksi-section');var titleText=(sec&&sec.querySelector('h2')&&sec.querySelector('h2').textContent)||'Συντάξιμες Αποδοχές';var safeTitle=String(titleText).replace(/</g,'&lt;');var bodyFn=_syntaksiPrintBodyFor(sec);if(typeof bodyFn!=='function'){return'<div class="syntaksi-print"><h1>'+safeTitle+'</h1></div>';}var pb=bodyFn();if(!pb||!pb.ok){return'<div class="syntaksi-print"><h1>'+safeTitle+'</h1><p class="print-description">Επιλέξτε πακέτα κάλυψης στην καρτέλα Καταμέτρηση.</p></div>';}return'<div class="syntaksi-print"><h1>'+safeTitle+'</h1>'+pb.summaryHtml+pb.tableHtml+(pb.disclaimerHtml||'')+'</div>';}
 function _patchApdInPrintHtml(html){var live=document.getElementById('apd-section');if(!live||typeof html!=='string'||!html)return html||'';if(typeof window._atlasApdApply==='function')window._atlasApdApply();var liveMount=live.querySelector('#apd-tables-mount');if(!liveMount)return html;try{var doc=new DOMParser().parseFromString(html,'text/html');var printMount=doc.getElementById('apd-tables-mount');if(!printMount)return html;printMount.innerHTML=liveMount.innerHTML;var livePl=document.getElementById('apd-plafond');var printPl=doc.getElementById('apd-plafond');if(livePl&&printPl){printPl.value=livePl.value;Array.from(printPl.options).forEach(function(o){if(o.value===livePl.value)o.setAttribute('selected','selected');else o.removeAttribute('selected');});}return'<!DOCTYPE html>\n'+doc.documentElement.outerHTML;}catch(e){return html;}}
 function _openPrintWindow(printDoc){var w=window.open('','_blank');w.document.write(printDoc);w.document.close();w.focus();setTimeout(function(){w.print();w.close();},400);}
-function printSection(el){if(typeof updatePersonalTitle==='function')updatePersonalTitle();var source=el.classList&&el.classList.contains('print-section')?el:(el.closest&&el.closest('.print-section')||el);var apdSec=(source&&source.id==='apd-section')?source:(source&&source.querySelector?source.querySelector('#apd-section'):null)||(source&&source.closest?source.closest('#apd-section'):null);if(apdSec){var apdTitle=(apdSec.querySelector('h2')&&apdSec.querySelector('h2').textContent)||'ΑΠΔ/Πλαφόν';_openPrintWindow(buildSinglePrintDoc(apdTitle,_apdPrintSectionContent(apdSec)));return;}var synSec=(source&&source.id==='syntaksi-section')?source:(source&&source.querySelector?source.querySelector('#syntaksi-section'):null)||(source&&source.closest?source.closest('#syntaksi-section'):null);if(synSec){var synTitle=(synSec.querySelector('h2')&&synSec.querySelector('h2').textContent)||'Συντάξιμες Αποδοχές';_openPrintWindow(buildSyntaksiPrintDoc(synTitle,_syntaksiPrintSectionContent(synSec)));return;}if(typeof persistInteractiveValues==='function')persistInteractiveValues(source);var clone=source.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var title=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'ATLAS';var bodyContent;var totalsTable=clone.querySelector('#totals-filter-table');if(totalsTable){var h2Text=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'Σύνολα';bodyContent='<div class="print-section"><h2>'+h2Text.replace(/</g,'&lt;')+'</h2>'+totalsTable.outerHTML+'</div>';}else{bodyContent=clone.outerHTML;}_openPrintWindow(buildSinglePrintDoc(title,bodyContent));}
-function openTableFs(el){var overlay=document.createElement('div');overlay.className='table-fullscreen';overlay.id='fs-overlay';var section=el.classList.contains('print-section')?el:el.closest('.print-section');var source=section||el;var heading=source.querySelector?source.querySelector('h2'):null;var titleText=heading?heading.textContent:'Πίνακας';var hasInteractive=source.querySelector&&source.querySelector('script');var toolbar=document.createElement('div');toolbar.className='fs-toolbar';toolbar.innerHTML='<span class="fs-title">'+titleText+'</span>';var actions=document.createElement('div');actions.className='fs-toolbar-actions';var printBtn=document.createElement('button');printBtn.className='fs-print-btn';printBtn.innerHTML='🖨 Εκτύπωση';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(){var bodyEl=overlay.querySelector('.fs-body');if(bodyEl){var apdSec=bodyEl.querySelector('#apd-section');if(apdSec){_openPrintWindow(buildSinglePrintDoc(titleText,_apdPrintSectionContent(apdSec)));return;}var synSec=bodyEl.querySelector('#syntaksi-section');if(synSec){_openPrintWindow(buildSyntaksiPrintDoc(titleText,_syntaksiPrintSectionContent(synSec)));return;}if(typeof persistInteractiveValues==='function')persistInteractiveValues(bodyEl);var clone=bodyEl.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var totalsTable=clone.querySelector('#totals-filter-table');var bodyContent=totalsTable?'<div class="print-section"><h2>'+(titleText.replace(/</g,'&lt;')||'Σύνολα')+'</h2>'+totalsTable.outerHTML+'</div>':clone.innerHTML;_openPrintWindow(buildSinglePrintDoc(titleText,bodyContent));}};actions.appendChild(printBtn);if(typeof XLSX!=='undefined'){var xlsFsBtn=document.createElement('button');xlsFsBtn.className='fs-print-btn';xlsFsBtn.innerHTML='📊 Excel';xlsFsBtn.title='Εξαγωγή αυτού του πίνακα σε Excel (όπως εμφανίζεται)';xlsFsBtn.onclick=function(){var bodyEl=overlay.querySelector('.fs-body');if(bodyEl)exportTabExcel(bodyEl,titleText||'Πίνακας');};actions.appendChild(xlsFsBtn);}if(source&&source.id==='syntaksi-section'){var jsonFsBtn=document.createElement('button');jsonFsBtn.className='fs-json-btn';jsonFsBtn.innerHTML='JSON για Syntaksi Pro 3';jsonFsBtn.title='Εξαγωγή JSON για Syntaksi Pro 3';var liveJson=document.getElementById('syntaksi-json-dl');if(liveJson&&liveJson.disabled)jsonFsBtn.disabled=true;jsonFsBtn.onclick=function(){var dl=document.getElementById('syntaksi-json-dl');if(dl&&!dl.disabled)dl.click();else showToast('Δεν υπάρχουν δεδομένα για JSON.');};actions.appendChild(jsonFsBtn);}var closeBtn=document.createElement('button');closeBtn.className='fs-close';closeBtn.innerHTML='✕';closeBtn.title='Κλείσιμο (Esc)';closeBtn.onclick=closeTableFs;actions.appendChild(closeBtn);toolbar.appendChild(actions);var body=document.createElement('div');body.className='fs-body';if(hasInteractive){var placeholder=document.createElement('div');placeholder.id='fs-placeholder';placeholder.style.display='none';source.parentNode.insertBefore(placeholder,source);body.appendChild(source);overlay._fsSource=source;overlay._fsPlaceholder=placeholder;}else{body.appendChild(source.cloneNode(true));}overlay.appendChild(toolbar);overlay.appendChild(body);document.body.appendChild(overlay);document.body.style.overflow='hidden';}
+function printSection(el){if(typeof updatePersonalTitle==='function')updatePersonalTitle();var source=el.classList&&el.classList.contains('print-section')?el:(el.closest&&el.closest('.print-section')||el);var apdSec=(source&&source.id==='apd-section')?source:(source&&source.querySelector?source.querySelector('#apd-section'):null)||(source&&source.closest?source.closest('#apd-section'):null);if(apdSec){var apdTitle=(apdSec.querySelector('h2')&&apdSec.querySelector('h2').textContent)||'ΑΠΔ/Πλαφόν';_openPrintWindow(buildSinglePrintDoc(apdTitle,_apdPrintSectionContent(apdSec)));return;}var synSec=(source&&source.classList&&source.classList.contains('syntaksi-layout'))?source:(source&&source.querySelector?source.querySelector('.syntaksi-layout'):null)||(source&&source.closest?source.closest('.syntaksi-layout'):null);if(synSec){var synTitle=(synSec.querySelector('h2')&&synSec.querySelector('h2').textContent)||'Συντάξιμες Αποδοχές';_openPrintWindow(buildSyntaksiPrintDoc(synTitle,_syntaksiPrintSectionContent(synSec)));return;}if(typeof persistInteractiveValues==='function')persistInteractiveValues(source);var clone=source.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var title=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'ATLAS';var bodyContent;var totalsTable=clone.querySelector('#totals-filter-table');if(totalsTable){var h2Text=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'Σύνολα';bodyContent='<div class="print-section"><h2>'+h2Text.replace(/</g,'&lt;')+'</h2>'+totalsTable.outerHTML+'</div>';}else{bodyContent=clone.outerHTML;}_openPrintWindow(buildSinglePrintDoc(title,bodyContent));}
+function openTableFs(el){var overlay=document.createElement('div');overlay.className='table-fullscreen';overlay.id='fs-overlay';var section=el.classList.contains('print-section')?el:el.closest('.print-section');var source=section||el;var heading=source.querySelector?source.querySelector('h2'):null;var titleText=heading?heading.textContent:'Πίνακας';var hasInteractive=source.querySelector&&source.querySelector('script');var toolbar=document.createElement('div');toolbar.className='fs-toolbar';toolbar.innerHTML='<span class="fs-title">'+titleText+'</span>';var actions=document.createElement('div');actions.className='fs-toolbar-actions';var printBtn=document.createElement('button');printBtn.className='fs-print-btn';printBtn.innerHTML='🖨 Εκτύπωση';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(){var bodyEl=overlay.querySelector('.fs-body');if(bodyEl){var apdSec=bodyEl.querySelector('#apd-section');if(apdSec){_openPrintWindow(buildSinglePrintDoc(titleText,_apdPrintSectionContent(apdSec)));return;}var synSec=bodyEl.querySelector('.syntaksi-layout');if(synSec){_openPrintWindow(buildSyntaksiPrintDoc(titleText,_syntaksiPrintSectionContent(synSec)));return;}if(typeof persistInteractiveValues==='function')persistInteractiveValues(bodyEl);var clone=bodyEl.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var totalsTable=clone.querySelector('#totals-filter-table');var bodyContent=totalsTable?'<div class="print-section"><h2>'+(titleText.replace(/</g,'&lt;')||'Σύνολα')+'</h2>'+totalsTable.outerHTML+'</div>':clone.innerHTML;_openPrintWindow(buildSinglePrintDoc(titleText,bodyContent));}};actions.appendChild(printBtn);if(typeof XLSX!=='undefined'){var xlsFsBtn=document.createElement('button');xlsFsBtn.className='fs-print-btn';xlsFsBtn.innerHTML='📊 Excel';xlsFsBtn.title='Εξαγωγή αυτού του πίνακα σε Excel (όπως εμφανίζεται)';xlsFsBtn.onclick=function(){var bodyEl=overlay.querySelector('.fs-body');if(bodyEl)exportTabExcel(bodyEl,titleText||'Πίνακας');};actions.appendChild(xlsFsBtn);}if(source&&source.classList&&source.classList.contains('syntaksi-layout')){var _synPfx=(source.id||'syntaksi-section').replace(/-section$/,'')||'syntaksi';var _jsonId=_synPfx+'-json-dl';var jsonFsBtn=document.createElement('button');jsonFsBtn.className='fs-json-btn';jsonFsBtn.innerHTML='JSON για Syntaksi Pro 3';jsonFsBtn.title='Εξαγωγή JSON για Syntaksi Pro 3';var liveJson=document.getElementById(_jsonId);if(liveJson&&liveJson.disabled)jsonFsBtn.disabled=true;jsonFsBtn.onclick=function(){var dl=document.getElementById(_jsonId);if(dl&&!dl.disabled)dl.click();else showToast('Δεν υπάρχουν δεδομένα για JSON.');};actions.appendChild(jsonFsBtn);}var closeBtn=document.createElement('button');closeBtn.className='fs-close';closeBtn.innerHTML='✕';closeBtn.title='Κλείσιμο (Esc)';closeBtn.onclick=closeTableFs;actions.appendChild(closeBtn);toolbar.appendChild(actions);var body=document.createElement('div');body.className='fs-body';if(hasInteractive){var placeholder=document.createElement('div');placeholder.id='fs-placeholder';placeholder.style.display='none';source.parentNode.insertBefore(placeholder,source);body.appendChild(source);overlay._fsSource=source;overlay._fsPlaceholder=placeholder;}else{body.appendChild(source.cloneNode(true));}overlay.appendChild(toolbar);overlay.appendChild(body);document.body.appendChild(overlay);document.body.style.overflow='hidden';}
 function closeTableFs(){var overlay=document.getElementById('fs-overlay');if(overlay){if(overlay._fsSource&&overlay._fsPlaceholder){overlay._fsPlaceholder.parentNode.insertBefore(overlay._fsSource,overlay._fsPlaceholder);overlay._fsPlaceholder.remove();}overlay.remove();document.body.style.overflow='';}}
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeTableFs();});
-function _patchSyntaksiInPrintHtml(html){var live=document.getElementById('syntaksi-section');if(!live||typeof html!=='string'||!html)return html||'';var pb=(typeof window._atlasSyntaksiGetPrintBody==='function')?window._atlasSyntaksiGetPrintBody():null;if(!pb||!pb.ok)return html;try{var doc=new DOMParser().parseFromString(html,'text/html');var sec=doc.getElementById('syntaksi-section');if(!sec)return html;var printMount=doc.getElementById('syntaksi-table-mount');if(printMount){printMount.innerHTML=pb.tableHtml;printMount.removeAttribute('hidden');printMount.classList.add('syntaksi-print-table-mount');}var pe=doc.getElementById('syntaksi-empty');if(pe)pe.setAttribute('hidden','hidden');var fb=doc.getElementById('syntaksi-filters-bar');if(fb)fb.setAttribute('hidden','hidden');var act=doc.getElementById('syntaksi-json-dl');if(act)act.setAttribute('hidden','hidden');var liveMetrics=sec.querySelector('#syntaksi-metrics-wrap');if(liveMetrics)liveMetrics.setAttribute('hidden','hidden');var sumMount=sec.querySelector('.syntaksi-print-summary-mount');if(!sumMount){sumMount=doc.createElement('div');sumMount.className='syntaksi-print-summary-mount syntaksi-print';var mnt=sec.querySelector('#syntaksi-table-mount');if(mnt)sec.insertBefore(sumMount,mnt);else sec.appendChild(sumMount);}sumMount.innerHTML=pb.summaryHtml;sec.classList.add('syntaksi-print');var h2=sec.querySelector('h2');if(h2&&!sec.querySelector('h1.syntaksi-print-h1')){var h1=doc.createElement('h1');h1.className='syntaksi-print-h1';h1.textContent=h2.textContent;h2.replaceWith(h1);}var oldDesc=sec.querySelector('p.print-description:not(.syntaksi-print-calc-note)');if(oldDesc)oldDesc.setAttribute('hidden','hidden');if(!sec.querySelector('.syntaksi-print-disclaimer')&&pb.disclaimerHtml){var disc=doc.createElement('div');disc.className='syntaksi-print-disclaimer';disc.innerHTML=pb.disclaimerHtml;sec.appendChild(disc);}return'<!DOCTYPE html>\n'+doc.documentElement.outerHTML;}catch(e){return html;}}
+function _patchSyntaksiInPrintHtml(html){if(typeof html!=='string'||!html)return html||'';var liveList=document.querySelectorAll('.syntaksi-layout');if(!liveList||!liveList.length)return html;var printMap=window._atlasSyntaksiPrint||{};var any=false;try{var doc=new DOMParser().parseFromString(html,'text/html');Array.prototype.forEach.call(liveList,function(live){var pfx=(live.id||'syntaksi-section').replace(/-section$/,'')||'syntaksi';var fn=printMap[pfx]||window._atlasSyntaksiGetPrintBody;if(typeof fn!=='function')return;var pb=fn();if(!pb||!pb.ok)return;var sec=doc.getElementById(pfx+'-section');if(!sec)return;any=true;var printMount=doc.getElementById(pfx+'-table-mount');if(printMount){printMount.innerHTML=pb.tableHtml;printMount.removeAttribute('hidden');printMount.classList.add('syntaksi-print-table-mount');}var pe=doc.getElementById(pfx+'-empty');if(pe)pe.setAttribute('hidden','hidden');var fb=doc.getElementById(pfx+'-filters-bar');if(fb)fb.setAttribute('hidden','hidden');var act=doc.getElementById(pfx+'-json-dl');if(act)act.setAttribute('hidden','hidden');var liveMetrics=sec.querySelector('#'+pfx+'-metrics-wrap');if(liveMetrics)liveMetrics.setAttribute('hidden','hidden');var sumMount=sec.querySelector('.syntaksi-print-summary-mount');if(!sumMount){sumMount=doc.createElement('div');sumMount.className='syntaksi-print-summary-mount syntaksi-print';var mnt=doc.getElementById(pfx+'-table-mount');if(mnt)sec.insertBefore(sumMount,mnt);else sec.appendChild(sumMount);}sumMount.innerHTML=pb.summaryHtml;sec.classList.add('syntaksi-print');var h2=sec.querySelector('h2');if(h2&&!sec.querySelector('h1.syntaksi-print-h1')){var h1=doc.createElement('h1');h1.className='syntaksi-print-h1';h1.textContent=h2.textContent;h2.replaceWith(h1);}var oldDesc=sec.querySelector('p.print-description:not(.syntaksi-print-calc-note)');if(oldDesc)oldDesc.setAttribute('hidden','hidden');if(!sec.querySelector('.syntaksi-print-disclaimer')&&pb.disclaimerHtml){var disc=doc.createElement('div');disc.className='syntaksi-print-disclaimer';disc.innerHTML=pb.disclaimerHtml;sec.appendChild(disc);}});if(!any)return html;return'<!DOCTYPE html>\n'+doc.documentElement.outerHTML;}catch(e){return html;}}
 function openPrint(){if(typeof updatePersonalTitle==='function')updatePersonalTitle();if(typeof persistInteractiveValues==='function')persistInteractiveValues(document.body);var safeName=(typeof _clientName==='string'?_clientName:'').trim().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');var html=_printHtml;if(typeof _patchApdInPrintHtml==='function')html=_patchApdInPrintHtml(html);if(typeof _patchSyntaksiInPrintHtml==='function')html=_patchSyntaksiInPrintHtml(html);if(safeName)html=html.replace(/<body>/,'<body><div class="prt-name">'+safeName+'</div>');var blob=new Blob([html],{type:'text/html;charset=utf-8'});var url=URL.createObjectURL(blob);window.open(url,'_blank');}
 function getFullSaveFilename(){var n=document.getElementById('personal_fullname');var t=document.getElementById('personal_tameio');var ak=document.getElementById('personal_amka');var name=(n&&n.value)?n.value.trim():'';var tameio=(t&&t.options[t.selectedIndex])?t.options[t.selectedIndex].text.trim():'';var amka=(ak&&ak.value)?ak.value.trim():'';function sanitize(s){return (s||'').replace(/[\s\/\\:*?"<>|]+/g,' ').trim().replace(/\s+/g,'_')||'';}var a=sanitize(name),b=sanitize(tameio),c=sanitize(amka);var parts=[a,b,c].filter(Boolean);var ds=document.body&&document.body.getAttribute('data-atlas-save-file');var suf=(ds&&String(ds).trim())?String(ds).trim():((typeof _fullSaveSuffix==='string'&&_fullSaveSuffix)?_fullSaveSuffix:'ATLAS Pro.html');return (parts.length?parts.join('_')+'_':'')+suf;}
 function persistInteractiveValues(root){var r=root||document.body;if(!r||!r.querySelectorAll)return;r.querySelectorAll('input').forEach(function(inp){var t=(inp.type||'').toLowerCase();if(t==='checkbox'||t==='radio'){if(inp.checked)inp.setAttribute('checked','checked');else inp.removeAttribute('checked');}else if(t!=='file'&&t!=='button'&&t!=='submit'&&t!=='image'){inp.setAttribute('value',inp.value);}});r.querySelectorAll('textarea').forEach(function(ta){ta.textContent=ta.value;});r.querySelectorAll('select').forEach(function(sel){Array.from(sel.options).forEach(function(opt){if(opt.selected)opt.setAttribute('selected','selected');else opt.removeAttribute('selected');});});}
@@ -7980,7 +8375,7 @@ function downloadExcelReport(){
 function downloadFullHtml(){persistInteractiveValues(document.body);var html='<!DOCTYPE html>\n'+document.documentElement.outerHTML;var blob=new Blob([html],{type:'text/html;charset=utf-8'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=(typeof getFullSaveFilename==='function'?getFullSaveFilename():_downloadFilename);a.click();URL.revokeObjectURL(a.href);}
 function showToast(message){var container=document.getElementById('toast-container');var toast=document.createElement('div');toast.className='toast';toast.textContent=message;container.appendChild(toast);void toast.offsetWidth;toast.classList.add('show');setTimeout(function(){toast.classList.remove('show');setTimeout(function(){if(container.contains(toast))container.removeChild(toast);},300);},2000);}
 document.addEventListener('click',function(e){var target=e.target.closest('.copy-target');if(!target||target.closest('#pane-synopsis'))return;var text=target.innerText.trim();if(text&&text!=='-'&&text!==''){navigator.clipboard.writeText(text).then(function(){showToast('Αντιγράφηκε: '+text);}).catch(function(err){console.error('Copy failed:',err);});}});
-document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.print-section').forEach(function(sec){if(sec.closest('#pane-personal'))return;var actions=document.createElement('div');actions.className='section-actions';if(sec.id==='syntaksi-section'){var jsonBtn=sec.querySelector('#syntaksi-json-dl');if(jsonBtn){jsonBtn.removeAttribute('hidden');actions.appendChild(jsonBtn);}}var printBtn=document.createElement('button');printBtn.className='btn-print-tab';printBtn.innerHTML='🖨';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(e){e.stopPropagation();printSection(sec);};actions.appendChild(printBtn);if(!sec.closest('#pane-synopsis')){var fsBtn=document.createElement('button');fsBtn.className='btn-fs';fsBtn.innerHTML='⛶';fsBtn.title='Πλήρης οθόνη';fsBtn.onclick=function(e){e.stopPropagation();openTableFs(sec);};actions.appendChild(fsBtn);}if(typeof XLSX!=='undefined'&&(sec.querySelector('table.print-table')||sec.id==='syntaksi-section')){var xlsBtn=document.createElement('button');xlsBtn.className='btn-xls-tab';xlsBtn.innerHTML='📊';xlsBtn.title='Εξαγωγή αυτού του πίνακα σε Excel (όπως εμφανίζεται)';xlsBtn.onclick=function(e){e.stopPropagation();var pane=sec.closest('.tab-pane');var tid=pane?(pane.id||'').replace(/^pane-/,''):'';var lbl=_atlasTabLabel(tid);if(!lbl||lbl===tid){var h=sec.querySelector('h2');lbl=h?h.textContent.trim():(lbl||'Πίνακας');}exportTabExcel(sec,lbl);};actions.appendChild(xlsBtn);}sec.appendChild(actions);});
+document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.print-section').forEach(function(sec){if(sec.closest('#pane-personal'))return;var actions=document.createElement('div');actions.className='section-actions';var _isSyn=sec.classList&&sec.classList.contains('syntaksi-layout');if(_isSyn){var _synPfx=(sec.id||'syntaksi-section').replace(/-section$/,'')||'syntaksi';var jsonBtn=sec.querySelector('#'+_synPfx+'-json-dl');if(jsonBtn){jsonBtn.removeAttribute('hidden');actions.appendChild(jsonBtn);}}var printBtn=document.createElement('button');printBtn.className='btn-print-tab';printBtn.innerHTML='🖨';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(e){e.stopPropagation();printSection(sec);};actions.appendChild(printBtn);if(!sec.closest('#pane-synopsis')){var fsBtn=document.createElement('button');fsBtn.className='btn-fs';fsBtn.innerHTML='⛶';fsBtn.title='Πλήρης οθόνη';fsBtn.onclick=function(e){e.stopPropagation();openTableFs(sec);};actions.appendChild(fsBtn);}if(typeof XLSX!=='undefined'&&(sec.querySelector('table.print-table')||_isSyn)){var xlsBtn=document.createElement('button');xlsBtn.className='btn-xls-tab';xlsBtn.innerHTML='📊';xlsBtn.title='Εξαγωγή αυτού του πίνακα σε Excel (όπως εμφανίζεται)';xlsBtn.onclick=function(e){e.stopPropagation();var pane=sec.closest('.tab-pane');var tid=pane?(pane.id||'').replace(/^pane-/,''):'';var lbl=_atlasTabLabel(tid);if(!lbl||lbl===tid){var h=sec.querySelector('h2');lbl=h?h.textContent.trim():(lbl||'Πίνακας');}exportTabExcel(sec,lbl);};actions.appendChild(xlsBtn);}sec.appendChild(actions);});
 document.querySelectorAll('table.print-table').forEach(function(tbl){if(tbl.closest('.print-section'))return;var wrapper=document.createElement('div');wrapper.className='table-container';tbl.parentNode.insertBefore(wrapper,tbl);wrapper.appendChild(tbl);var actions=document.createElement('div');actions.className='section-actions';var printBtn=document.createElement('button');printBtn.className='btn-print-tab';printBtn.innerHTML='🖨';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(e){e.stopPropagation();printSection(tbl);};var fsBtn=document.createElement('button');fsBtn.className='btn-fs';fsBtn.innerHTML='⛶';fsBtn.title='Πλήρης οθόνη';fsBtn.onclick=function(e){e.stopPropagation();openTableFs(tbl);};actions.appendChild(printBtn);actions.appendChild(fsBtn);if(typeof XLSX!=='undefined'){var xlsBtn2=document.createElement('button');xlsBtn2.className='btn-xls-tab';xlsBtn2.innerHTML='📊';xlsBtn2.title='Εξαγωγή αυτού του πίνακα σε Excel (όπως εμφανίζεται)';xlsBtn2.onclick=function(e){e.stopPropagation();var pane=tbl.closest('.tab-pane');var tid=pane?(pane.id||'').replace(/^pane-/,''):'';var lbl=_atlasTabLabel(tid)||'Πίνακας';exportTabExcel(tbl,lbl);};actions.appendChild(xlsBtn2);}wrapper.appendChild(actions);});
 var targetColumns=['Συνολικές ημέρες','Μικτές αποδοχές','Συνολικές εισφορές','ΣΥΝΟΛΟ','ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ','ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ','ΑΠΟΔΟΧΕΣ','ΕΙΣΦΟΡΕΣ','Ημέρες Ασφ.','Σύνολο','Μικτές Αποδοχές','Συνολικές Εισφορές'];
 var tables=document.querySelectorAll('table.print-table');tables.forEach(function(table){var headers=table.querySelectorAll('thead th');var targetIndices=[];headers.forEach(function(th,index){var headerText=th.textContent.trim();if(targetColumns.some(function(col){return headerText.indexOf(col)!==-1;})){targetIndices.push(index);}});if(targetIndices.length>0){var rows=table.querySelectorAll('tbody tr');rows.forEach(function(row){var cells=row.querySelectorAll('td');targetIndices.forEach(function(index){if(cells[index]){cells[index].classList.add('copy-target');cells[index].title='Κλικ για αντιγραφή';}});});}});
