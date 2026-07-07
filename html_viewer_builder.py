@@ -190,6 +190,7 @@ def _build_parallel_metrics_html(
     days_label: str,
     *,
     mode: str,
+    parallel_df: pd.DataFrame | None = None,
 ) -> str:
     if mode == "2017":
         months, days = compute_parallel_2017_summary_metrics(df)
@@ -200,8 +201,18 @@ def _build_parallel_metrics_html(
             "ΕΦΚΑ μισθωτή + ΕΦΚΑ μη μισθωτή. Εφαρμόζεται όριο 25 ημερών/μήνα.</div>"
             "</div>"
         )
+        metric_cells = [
+            _atlas_metric_cell_html(months_label, format_number_greek(months, decimals=0)),
+            _atlas_metric_cell_html(days_label, format_number_greek(days, decimals=0)),
+        ]
     else:
-        months, days = compute_parallel_summary_metrics(df)
+        months, _legacy_days = compute_parallel_summary_metrics(df)
+        if parallel_df is not None and not parallel_df.empty:
+            days = _compute_parallel_days_from_print_df(parallel_df)
+        else:
+            days = _legacy_days
+        years = days / 300 if days else 0.0
+        extra_units = years * 20
         info_html = (
             '<div class="atlas-info-box">'
             '<div class="atlas-info-box-title">Παράλληλη ασφάλιση</div>'
@@ -210,13 +221,170 @@ def _build_parallel_metrics_html(
             "μισθωτό (ΜΕ), ΙΚΑ &amp; ΤΣΑΥ μη μισθωτό (ΜΕ), ή ΟΓΑ Κ &amp; ΙΚΑ/ΟΑΕΕ (έως 31/12/2016).</div>"
             "</div>"
         )
-    return _build_atlas_header_split_metrics_html(
-        info_html,
-        [
+        metric_cells = [
             _atlas_metric_cell_html(months_label, format_number_greek(months, decimals=0)),
             _atlas_metric_cell_html(days_label, format_number_greek(days, decimals=0)),
-        ],
+            _atlas_metric_cell_html("Έτη Παράλληλης", format_number_greek(years, decimals=2)),
+            _atlas_metric_cell_html("Επιπλέον Μονάδες", format_number_greek(extra_units, decimals=2)),
+        ]
+    return _build_atlas_header_split_metrics_html(info_html, metric_cells)
+
+
+_PARALLEL_MONTH_ORDER = ['ΙΑΝ', 'ΦΕΒ', 'ΜΑΡ', 'ΑΠΡ', 'ΜΑΙ', 'ΙΟΥΝ', 'ΙΟΥΛ', 'ΑΥΓ', 'ΣΕΠ', 'ΟΚΤ', 'ΝΟΕ', 'ΔΕΚ']
+_PARALLEL_MONEY_COLS = ('Μικτές Αποδοχές', 'Συνολικές Εισφορές')
+
+
+def _parse_gr_int_value(raw) -> int:
+    """Διαβάζει μορφοποιημένο ακέραιο ημερών (ελληνικό format π.χ. '1.234') σε int."""
+    t = str(raw).strip()
+    if not t or t in ('-', 'nan', 'None'):
+        return 0
+    neg = t.startswith('-')
+    digits = re.sub(r'[^\d]', '', t)
+    if not digits:
+        return 0
+    val = int(digits)
+    return -val if neg else val
+
+
+def _parse_gr_money_value(raw) -> float:
+    """Διαβάζει μορφοποιημένο ποσό (π.χ. '1.234,56 €') σε float."""
+    t = str(raw).strip()
+    if not t or t in ('-', 'nan', 'None'):
+        return 0.0
+    neg = t.startswith('-')
+    t = re.sub(r'[^\d.,]', '', t)
+    if not t:
+        return 0.0
+    t = t.replace('.', '').replace(',', '.')
+    try:
+        val = float(t)
+    except ValueError:
+        return 0.0
+    return -val if neg else val
+
+
+def _compute_parallel_year_day_totals(parallel_df: pd.DataFrame) -> dict[str, int]:
+    """Παράλληλες ημέρες ανά έτος (ίδια λογική με τη γραμμή «Σύνολο» του πίνακα)."""
+    if parallel_df is None or parallel_df.empty or 'Έτος' not in parallel_df.columns:
+        return {}
+    rendered_cols = [c for c in parallel_df.columns if c != 'Έτος']
+    month_cols = [c for c in rendered_cols if c in _PARALLEL_MONTH_ORDER]
+    if not month_cols:
+        return {}
+    result: dict[str, int] = {}
+    for year, grp in parallel_df.groupby('Έτος'):
+        year_parallel = 0
+        for c in month_cols:
+            month_sum = sum(_parse_gr_int_value(v) for v in grp[c])
+            year_parallel += min(max(month_sum - 25, 0), 25)
+        result[str(year).strip()] = year_parallel
+    return result
+
+
+def _compute_parallel_days_from_print_df(parallel_df: pd.DataFrame) -> int:
+    """Συνολικές παράλληλες ημέρες = άθροισμα ετήσιων γραμμών «Σύνολο»."""
+    return sum(_compute_parallel_year_day_totals(parallel_df).values())
+
+
+def _parallel_total_row_cell_styles(rendered_cols: list[str]) -> dict[str, str]:
+    """Ίδια μορφοποίηση γραμμής συνόλου με την Καταμέτρηση (print_style_rows)."""
+    label_col = 'Περιγραφή'
+    try:
+        desc_idx = rendered_cols.index(label_col)
+        desc_right_cols = set(rendered_cols[desc_idx:])
+    except ValueError:
+        desc_right_cols = set()
+    month_cols = [c for c in rendered_cols if c in _PARALLEL_MONTH_ORDER]
+    total_bold_cols = (
+        [label_col, 'Σύνολο'] + month_cols + [c for c in _PARALLEL_MONEY_COLS if c in rendered_cols]
     )
+    styles: dict[str, str] = {}
+    for col in rendered_cols:
+        style = ''
+        if col in desc_right_cols:
+            style += 'background-color:#f5fafc;color:#000;'
+        if col in total_bold_cols:
+            style += 'font-weight:700;'
+        if col == label_col:
+            style += 'white-space:nowrap;'
+        if style:
+            styles[col] = style
+    return styles
+
+
+def _parallel_total_td(col: str, value: str, styles: dict[str, str]) -> str:
+    style = styles.get(col, '')
+    if style:
+        return f'<td style="{style}">{value}</td>'
+    return f'<td>{value}</td>'
+
+
+def _build_parallel_year_totals_map(parallel_df: pd.DataFrame) -> dict:
+    """Γραμμή συνόλων ανά έτος (HTML <tr>) για τον πίνακα Παράλληλης έως 2016.
+
+    Ανά μήνα: αθροίζονται οι ημέρες όλων των εγγραφών και εμφανίζεται το
+    ΥΠΕΡΒΑΛΛΟΝ πάνω από 25 (= παράλληλες ημέρες), με ανώτατο όριο 25
+    (π.χ. μισθωτή 12 + ελ. επάγγελμα 25 = 37 → 37 − 25 = 12 παράλληλες).
+    Το ετήσιο «Σύνολο» = άθροισμα των μηνιαίων παράλληλων ημερών.
+    Επιπλέον εμφανίζονται τα ετήσια σύνολα Μικτών Αποδοχών / Συνολικών Εισφορών."""
+    if parallel_df is None or parallel_df.empty or 'Έτος' not in parallel_df.columns:
+        return {}
+    rendered_cols = [c for c in parallel_df.columns if c != 'Έτος']
+    month_cols = [c for c in rendered_cols if c in _PARALLEL_MONTH_ORDER]
+    money_cols = [c for c in rendered_cols if c in _PARALLEL_MONEY_COLS]
+    if not month_cols:
+        return {}
+    label_col = 'Περιγραφή' if 'Περιγραφή' in rendered_cols else (rendered_cols[0] if rendered_cols else None)
+    cell_styles = _parallel_total_row_cell_styles(rendered_cols)
+
+    result: dict = {}
+    year_day_totals = _compute_parallel_year_day_totals(parallel_df)
+    for year, grp in parallel_df.groupby('Έτος'):
+        year_key = str(year).strip()
+        month_totals = {}
+        for c in month_cols:
+            month_sum = sum(_parse_gr_int_value(v) for v in grp[c])
+            month_totals[c] = min(max(month_sum - 25, 0), 25)
+        grand_total = year_day_totals.get(year_key, sum(month_totals.values()))
+        money_totals = {c: sum(_parse_gr_money_value(v) for v in grp[c]) for c in money_cols}
+
+        cells = []
+        label_placed = False
+        for c in rendered_cols:
+            if c == 'Σύνολο':
+                val = format_number_greek(grand_total, decimals=0) if grand_total else ''
+                cells.append(_parallel_total_td(c, val, cell_styles))
+            elif c in month_cols:
+                v = month_totals.get(c, 0)
+                val = format_number_greek(v, decimals=0) if v else ''
+                cells.append(_parallel_total_td(c, val, cell_styles))
+            elif c in money_cols:
+                v = money_totals.get(c, 0.0)
+                val = format_currency(v) if v else ''
+                cells.append(_parallel_total_td(c, val, cell_styles))
+            elif c == label_col and not label_placed:
+                cells.append(_parallel_total_td(c, f'ΣΥΝΟΛΟ {year_key}', cell_styles))
+                label_placed = True
+            else:
+                cells.append(_parallel_total_td(c, '', cell_styles))
+        result[year_key] = f'<tr class="total-row" data-is-total="1">{"".join(cells)}</tr>'
+    return result
+
+
+def _inject_parallel_year_totals(par_html: str, parallel_df: pd.DataFrame) -> str:
+    """Εισάγει τη γραμμή συνόλων στο τέλος του tbody κάθε ετήσιου section της Παράλληλης."""
+    totals_by_year = _build_parallel_year_totals_map(parallel_df)
+    if not totals_by_year:
+        return par_html
+    pattern = re.compile(r"(<div class='year-heading'>)(.*?)(</div>)(.*?)(</tbody>)", re.DOTALL)
+
+    def _repl(m: "re.Match") -> str:
+        year = m.group(2).strip()
+        extra = totals_by_year.get(year, '')
+        return m.group(1) + m.group(2) + m.group(3) + m.group(4) + extra + m.group(5)
+
+    return pattern.sub(_repl, par_html)
 
 
 def _build_multi_metrics_html(df: pd.DataFrame, description_map: dict | None = None) -> str:
@@ -5463,6 +5631,7 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
             style_rows=parallel_styles,
             collapse_cols=['Ταμείο', 'Τύπος Ασφάλισης', 'Εργοδότης'],
         )
+        par_html = _inject_parallel_year_totals(par_html, parallel_df)
         _par_info = [
             (
                 "info",
@@ -5491,7 +5660,8 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
                     "(έως 31/12/2016).</p>"
                 ),
                 metrics_html=_build_parallel_metrics_html(
-                    df, "Μήνες Παράλληλης", "Ημέρες Παράλληλης", mode="legacy"
+                    df, "Μήνες Παράλληλης", "Ημέρες Παράλληλης", mode="legacy",
+                    parallel_df=parallel_df,
                 ),
                 body_html=par_html,
             ),
@@ -6000,6 +6170,8 @@ table.print-table tbody td:first-child { font-weight: 700; }
 table.print-table tbody tr.total-row td { background: #dbeafe !important; font-weight: 700 !important; border-top: 1px solid #93c5fd; }
 #count-tables-wrapper table.print-table tbody tr.total-row td,
 #count-tables-wrapper table.print-table tbody tr[data-is-total="1"] td { background: #f5fafc !important; color: #000 !important; font-weight: 700 !important; border-top: 1px solid #c8dce8; }
+#parallel-section table.print-table tbody tr.total-row td,
+#parallel-section table.print-table tbody tr[data-is-total="1"] td { background: #f5fafc !important; color: #000 !important; font-weight: 700 !important; border-top: 1px solid #c8dce8; }
 #count-tables-wrapper table.print-table tbody td.copy-target { transition: background-color 0.18s ease, box-shadow 0.18s ease; }
 #count-tables-wrapper table.print-table tbody td.copy-target:hover { background-color: rgba(99, 102, 241, 0.14) !important; box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.38); }
 /* Ομοιόμορφη/responsive κατανομή στηλών στην Καταμέτρηση (ίδια λογική με full screen): αγνόηση των fixed πλατών του colgroup */
@@ -6789,6 +6961,13 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
   font-weight: 700 !important;
   border-top: 1px solid #c8dce8;
 }
+#parallel-section table.print-table tbody tr.total-row td,
+#parallel-section table.print-table tbody tr[data-is-total="1"] td {
+  background: #f5fafc !important;
+  color: #000 !important;
+  font-weight: 700 !important;
+  border-top: 1px solid #c8dce8;
+}
 .table-fullscreen .fs-body table.print-table:not(.count-unified) { table-layout: auto; font-size: 16px; }
 .table-fullscreen .fs-body table.print-table colgroup { display: table-column-group; }
 .table-fullscreen .fs-body table.print-table:not(.count-unified) colgroup col { width: auto !important; }
@@ -7136,6 +7315,18 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
   color: #000 !important;
   font-weight: 700 !important;
   border-top: 1px solid #c8dce8;
+}
+#parallel-section table.print-table tbody tr.total-row td,
+#parallel-section table.print-table tbody tr[data-is-total="1"] td {
+  background: #f5fafc !important;
+  color: #000 !important;
+  font-weight: 700 !important;
+  border-top: 1px solid #c8dce8;
+}
+#parallel-section table.print-table thead th:nth-child(n+7),
+#parallel-section table.print-table tbody td:nth-child(n+7) {
+  text-align: right;
+  white-space: nowrap;
 }
 #count-tables-wrapper table.print-table tbody td.copy-target {
   transition: background-color 0.18s ease, box-shadow 0.18s ease;
