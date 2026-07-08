@@ -5926,7 +5926,7 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
                             title="Συντάξιμες αποδοχές παράλληλης ασφάλισης", parallel_only=True, include_engine=False,
                         )
                         if syntaksi_par_html:
-                            tab_entries.append(("syntaksipar", "Συντάξιμες αποδοχές παράλληλης ασφάλισης", syntaksi_par_html))
+                            tab_entries.append(("syntaksipar", "Συντάξιμες παραλ.", syntaksi_par_html))
         except Exception:
             pass
 
