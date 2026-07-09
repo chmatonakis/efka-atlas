@@ -1668,10 +1668,10 @@ def build_totals_with_filters(display_summary, raw_df=None, desc_map=None,
     apodochon_filters = _lite_filter_modal_group("Τύπος αποδοχών", apodochon_options, "typosApod") if apodochon_options else ""
     date_filters = (
         '<div class="filter-group">'
-        '<input type="text" id="filter-apo" class="filter-date" placeholder="Από (ηη/μμ/εεεε)" maxlength="10">'
+        '<input type="text" id="filter-apo" class="filter-date" placeholder="Από (mm/yyyy)" maxlength="10">'
         '</div>'
         '<div class="filter-group">'
-        '<input type="text" id="filter-eos" class="filter-date" placeholder="Έως (ηη/μμ/εεεε)" maxlength="10">'
+        '<input type="text" id="filter-eos" class="filter-date" placeholder="Έως (mm/yyyy)" maxlength="10">'
         '</div>'
     )
 
@@ -1931,7 +1931,9 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
   var CAP=25,IKACAP=31,YD=300,ETAAMSGCAP=30;
   var MN={1:'\\u0399\\u03B1\\u03BD',2:'\\u03A6\\u03B5\\u03B2',3:'\\u039C\\u03B1\\u03C1',4:'\\u0391\\u03C0\\u03C1',5:'\\u039C\\u03B1\\u03CA',6:'\\u0399\\u03BF\\u03C5\\u03BD',7:'\\u0399\\u03BF\\u03C5\\u03BB',8:'\\u0391\\u03C5\\u03B3',9:'\\u03A3\\u03B5\\u03C0',10:'\\u039F\\u03BA\\u03C4',11:'\\u039D\\u03BF\\u03B5',12:'\\u0394\\u03B5\\u03BA'};
 
-  function pd(s){if(!s)return null;var m=s.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})$/);return m?new Date(+m[3],m[2]-1,+m[1]):null;}
+  function pd(s){if(!s)return null;var t=String(s).trim();var m3=t.match(/^(\\d{1,2})[./](\\d{1,2})[./](\\d{4})$/);if(m3)return new Date(+m3[3],m3[2]-1,+m3[1]);var m2=t.match(/^(\\d{1,2})[./](\\d{4})$/);if(m2)return new Date(+m2[2],m2[1]-1,1);var y=parseInt(t,10);if(!isNaN(y)&&y>=1000&&y<=9999)return new Date(y,0,1);return null;}
+  function ymFromDate(d){return d?d.getFullYear()*100+(d.getMonth()+1):0;}
+  function ymFromApoEos(s){var d=pd(s);return ymFromDate(d);}
   function fi(n){return n===0?'0':n.toString().replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');}
   function fd(n){var p=n.toFixed(1).split('.');return p[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.')+','+p[1];}
   function fy(n){var p=n.toFixed(2).split('.');return p[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.')+','+p[1];}
@@ -2063,7 +2065,9 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
         if(HT&&tyC.length&&(r.ty===undefined||tyC.indexOf(r.ty)===-1))return false;
         if(HE&&etC.length&&(r.et===undefined||etC.indexOf(r.et)===-1))return false;
         var rA=pd(r.apo),rE=pd(r.eos);if(!rA||!rE)return false;
-        if(aD&&rE<aD)return false;if(eD&&rA>eD)return false;
+        var rYm0=ymFromDate(rA),rYm1=ymFromDate(rE);
+        var fYm=ymFromDate(aD),tYm=ymFromDate(eD);
+        if(fYm&&rYm1<fYm)return false;if(tYm&&rYm0>tYm)return false;
         return true;
       });
 
@@ -2558,11 +2562,11 @@ def build_count_with_filters(count_display_df, print_style_rows, count_df,
         f'<div class="cnt-grid-apodox">{_cnt_apodoxes_dd}</div>'
         '<div class="cnt-grid-from">'
         '<input type="text" id="cnt-filter-from" class="filter-date" '
-        'placeholder="01/01/1960" aria-label="Από (dd/mm/yyyy)" autocomplete="off">'
+        'placeholder="01/2002" aria-label="Από (mm/yyyy)" autocomplete="off">'
         '</div>'
         '<div class="cnt-grid-to">'
         '<input type="text" id="cnt-filter-to" class="filter-date" '
-        'placeholder="31/12/2040" aria-label="Έως (dd/mm/yyyy)" autocomplete="off">'
+        'placeholder="12/2026" aria-label="Έως (mm/yyyy)" autocomplete="off">'
         '</div>'
         f'<div class="cnt-grid-reset">{_cnt_reset_btn}</div>'
         '<div class="cnt-grid-row2">'
@@ -2721,7 +2725,7 @@ def _build_count_filter_js():
     return sums;
   }
 
-  function addTrToSums(tr,sums,cm,totOnly,segTameioRef){
+  function addTrToSums(tr,sums,cm,totOnly,segTameioRef,fromM,toM){
     if(tr.getAttribute('data-is-band')==='1')return;
     if(tr.getAttribute('data-is-sep')==='1')return;
     if(tr.getAttribute('data-is-total')==='1')return;
@@ -2733,8 +2737,13 @@ def _build_count_filter_js():
       var tm=(tr.getAttribute('data-c-tameio')||'').trim();
       if(tm&&!segTameioRef.v)segTameioRef.v=tm;
     }
+    var yr=parseInt(tr.getAttribute('data-c-year')||'',10)||0;
     Object.keys(sums).forEach(function(k){
       var i=parseInt(k,10);
+      if(cm.monthIdxs.indexOf(i)>=0){
+        var mi=cm.monthIdxs.indexOf(i)+1;
+        if(yr&&!cntMonthInRange(yr,mi,fromM,toM))return;
+      }
       if(tds[i]){var v=parseGreekNum(tds[i].textContent);if(!isNaN(v))sums[k]=sums[k]+v;}
     });
   }
@@ -2863,22 +2872,61 @@ def _build_count_filter_js():
     });
   }
 
-  function cntParseDate(s){
+  function cntParseMonthYear(s,isTo){
     if(!s)return null;
     var t=String(s).trim();
     if(!t)return null;
-    var m=t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if(m)return new Date(parseInt(m[3],10),parseInt(m[2],10)-1,parseInt(m[1],10));
+    var m3=t.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/);
+    if(m3)return {y:parseInt(m3[3],10),m:parseInt(m3[2],10)};
+    var m2=t.match(/^(\d{1,2})[./](\d{4})$/);
+    if(m2)return {y:parseInt(m2[2],10),m:parseInt(m2[1],10)};
     var y=parseInt(t,10);
-    if(!isNaN(y)&&y>=1000&&y<=9999)return new Date(y,0,1);
+    if(!isNaN(y)&&y>=1000&&y<=9999)return {y:y,m:isTo?12:1};
     return null;
   }
-  function cntYearFromInput(id,fallback){
+  function cntMonthIntFromInput(id,fallback,isTo){
     var el=document.getElementById(id);
     if(!el)return fallback;
-    var d=cntParseDate(el.value);
-    if(d)return d.getFullYear();
-    return fallback;
+    var raw=(el.value||'').trim();
+    if(!raw)return fallback;
+    var p=cntParseMonthYear(raw,!!isTo);
+    return p?p.y*100+p.m:fallback;
+  }
+  function cntMonthInRange(year,month,fromM,toM){
+    if(!year||!month)return true;
+    var ym=year*100+month;
+    if(fromM&&ym<fromM)return false;
+    if(toM&&ym>toM)return false;
+    return true;
+  }
+  function cntYearHasMonthInRange(year,fromM,toM){
+    if(!year)return true;
+    for(var m=1;m<=12;m++){if(cntMonthInRange(year,m,fromM,toM))return true;}
+    return false;
+  }
+  function cntMaskMonthCells(tr,cm,fromM,toM){
+    var yr=parseInt(tr.getAttribute('data-c-year')||'',10)||0;
+    if(!yr||tr.getAttribute('data-is-band')==='1'||tr.getAttribute('data-is-sep')==='1'||tr.getAttribute('data-is-total')==='1')return;
+    var tds=tr.querySelectorAll('td');
+    cm.monthIdxs.forEach(function(colIdx,pos){
+      var mi=pos+1;
+      var td=tds[colIdx];
+      if(!td)return;
+      var attr='data-c-raw-'+colIdx;
+      if(!td.hasAttribute(attr))td.setAttribute(attr,td.textContent||'');
+      var raw=td.getAttribute(attr)||'';
+      td.textContent=cntMonthInRange(yr,mi,fromM,toM)?raw:'';
+    });
+  }
+  function cntRecalcRowSynolo(tr,cm){
+    if(cm.synoloIdx===undefined||tr.getAttribute('data-is-total')==='1')return;
+    var tds=tr.querySelectorAll('td');
+    var total=0;
+    cm.monthIdxs.forEach(function(colIdx){
+      var v=parseGreekNum((tds[colIdx]&&tds[colIdx].textContent)||'');
+      if(!isNaN(v))total+=v;
+    });
+    if(tds[cm.synoloIdx])tds[cm.synoloIdx].textContent=formatDays(total);
   }
 
   function liteCollectChecked(sec,key){
@@ -2928,8 +2976,8 @@ def _build_count_filter_js():
       var escA=function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');};
       label.innerHTML=vals.map(function(v){return '<button type="button" class="filter-selected-chip" data-value="'+escA(v)+'" data-filter-key="'+escA(key)+'" title="Αφαίρεση">'+esc(v)+'</button>';}).join('');
     });
-    var fromY=cntYearFromInput('cnt-filter-from',0);
-    var toY=cntYearFromInput('cnt-filter-to',9999);
+    var fromM=cntMonthIntFromInput('cnt-filter-from',0,false);
+    var toM=cntMonthIntFromInput('cnt-filter-to',999912,true);
     var totOnly=document.getElementById('cnt-totals-only')&&document.getElementById('cnt-totals-only').checked;
     var sparseGap=document.getElementById('cnt-year-sparse')&&document.getElementById('cnt-year-sparse').checked;
     sec.classList.toggle('count-year-sparse', !!sparseGap);
@@ -2937,7 +2985,13 @@ def _build_count_filter_js():
     if(cTable){
       var cm=mapHeaders(cTable);
       var rows=cTable.querySelectorAll('tbody tr');
-      function rowYearOK(tr){var yr=parseInt(tr.getAttribute('data-c-year')||'',10);return !(yr&&(yr<fromY||yr>toY));}
+      function rowYearOK(tr){var yr=parseInt(tr.getAttribute('data-c-year')||'',10);return !yr||cntYearHasMonthInRange(yr,fromM,toM);}
+
+      // 0) Μάσκα μηνών εκτός διαστήματος (μήνας/έτος μόνο)
+      rows.forEach(function(tr){
+        cntMaskMonthCells(tr,cm,fromM,toM);
+        cntRecalcRowSynolo(tr,cm);
+      });
 
       // 1) Φίλτρο ανά γραμμή (έτος + κριτήρια)
       rows.forEach(function(tr){
@@ -2985,7 +3039,7 @@ def _build_count_filter_js():
           segTameioRef.v='';
           continue;
         }
-        addTrToSums(tr,sums,cm,totOnly,segTameioRef);
+        addTrToSums(tr,sums,cm,totOnly,segTameioRef,fromM,toM);
       }
 
       // 4) Ορατότητα μπάντας/κενής γραμμής: κρύψε έτη χωρίς ορατές γραμμές
@@ -3054,7 +3108,7 @@ def _build_count_filter_js():
         return s;
       }
       var fr=allRows.filter(function(r){
-        if(r.y<fromY||r.y>toY)return false;
+        if(!cntMonthInRange(r.y,r.m,fromM,toM))return false;
         if(f.tameio.length&&f.tameio.indexOf(r.t)===-1)return false;
         if(f.typos.length&&f.typos.indexOf(r.k)===-1)return false;
         if(f.employer.length&&f.employer.indexOf(r.e)===-1)return false;
@@ -3360,10 +3414,10 @@ def _apd_is_special_code(clean_code: str) -> bool:
 
 
 def _apd_date_to_int(s) -> int:
-    """dd/mm/yyyy → yyyymmdd (0 αν άκυρο)."""
+    """dd/mm/yyyy ή dd.mm.yyyy → yyyymmdd (0 αν άκυρο)."""
     if s is None:
         return 0
-    txt = str(s).strip()
+    txt = str(s).strip().replace(".", "/")
     if not txt:
         return 0
     dt = pd.to_datetime(txt, format="%d/%m/%Y", errors="coerce")
@@ -4032,14 +4086,20 @@ def _build_apd_filter_js():
   function esc(s){var d=document.createElement('div');d.textContent=(s==null?'':s);return d.innerHTML;}
   function escA(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');}
 
-  function parseDateInt(s){
+  function parseDateInt(s,isTo){
     if(!s)return 0;
     var t=String(s).trim();
-    var m=t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if(m)return parseInt(m[3],10)*10000+parseInt(m[2],10)*100+parseInt(m[1],10);
+    var m3=t.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/);
+    if(m3)return parseInt(m3[3],10)*100+parseInt(m3[2],10);
+    var m2=t.match(/^(\d{1,2})[./](\d{4})$/);
+    if(m2)return parseInt(m2[2],10)*100+parseInt(m2[1],10);
     var y=parseInt(t,10);
-    if(!isNaN(y)&&y>=1000&&y<=9999)return y*10000+101;
+    if(!isNaN(y)&&y>=1000&&y<=9999)return y*100+(isTo?12:1);
     return 0;
+  }
+  function parseMonthIntFromAi(ai){
+    if(!ai)return 0;
+    return Math.floor(ai/100);
   }
 
   // Κλειδωμένα φίλτρα: ταμείο/πακέτο/τύπος αποδοχών/από-έως από την Καταμέτρηση
@@ -4079,8 +4139,8 @@ def _build_apd_filter_js():
     var cl=readCountLocked();
     return {
       plafond:(plEl&&plEl.value)||'neos',
-      from_i:parseDateInt(cl.from),
-      to_i:parseDateInt(cl.to),
+      from_i:parseDateInt(cl.from,false),
+      to_i:parseDateInt(cl.to,true),
       tameio:cl.tameio,
       klados:kladosCodesFromCount(),
       apodox:cl.apodoxes,
@@ -4107,8 +4167,9 @@ def _build_apd_filter_js():
       if(hasK&&!sk[r.klados])continue;
       if(hasA&&!sa[r.apodox])continue;
       var ai=r.ai||0;
-      if(P.from_i&&(!ai||ai<P.from_i))continue;
-      if(P.to_i&&(!ai||ai>P.to_i))continue;
+      var am=parseMonthIntFromAi(ai);
+      if(P.from_i&&(!am||am<P.from_i))continue;
+      if(P.to_i&&(!am||am>P.to_i))continue;
       var year=ai?Math.floor(ai/10000):null;
       var basePlaf;
       if(plMap===null)basePlaf=null;
@@ -5073,8 +5134,10 @@ window.__atlasSyntaksiInit=window.__atlasSyntaksiInit||function(CFG){
   function cntParseDateYear(s,fallback){
     if(!s)return fallback;
     var t=String(s).trim();if(!t)return fallback;
-    var m=t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if(m)return parseInt(m[3],10);
+    var m3=t.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/);
+    if(m3)return parseInt(m3[3],10);
+    var m2=t.match(/^(\d{1,2})[./](\d{4})$/);
+    if(m2)return parseInt(m2[2],10);
     var y=parseInt(t,10);
     if(!isNaN(y)&&y>=1000&&y<=9999)return y;
     return fallback;
