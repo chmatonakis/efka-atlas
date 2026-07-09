@@ -2804,6 +2804,96 @@ def _build_count_filter_js():
     });
   }
 
+  function paketoCodeFromTr(tr,cm){
+    var raw=(tr.getAttribute('data-c-klados')||'').trim();
+    if(!raw&&cm.klados!==undefined){
+      var tds=tr.querySelectorAll('td');
+      raw=tds[cm.klados]?(tds[cm.klados].textContent||'').trim():'';
+    }
+    if(!raw)return '';
+    return raw.split(/\s*[\u2013\-]\s+/)[0].trim();
+  }
+
+  function saveTotalsPaketaCellState(cm,rows){
+    if(cm.klados===undefined||cm.perigrafi===undefined)return;
+    Array.prototype.forEach.call(rows,function(tr){
+      if(tr.getAttribute('data-is-total')!=='1')return;
+      var tds=tr.querySelectorAll('td');
+      var kTd=tds[cm.klados], pTd=tds[cm.perigrafi];
+      if(kTd&&!kTd.hasAttribute('data-c-orig-kl'))kTd.setAttribute('data-c-orig-kl',kTd.textContent||'');
+      if(pTd&&!pTd.hasAttribute('data-c-orig-per'))pTd.setAttribute('data-c-orig-per',pTd.textContent||'');
+      if(kTd&&!kTd.hasAttribute('data-c-orig-colspan'))kTd.setAttribute('data-c-orig-colspan',kTd.getAttribute('colspan')||'1');
+      if(pTd&&!pTd.hasAttribute('data-c-orig-display'))pTd.setAttribute('data-c-orig-display',pTd.style.display||'');
+    });
+  }
+
+  function restoreTotalsPaketaCells(cm,rows){
+    if(cm.klados===undefined||cm.perigrafi===undefined)return;
+    Array.prototype.forEach.call(rows,function(tr){
+      if(tr.getAttribute('data-is-total')!=='1')return;
+      var tds=tr.querySelectorAll('td');
+      var kTd=tds[cm.klados], pTd=tds[cm.perigrafi];
+      if(kTd){
+        kTd.textContent=kTd.getAttribute('data-c-orig-kl')||'';
+        var oc=kTd.getAttribute('data-c-orig-colspan');
+        if(oc&&oc!=='1')kTd.setAttribute('colspan',oc);else kTd.removeAttribute('colspan');
+        kTd.classList.remove('cnt-paketa-merged');
+      }
+      if(pTd){
+        pTd.textContent=pTd.getAttribute('data-c-orig-per')||'';
+        pTd.style.display=pTd.getAttribute('data-c-orig-display')||'';
+        pTd.classList.remove('cnt-paketa-merged-hidden');
+      }
+    });
+  }
+
+  function sortPaketaCodes(codes){
+    return codes.slice().sort(function(a,b){
+      var na=parseInt(a,10), nb=parseInt(b,10);
+      if(!isNaN(na)&&!isNaN(nb)&&String(na)===String(a).trim()&&String(nb)===String(b).trim())return na-nb;
+      return String(a).localeCompare(String(b),'el');
+    });
+  }
+
+  function reflowTotalsOnlyPaketaMerge(cm,rows,totOnly){
+    if(cm.klados===undefined||cm.perigrafi===undefined)return;
+    if(!totOnly){restoreTotalsPaketaCells(cm,rows);return;}
+    var segCodes={}, segOrder=[];
+    function addCode(c){
+      if(!c||segCodes[c])return;
+      segCodes[c]=1;
+      segOrder.push(c);
+    }
+    Array.prototype.forEach.call(rows,function(tr){
+      if(tr.getAttribute('data-is-band')==='1'){segCodes={};segOrder=[];return;}
+      if(tr.getAttribute('data-is-sep')==='1')return;
+      if(tr.getAttribute('data-is-total')==='1'){
+        if(tr.style.display!=='none'){
+          var tds=tr.querySelectorAll('td');
+          var kTd=tds[cm.klados], pTd=tds[cm.perigrafi];
+          var codes=sortPaketaCodes(segOrder);
+          if(kTd){
+            kTd.textContent=codes.join(', ');
+            kTd.setAttribute('colspan','2');
+            kTd.classList.add('cnt-paketa-merged');
+          }
+          if(pTd){
+            pTd.textContent='';
+            pTd.style.display='none';
+            pTd.classList.add('cnt-paketa-merged-hidden');
+          }
+        }
+        segCodes={};segOrder=[];
+        return;
+      }
+      if(tr.getAttribute('data-filter-ok')==='1'){
+        var tdsF=tr.querySelectorAll('td');
+        if(cm.perigrafi!==undefined&&tdsF[cm.perigrafi]&&(tdsF[cm.perigrafi].textContent||'').trim()==='Εισφορές μήνα')return;
+        addCode(paketoCodeFromTr(tr,cm));
+      }
+    });
+  }
+
   function rowCountsTowardSubtotal(tr,cm,totOnly){
     if(tr.getAttribute('data-is-band')==='1')return false;
     if(tr.getAttribute('data-is-sep')==='1')return false;
@@ -2870,6 +2960,7 @@ def _build_count_filter_js():
       if(apodoxesColT!==undefined&&apodoxesColT>=0&&tds[apodoxesColT]){tds[apodoxesColT].classList.add('copy-target');tds[apodoxesColT].setAttribute('title','Κλικ για αντιγραφή (Αποδοχές)');}
       if(eisforcesColT!==undefined&&eisforcesColT>=0&&tds[eisforcesColT]){tds[eisforcesColT].classList.add('copy-target');tds[eisforcesColT].setAttribute('title','Κλικ για αντιγραφή (Εισφορές)');}
     });
+    saveTotalsPaketaCellState(cmTag,tagRows);
   }
 
   function cntParseMonthYear(s,isTo){
@@ -2981,6 +3072,7 @@ def _build_count_filter_js():
     var totOnly=document.getElementById('cnt-totals-only')&&document.getElementById('cnt-totals-only').checked;
     var sparseGap=document.getElementById('cnt-year-sparse')&&document.getElementById('cnt-year-sparse').checked;
     sec.classList.toggle('count-year-sparse', !!sparseGap);
+    sec.classList.toggle('count-totals-only', !!totOnly);
 
     if(cTable){
       var cm=mapHeaders(cTable);
@@ -3059,6 +3151,7 @@ def _build_count_filter_js():
       // 5) Reflow ετικετών (collapsed)
       reflowCollapsedFundLabels(cm,rows,totOnly);
       reflowTotalsOnlyFundLabels(cm,rows,totOnly);
+      reflowTotalsOnlyPaketaMerge(cm,rows,totOnly);
     }
 
     (function updateCountKindMetrics(){
@@ -7804,6 +7897,11 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 #count-tables-wrapper table.print-table.count-unified tbody tr.count-year-band td:first-child { color: #1e40af !important; }
 #count-tables-wrapper table.print-table.count-unified tbody tr.count-year-gap td { height: 41px; padding: 0; background: transparent; border: 0; }
 #count-section.count-year-sparse #count-tables-wrapper table.print-table.count-unified tbody tr.count-year-gap td { height: 115px; }
+#count-section.count-totals-only #count-tables-wrapper table.print-table.count-unified tbody tr[data-is-total="1"] td.cnt-paketa-merged {
+  text-align: left;
+  white-space: normal;
+  font-weight: 700;
+}
 /* Σύνολα / Παράρτημα: fixed πλάτη από colgroup (ίδια λογική με Καταμέτρηση) */
 .totals-table-scroll table.print-table.totals-weighted,
 .annex-table-scroll table.print-table.annex-weighted {
@@ -7891,12 +7989,12 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .syntaksi-filters .apd-select:hover { border-color: #6366f1; }
 .syntaksi-filters .apd-filter-input:focus,
 .syntaksi-filters .apd-select:focus { border: 1px solid #6366f1 !important; outline: none !important; box-shadow: none !important; }
-.atlas-locked-count-bar { margin: 0 2px 12px; padding: 12px 14px; background: #f1f5f9; border: none; border-radius: 8px; }
-.atlas-locked-count-title { font-size: 15px; font-weight: 700; color: #475569; margin-bottom: 8px; }
+.atlas-locked-count-bar { margin: 0 2px 10px; padding: 8px 12px; background: #f1f5f9; border: none; border-radius: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.atlas-locked-count-title { font-size: 14px; font-weight: 700; color: #475569; margin-bottom: 0; flex-shrink: 0; white-space: nowrap; }
 .atlas-locked-count-title::before { content: "🔒 "; }
-.atlas-locked-count-grid { display: flex; flex-wrap: wrap; gap: 10px 20px; }
-.atlas-locked-count-item { font-size: 14px; color: #334155; min-width: 0; }
-.atlas-locked-count-sub { font-weight: 600; color: #64748b; margin-right: 6px; }
+.atlas-locked-count-grid { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; flex: 1; min-width: 0; }
+.atlas-locked-count-item { font-size: 13px; color: #334155; min-width: 0; display: inline-flex; align-items: baseline; flex-wrap: nowrap; }
+.atlas-locked-count-sub { font-weight: 600; color: #64748b; margin-right: 4px; white-space: nowrap; }
 .atlas-locked-count-val { font-weight: 600; color: #1e293b; word-break: break-word; }
 .apd-filters-free.apd-filters-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .syntaksi-empty { padding: 18px; color: #64748b; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; margin: 8px 2px; flex-shrink: 0; }
