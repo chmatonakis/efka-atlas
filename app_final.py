@@ -2655,9 +2655,9 @@ def compute_parallel_months(base_df: pd.DataFrame) -> list[tuple[int, int]]:
             if num_months == 0:
                 continue
 
-            days_per_month = days_val / num_months
+            days_parts = distribute_days_to_months(days_val, num_months)
 
-            for m_dt in months_list:
+            for i, m_dt in enumerate(months_list):
                 parallel_rows.append({
                     'ΕΤΟΣ': m_dt.year,
                     'Μήνας_Num': m_dt.month,
@@ -2665,7 +2665,7 @@ def compute_parallel_months(base_df: pd.DataFrame) -> list[tuple[int, int]]:
                     'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ': str(row.get('Τύπος Ασφάλισης', '')).strip(),
                     'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ': str(row.get('Κλάδος/Πακέτο Κάλυψης', '')).strip(),
                     'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': str(row.get('Τύπος Αποδοχών', '')).strip(),
-                    'Ημέρες': days_per_month
+                    'Ημέρες': days_parts[i]
                 })
         except Exception:
             continue
@@ -2770,16 +2770,16 @@ def compute_parallel_months_2017(base_df: pd.DataFrame) -> list[tuple[int, int]]
             num_months = len(months_list)
             if num_months == 0:
                 continue
-            days_per_month = days_val / num_months
+            days_parts = distribute_days_to_months(days_val, num_months)
 
-            for m_dt in months_list:
+            for i, m_dt in enumerate(months_list):
                 parallel_rows.append({
                     'ΕΤΟΣ': m_dt.year,
                     'Μήνας_Num': m_dt.month,
                     'ΤΑΜΕΙΟ': str(row.get('Ταμείο', '')).strip(),
                     'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ': str(row.get('Τύπος Ασφάλισης', '')).strip(),
                     'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': str(row.get('Τύπος Αποδοχών', '')).strip(),
-                    'Ημέρες': days_per_month
+                    'Ημέρες': days_parts[i]
                 })
         except Exception:
             continue
@@ -2928,8 +2928,8 @@ def _parallel_month_groups_until_2016(base_df: pd.DataFrame):
                     curr = curr.replace(month=curr.month + 1)
             if not months_list:
                 continue
-            days_per_month = days_val / len(months_list)
-            for m_dt in months_list:
+            days_parts = distribute_days_to_months(days_val, len(months_list))
+            for i, m_dt in enumerate(months_list):
                 parallel_rows.append({
                     'ΕΤΟΣ': m_dt.year,
                     'Μήνας_Num': m_dt.month,
@@ -2937,7 +2937,7 @@ def _parallel_month_groups_until_2016(base_df: pd.DataFrame):
                     'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ': str(row.get('Τύπος Ασφάλισης', '')).strip(),
                     'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ': str(row.get('Κλάδος/Πακέτο Κάλυψης', '')).strip(),
                     'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': str(row.get('Τύπος Αποδοχών', '')).strip(),
-                    'Ημέρες': days_per_month,
+                    'Ημέρες': days_parts[i],
                 })
         except Exception:
             continue
@@ -3007,15 +3007,15 @@ def _parallel_month_groups_2017(base_df: pd.DataFrame):
                     curr = curr.replace(month=curr.month + 1)
             if not months_list:
                 continue
-            days_per_month = days_val / len(months_list)
-            for m_dt in months_list:
+            days_parts = distribute_days_to_months(days_val, len(months_list))
+            for i, m_dt in enumerate(months_list):
                 parallel_rows.append({
                     'ΕΤΟΣ': m_dt.year,
                     'Μήνας_Num': m_dt.month,
                     'ΤΑΜΕΙΟ': str(row.get('Ταμείο', '')).strip(),
                     'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ': str(row.get('Τύπος Ασφάλισης', '')).strip(),
                     'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': str(row.get('Τύπος Αποδοχών', '')).strip(),
-                    'Ημέρες': days_per_month,
+                    'Ημέρες': days_parts[i],
                 })
         except Exception:
             continue
@@ -3259,12 +3259,12 @@ def _build_monthly_rows_for_parallel(df: pd.DataFrame, description_map: dict | N
             if num_months == 0:
                 continue
 
-            days_per_month = days_val / num_months
+            days_parts = distribute_days_to_months(days_val, num_months)
             gross_per_month = gross_val / num_months
             contrib_per_month = contrib_val / num_months
             is_aggregate = _compute_is_aggregate_interval(row, start_dt, end_dt, num_months)
 
-            for m_dt in months_list:
+            for i, m_dt in enumerate(months_list):
                 rows.append({
                     'ΕΤΟΣ': m_dt.year,
                     'ΤΑΜΕΙΟ': tameio,
@@ -3274,7 +3274,7 @@ def _build_monthly_rows_for_parallel(df: pd.DataFrame, description_map: dict | N
                     'ΠΕΡΙΓΡΑΦΗ': klados_desc,
                     'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': earnings_type,
                     'Μήνας_Num': m_dt.month,
-                    'Ημέρες': days_per_month,
+                    'Ημέρες': days_parts[i],
                     'Μικτές_Part': gross_per_month,
                     'Εισφορές_Part': contrib_per_month,
                     'Is_Aggregate': is_aggregate,
@@ -3656,15 +3656,15 @@ def compute_applied_monthly_day_caps(data_df: pd.DataFrame) -> list[dict]:
             if not months_list:
                 continue
 
-            days_per_month = days_val / len(months_list)
+            days_parts = distribute_days_to_months(days_val, len(months_list))
             tameio = str(row.get('Ταμείο', '')).strip()
-            for m_dt in months_list:
+            for i, m_dt in enumerate(months_list):
                 monthly_rows.append({
                     'Έτος': int(m_dt.year),
                     'Μήνας': int(m_dt.month),
                     'Ταμείο': tameio,
                     'Πακέτο': package,
-                    'Ημέρες': float(days_per_month)
+                    'Ημέρες': float(days_parts[i])
                 })
         except Exception:
             continue
@@ -3967,13 +3967,15 @@ def compute_summary_capped_days_by_group(
             if not months_list:
                 continue
 
-            days_per_month = total_days_val / orig_len
+            n_filtered = len(months_list)
+            share_total = total_days_val if n_filtered == orig_len else total_days_val * n_filtered / orig_len
+            days_parts = distribute_days_to_months(share_total, n_filtered)
             base_rec = {k: row.get(k, '') for k in cap_group_keys}
-            for m_dt in months_list:
+            for i, m_dt in enumerate(months_list):
                 rec = dict(base_rec)
                 rec['Έτος'] = int(m_dt.year)
                 rec['Μήνας'] = int(m_dt.month)
-                rec['Συνολικές_Ημέρες'] = float(days_per_month)
+                rec['Συνολικές_Ημέρες'] = float(days_parts[i])
                 monthly_rows.append(rec)
         except Exception:
             continue
@@ -4072,13 +4074,15 @@ def compute_summary_capped_dk(
                 months_list = [m for m in months_list if m <= to_month]
             if not months_list:
                 continue
-            days_per_month = total_days_val / orig_len
+            n_filtered = len(months_list)
+            share_total = total_days_val if n_filtered == orig_len else total_days_val * n_filtered / orig_len
+            days_parts = distribute_days_to_months(share_total, n_filtered)
             base_rec = {k: row.get(k, '') for k in cap_group_keys}
-            for m_dt in months_list:
+            for i, m_dt in enumerate(months_list):
                 rec = dict(base_rec)
                 rec['Έτος'] = int(m_dt.year)
                 rec['Μήνας'] = int(m_dt.month)
-                rec['Συνολικές_Ημέρες'] = float(days_per_month)
+                rec['Συνολικές_Ημέρες'] = float(days_parts[i])
                 monthly_rows.append(rec)
         except Exception:
             continue
@@ -5375,13 +5379,13 @@ def get_count_allocation(count_df: pd.DataFrame, description_map: dict[str, str]
                 curr = curr.replace(year=curr.year + 1, month=1) if curr.month == 12 else curr.replace(month=curr.month + 1)
             num_months = len(months_list)
             if num_months == 0: continue
-            days_per_month = days_val / num_months
+            days_parts = distribute_days_to_months(days_val, num_months)
             contrib_per_month = contrib_val / num_months
-            for m_dt in months_list:
+            for i, m_dt in enumerate(months_list):
                 counting_rows.append({
                     'ΕΤΟΣ': m_dt.year, 'ΤΑΜΕΙΟ': tameio, 'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ': insurance_type,
                     'ΕΡΓΟΔΟΤΗΣ': employer, 'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ': klados, 'ΠΕΡΙΓΡΑΦΗ': klados_desc, 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': earnings_type,
-                    'Μήνας_Num': m_dt.month, 'Ημέρες': days_per_month, 'Εισφορές_Part': contrib_per_month
+                    'Μήνας_Num': m_dt.month, 'Ημέρες': days_parts[i], 'Εισφορές_Part': contrib_per_month
                 })
         except Exception:
             continue
@@ -5752,6 +5756,32 @@ def _atlas_is_missing_cell(val) -> bool:
     return val == ''
 
 
+def distribute_days_to_months(total_days, num_months: int) -> list[float]:
+    """Κατανομή ημερών σε ακέραιες τιμές ανά μήνα (υπόλοιπο στους πρώτους μήνες)· άθροισμα = total_days."""
+    if num_months <= 0:
+        return []
+    try:
+        total = float(total_days)
+    except (TypeError, ValueError):
+        return [0.0] * num_months
+    if num_months == 1:
+        return [total]
+    if total == 0:
+        return [0.0] * num_months
+
+    sign = 1.0 if total >= 0 else -1.0
+    n_abs = abs(total)
+    n_int = int(round(n_abs))
+    if abs(n_abs - n_int) > 1e-6:
+        per = total / num_months
+        parts = [per] * num_months
+        parts[-1] = total - per * (num_months - 1)
+        return [float(p) for p in parts]
+
+    base, rem = divmod(n_int, num_months)
+    return [float(sign * (base + (1 if i < rem else 0))) for i in range(num_months)]
+
+
 def format_count_days_display(val) -> str:
     """Μορφοποίηση ημερών — ίδια με γραμμές ΣΥΝΟΛΟ της καταμέτρησης."""
     if _atlas_is_missing_cell(val):
@@ -5795,6 +5825,57 @@ def compute_kind_monthly_capped_from_c_df(c_df_src: pd.DataFrame, year: int, kin
     )
     by_m = g.groupby('Μήνας_Num')['_capped'].sum()
     return {m: float(by_m.get(m, 0.0) or 0.0) for m in range(1, 13)}
+
+
+def compute_ika_misthoti_monthly_from_c_df(c_df_src: pd.DataFrame, year: int) -> dict[int, float]:
+    """Μηνιαίες ημέρες μισθωτή ΙΚΑ (πλαφόν 31/μήνα) — για υπολογισμό Διαδοχικής."""
+    sub = c_df_src[c_df_src['ΕΤΟΣ'] == year].copy()
+    if sub.empty:
+        return {m: 0.0 for m in range(1, 13)}
+    sub['_k'] = sub['ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ'].apply(insurance_kind_classify_count)
+    sub = sub[sub['_k'] == 'ΜΙΣΘΩΤΗ']
+    tameio_u = sub['ΤΑΜΕΙΟ'].astype(str).str.upper()
+    sub = sub[tameio_u.str.contains('ΙΚΑ', na=False) | tameio_u.str.contains('IKA', na=False)]
+    if sub.empty:
+        return {m: 0.0 for m in range(1, 13)}
+    g = sub.groupby('Μήνας_Num', as_index=False)['Ημέρες'].sum()
+    g['_capped'] = g['Ημέρες'].apply(lambda d: min(float(d), 31.0))
+    return {int(r['Μήνας_Num']): float(r['_capped']) for _, r in g.iterrows()}
+
+
+def compute_diadochiki_monthly_from_c_df(c_df_src: pd.DataFrame, year: int) -> dict[int, float]:
+    """Διαδοχική ανά μήνα: συνδυασμός μισθωτή + μη μισθωτή με πλαφόν 25/μήνα,
+    εκτός ΙΚΑ μισθωτή όπου μπορεί να ξεπεράσει τις 25 (έως 31).
+    Ποτέ δεν υπερβαίνει το άθροισμα τύπων (μισθωτής + μη μισθωτής) στον ίδιο μήνα."""
+    md_m = compute_kind_monthly_capped_from_c_df(c_df_src, year, 'ΜΙΣΘΩΤΗ')
+    md_nm = compute_kind_monthly_capped_from_c_df(c_df_src, year, 'ΜΗ ΜΙΣΘΩΤΗ')
+    md_ika = compute_ika_misthoti_monthly_from_c_df(c_df_src, year)
+    out: dict[int, float] = {}
+    for m in range(1, 13):
+        ika_m = float(md_ika.get(m, 0.0) or 0.0)
+        m_days = float(md_m.get(m, 0.0) or 0.0)
+        nm_days = float(md_nm.get(m, 0.0) or 0.0)
+        combined = m_days + nm_days
+        capped = min(25.0, combined)
+        if ika_m > 25.0:
+            out[m] = min(combined, max(ika_m, capped))
+        else:
+            out[m] = capped
+    return out
+
+
+def compute_diadochiki_total_days_from_c_df(c_df_src: pd.DataFrame) -> float:
+    """Συνολικές ημέρες Διαδοχικής (άθροισμα όλων των ετών)."""
+    if c_df_src is None or c_df_src.empty:
+        return 0.0
+    try:
+        years = sorted({int(y) for y in c_df_src['ΕΤΟΣ'].dropna().unique()})
+    except Exception:
+        return 0.0
+    total = 0.0
+    for y in years:
+        total += sum(compute_diadochiki_monthly_from_c_df(c_df_src, y).values())
+    return total
 
 
 def build_syntaksi_annual_table(c_df: pd.DataFrame) -> pd.DataFrame:
@@ -6493,12 +6574,12 @@ def build_count_c_dataframe(count_df: pd.DataFrame, description_map: dict[str, s
             if num_months == 0:
                 continue
 
-            days_per_month = days_val / num_months
+            days_parts = distribute_days_to_months(days_val, num_months)
             gross_per_month = gross_val / num_months
             contrib_per_month = contrib_val / num_months
             is_aggregate = (num_months > 1) and is_pre2002 and (duration_days > 31) and not expected_agg_pattern
 
-            for m_dt in months_list:
+            for i, m_dt in enumerate(months_list):
                 counting_rows.append({
                     'ΕΤΟΣ': m_dt.year,
                     'ΤΑΜΕΙΟ': tameio,
@@ -6508,7 +6589,7 @@ def build_count_c_dataframe(count_df: pd.DataFrame, description_map: dict[str, s
                     'ΠΕΡΙΓΡΑΦΗ': klados_desc,
                     'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': earnings_type,
                     'Μήνας_Num': m_dt.month,
-                    'Ημέρες': days_per_month,
+                    'Ημέρες': days_parts[i],
                     'Μικτές_Part': gross_per_month,
                     'Εισφορές_Part': contrib_per_month,
                     'Is_Aggregate': is_aggregate
@@ -10488,155 +10569,10 @@ def show_results_page(df, filename):
             st.session_state['count_klados_selected'] = bool(sel_cnt_klados)
             st.session_state['count_work_df'] = count_df.copy()
 
-            counting_rows = []
-            
-            with nullcontext():
-                def _get_num(val):
-                    try:
-                        return clean_numeric_value(val) or 0
-                    except Exception:
-                        return 0
+            _cnt_desc_map = description_map if isinstance(description_map, dict) else None
+            c_df = build_count_c_dataframe(count_df, _cnt_desc_map)
 
-                def _is_expected_oaee(r, duration_days):
-                    tam = str(r.get('Ταμείο', '')).upper()
-                    if 'ΟΑΕΕ' not in tam:
-                        return False
-                    months_val = _get_num(r.get('Μήνες'))
-                    days_val = _get_num(r.get('Ημέρες'))
-                    # Αναμενόμενα βραχύχρονα διαστήματα (έως 2 μήνες ~25 ημέρες/μήνα)
-                    if months_val and months_val <= 2:
-                        if days_val and abs(days_val - months_val * 25) <= 1:
-                            return True
-                        if not days_val and duration_days <= 62:
-                            return True
-                    return False
-
-                def _is_expected_tsm(r, duration_days, start_dt, end_dt):
-                    tam = str(r.get('Ταμείο', '')).upper()
-                    if 'ΤΣΜΕΔΕ' not in tam:
-                        return False
-                    months_val = _get_num(r.get('Μήνες'))
-                    days_val = _get_num(r.get('Ημέρες'))
-                    if pd.notna(start_dt) and pd.notna(end_dt) and start_dt.year == end_dt.year:
-                        sem1 = (start_dt.month == 1 and end_dt.month == 6)
-                        sem2 = (start_dt.month == 7 and end_dt.month == 12)
-                        if sem1 or sem2:
-                            # 6μηνα με ~25 ημέρες/μήνα θεωρούνται αναμενόμενα
-                            if months_val == 6 and (not days_val or abs(days_val - 150) <= 2):
-                                return True
-                            if not months_val and 150 <= duration_days <= 190:
-                                return True
-                    return False
-
-                for idx, row in count_df.iterrows():
-                    try:
-                        if pd.isna(row['Από']) or pd.isna(row['Έως']):
-                            continue
-                            
-                        start_dt = pd.to_datetime(row['Από'], format='%d/%m/%Y', errors='coerce')
-                        end_dt = pd.to_datetime(row['Έως'], format='%d/%m/%Y', errors='coerce')
-                        
-                        if pd.isna(start_dt) or pd.isna(end_dt):
-                            continue
-                            
-                        duration_days = (end_dt - start_dt).days + 1
-                        is_pre2002 = end_dt < pd.Timestamp('2002-01-01')
-                        expected_agg_pattern = _is_expected_oaee(row, duration_days) or _is_expected_tsm(row, duration_days, start_dt, end_dt)
-                            
-                        # Calculation logic for total days
-                        # Priority: Days column -> Years/Months/Days columns conversion
-                        days_val = 0
-                        
-                        has_explicit_days = False
-                        if 'Ημέρες' in row and pd.notna(row['Ημέρες']) and str(row['Ημέρες']).strip() != '':
-                             d = clean_numeric_value(row['Ημέρες'])
-                             # Allow negative values (corrective entries)
-                             if d is not None and d != 0:
-                                 days_val += d
-                                 has_explicit_days = True
-                        
-                        # If we have years/months columns, add them converted
-                        if 'Έτη' in row and pd.notna(row['Έτη']):
-                             y = clean_numeric_value(row['Έτη'])
-                             if y is not None and y != 0:
-                                 days_val += y * 300
-                                 has_explicit_days = True
-                        
-                        if 'Μήνες' in row and pd.notna(row['Μήνες']):
-                             m = clean_numeric_value(row['Μήνες'])
-                             if m is not None and m != 0:
-                                 days_val += m * 25
-                                 has_explicit_days = True
-                        
-                        # Parse amounts (Gross Earnings & Contributions) - ONLY EURO
-                        # Strict check for Drachmas to exclude them from summation
-                        raw_gross = str(row.get('Μικτές αποδοχές', ''))
-                        if 'ΔΡΧ' in raw_gross.upper() or 'DRX' in raw_gross.upper():
-                            gross_val = 0.0
-                        else:
-                            gross_val = clean_numeric_value(raw_gross, exclude_drx=True)
-                        if gross_val is None: gross_val = 0.0
-                        
-                        raw_contrib = str(row.get('Συνολικές εισφορές', ''))
-                        if 'ΔΡΧ' in raw_contrib.upper() or 'DRX' in raw_contrib.upper():
-                            contrib_val = 0.0
-                        else:
-                            contrib_val = clean_numeric_value(raw_contrib, exclude_drx=True)
-                        if contrib_val is None: contrib_val = 0.0
-
-                        sign = get_negative_amount_sign(gross_val, contrib_val)
-                        if sign == -1:
-                            days_val = -abs(days_val)
-                        
-                        # Keys
-                        tameio = str(row.get('Ταμείο', '')).strip()
-                        insurance_type = str(row.get('Τύπος Ασφάλισης', '')).strip()
-                        employer = str(row.get('Α-Μ εργοδότη', '')).strip()
-                        klados = str(row.get('Κλάδος/Πακέτο Κάλυψης', '')).strip()
-                        klados_desc = description_map.get(klados, '') if 'description_map' in locals() else ''
-                        earnings_type = str(row.get('Τύπος Αποδοχών', '')).strip()
-                        
-                        # Generate month list
-                        curr = start_dt.replace(day=1)
-                        end_month_dt = end_dt.replace(day=1)
-                        
-                        months_list = []
-                        while curr <= end_month_dt:
-                            months_list.append(curr)
-                            if curr.month == 12:
-                                curr = curr.replace(year=curr.year + 1, month=1)
-                            else:
-                                curr = curr.replace(month=curr.month + 1)
-                        
-                        num_months = len(months_list)
-                        if num_months == 0: continue
-                        
-                        days_per_month = days_val / num_months
-                        gross_per_month = gross_val / num_months
-                        contrib_per_month = contrib_val / num_months
-                        is_aggregate = (num_months > 1) and is_pre2002 and (duration_days > 31) and not expected_agg_pattern
-                        
-                        for m_dt in months_list:
-                            counting_rows.append({
-                                'ΕΤΟΣ': m_dt.year,
-                                'ΤΑΜΕΙΟ': tameio,
-                                'ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ': insurance_type,
-                                'ΕΡΓΟΔΟΤΗΣ': employer,
-                                'ΚΛΑΔΟΣ/ΠΑΚΕΤΟ': klados,
-                                'ΠΕΡΙΓΡΑΦΗ': klados_desc,
-                                'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': earnings_type,
-                                'Μήνας_Num': m_dt.month,
-                                'Ημέρες': days_per_month,
-                                'Μικτές_Part': gross_per_month,
-                                'Εισφορές_Part': contrib_per_month,
-                                'Is_Aggregate': is_aggregate
-                            })
-                            
-                    except Exception:
-                        continue
-
-            if counting_rows:
-                c_df = pd.DataFrame(counting_rows)
+            if c_df is not None and not c_df.empty:
                 _cnt_klados_pick = list(st.session_state.get("cnt_filter_klados") or [])
                 cnt_show_monthly_kind_totals = bool(_cnt_klados_pick)
 
@@ -10684,6 +10620,7 @@ def show_results_page(df, filename):
                         _sum_misthoti_cnt += sum(compute_kind_monthly_capped_totals(c_df_metrics, _yc, 'ΜΙΣΘΩΤΗ').values())
                         _sum_nm_cnt += sum(compute_kind_monthly_capped_totals(c_df_metrics, _yc, 'ΜΗ ΜΙΣΘΩΤΗ').values())
                     _sum_days_cnt = _sum_misthoti_cnt + _sum_nm_cnt
+                    _sum_diadochiki_cnt = compute_diadochiki_total_days_from_c_df(c_df_metrics)
                     _basis_cnt_tab = st.session_state.get('ins_days_basis', 'Μήνας = 25, Έτος = 300')
                     _year_days_cnt = 360 if str(_basis_cnt_tab).startswith('Μήνας = 30') else 300
                     with cnt_metrics_ph.container():
@@ -10699,7 +10636,8 @@ def show_results_page(df, filename):
                             _cnt_warn_html = (
                                 '<div class="atlas-warn-box">'
                                 f"<strong>Εντοπίστηκε: {' / '.join(_cnt_warn_parts)}.</strong> "
-                                "Το άθροισμα ημερών ασφάλισης μπορεί να δώσει παραπλανητικό αποτέλεσμα. "
+                                "Το άθροισμα τύπων (μισθωτής + μη μισθωτής) μπορεί να υπερβαίνει τη Διαδοχική όταν υπάρχουν ημέρες και των δύο τύπων στον ίδιο μήνα. "
+                                "Η Διαδοχική και τα συνολικά έτη αποτελούν το πραγματικό σύνολο ημερών. "
                                 "Ελέγξτε τις αντίστοιχες καρτέλες για λεπτομέρειες."
                                 "</div>"
                             )
@@ -10719,9 +10657,13 @@ def show_results_page(df, filename):
                                     format_number_greek(_sum_days_cnt, decimals=0),
                                 ),
                                 (
+                                    "Διαδοχική",
+                                    format_number_greek(_sum_diadochiki_cnt, decimals=0),
+                                ),
+                                (
                                     "Συνολικά έτη",
                                     format_insurance_years_from_days(
-                                        _sum_days_cnt, _year_days_cnt
+                                        _sum_diadochiki_cnt, _year_days_cnt
                                     ),
                                 ),
                             ],
@@ -10973,6 +10915,43 @@ def show_results_page(df, filename):
 
                 emitted_kind_totals = set()
                 loipa_done_years = set()
+                diadochiki_done_years = set()
+
+                def append_diadochiki_line_for_year(py):
+                    if py in diadochiki_done_years:
+                        return
+                    diadochiki_done_years.add(py)
+                    kinds_here = year_kinds_present.get(py, set())
+                    if not kinds_here:
+                        return
+                    has_m = 'ΜΙΣΘΩΤΗ' in kinds_here
+                    has_nm = 'ΜΗ ΜΙΣΘΩΤΗ' in kinds_here
+                    if not has_m and not has_nm:
+                        return
+                    total_row = {c: '' for c in all_cols}
+                    export_row = {c: '' for c in all_cols}
+                    total_row['ΕΤΟΣ'] = ''
+                    export_row['ΕΤΟΣ'] = ''
+                    desc = f"ΣΥΝΟΛΟ {py} — Διαδοχική"
+                    total_row['ΠΕΡΙΓΡΑΦΗ'] = desc
+                    export_row['ΠΕΡΙΓΡΑΦΗ'] = desc
+                    monthly_tf = False
+                    if cnt_show_monthly_kind_totals:
+                        md = compute_diadochiki_monthly_from_c_df(c_df, py)
+                        sm = sum(md.values())
+                        total_row['ΣΥΝΟΛΟ'] = format_cell_days(sm)
+                        export_row['ΣΥΝΟΛΟ'] = sm if sm else ''
+                        for i, mc in enumerate(month_cols):
+                            total_row[mc] = format_cell_days(md[i + 1])
+                            export_row[mc] = md[i + 1] if md[i + 1] else ''
+                        monthly_tf = True
+                    else:
+                        sm = sum(compute_diadochiki_monthly_from_c_df(c_df, py).values())
+                        total_row['ΣΥΝΟΛΟ'] = format_cell_days(sm)
+                        export_row['ΣΥΝΟΛΟ'] = sm if sm else ''
+                    processed_rows.append(total_row)
+                    processed_export_rows.append(export_row)
+                    processed_mask_rows.append(make_mask_row(is_total=True, monthly_total=monthly_tf))
 
                 def append_one_kind_total_line(py, k_code, k_label):
                     if (py, k_code) in emitted_kind_totals:
@@ -11082,6 +11061,7 @@ def show_results_page(df, filename):
                     for k_code, k_label in [('ΜΙΣΘΩΤΗ', 'Μισθωτή'), ('ΜΗ ΜΙΣΘΩΤΗ', 'Μη μισθωτή')]:
                         if k_code in kinds_here:
                             append_one_kind_total_line(py, k_code, k_label)
+                    append_diadochiki_line_for_year(py)
                     append_loipa_line_for_year(py)
 
                 last_block_insurance_kind = None
@@ -12367,12 +12347,12 @@ def show_results_page(df, filename):
                         num_months = len(months_list)
                         if num_months == 0: continue
                         
-                        days_per_month = days_val / num_months
+                        days_parts = distribute_days_to_months(days_val, num_months)
                         gross_per_month = gross_val / num_months
                         contrib_per_month = contrib_val / num_months
                         is_aggregate = _compute_is_aggregate_interval(row, start_dt, end_dt, num_months)
                         
-                        for m_dt in months_list:
+                        for i, m_dt in enumerate(months_list):
                             parallel_rows.append({
                                 'ΕΤΟΣ': m_dt.year,
                                 'ΤΑΜΕΙΟ': tameio,
@@ -12383,7 +12363,7 @@ def show_results_page(df, filename):
                                 'ΠΕΡΙΓΡΑΦΗ': klados_desc,
                                 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': earnings_type,
                                 'Μήνας_Num': m_dt.month,
-                                'Ημέρες': days_per_month,
+                                'Ημέρες': days_parts[i],
                                 'Μικτές_Part': gross_per_month,
                                 'Εισφορές_Part': contrib_per_month,
                                 'Is_Aggregate': is_aggregate
@@ -12896,12 +12876,12 @@ def show_results_page(df, filename):
                         if num_months == 0:
                             continue
 
-                        days_per_month = days_val / num_months
+                        days_parts = distribute_days_to_months(days_val, num_months)
                         gross_per_month = gross_val / num_months
                         contrib_per_month = contrib_val / num_months
                         is_aggregate = _compute_is_aggregate_interval(row, start_dt, end_dt, num_months)
 
-                        for m_dt in months_list:
+                        for i, m_dt in enumerate(months_list):
                             parallel_rows.append({
                                 'ΕΤΟΣ': m_dt.year,
                                 'ΤΑΜΕΙΟ': tameio,
@@ -12912,7 +12892,7 @@ def show_results_page(df, filename):
                                 'ΠΕΡΙΓΡΑΦΗ': klados_desc,
                                 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': earnings_type,
                                 'Μήνας_Num': m_dt.month,
-                                'Ημέρες': days_per_month,
+                                'Ημέρες': days_parts[i],
                                 'Μικτές_Part': gross_per_month,
                                 'Εισφορές_Part': contrib_per_month,
                                 'Is_Aggregate': is_aggregate
@@ -13194,12 +13174,12 @@ def show_results_page(df, filename):
                         num_months = len(months_list)
                         if num_months == 0: continue
                         
-                        days_per_month = days_val / num_months
+                        days_parts = distribute_days_to_months(days_val, num_months)
                         gross_per_month = gross_val / num_months
                         contrib_per_month = contrib_val / num_months
                         is_aggregate = _compute_is_aggregate_interval(row, start_dt, end_dt, num_months)
                         
-                        for m_dt in months_list:
+                        for i, m_dt in enumerate(months_list):
                             multi_rows.append({
                                 'ΕΤΟΣ': m_dt.year,
                                 'ΤΑΜΕΙΟ': tameio,
@@ -13210,7 +13190,7 @@ def show_results_page(df, filename):
                                 'ΠΕΡΙΓΡΑΦΗ': klados_desc,
                                 'ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ': earnings_type,
                                 'Μήνας_Num': m_dt.month,
-                                'Ημέρες': days_per_month,
+                                'Ημέρες': days_parts[i],
                                 'Μικτές_Part': gross_per_month,
                                 'Εισφορές_Part': contrib_per_month,
                                 'Is_Aggregate': is_aggregate

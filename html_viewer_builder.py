@@ -52,6 +52,7 @@ from app_final import (
     _atlas_write_df_to_excel,
     apply_negative_time_sign,
     insurance_kind_classify_count,
+    compute_diadochiki_total_days_from_c_df,
     format_number_greek,
     format_currency,
     APODOXES_DESCRIPTIONS,
@@ -2249,10 +2250,10 @@ def _build_totals_filter_js(raw_records_js, dk_map_js, desc_map_js,
 """)
 
 
-def _compute_count_kind_summary_from_c_df(c_df: pd.DataFrame, year_days: float = 300.0) -> tuple[float, float, float, float]:
-    """Άθροισμα ημερών μισθωτή / μη μισθωτή (πλαφόν ανά μήνα, ίδια λογική με Κυρία) και ισοδύναμα έτη."""
+def _compute_count_kind_summary_from_c_df(c_df: pd.DataFrame, year_days: float = 300.0) -> tuple[float, float, float, float, float]:
+    """Άθροισμα ημερών μισθωτή / μη μισθωτή / Διαδοχική (ίδια λογική με Κυρία) και ισοδύναμα έτη."""
     if c_df is None or getattr(c_df, "empty", True):
-        return 0.0, 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0, 0.0
 
     def _cap_days(tameio_val):
         t = str(tameio_val).upper()
@@ -2282,14 +2283,15 @@ def _compute_count_kind_summary_from_c_df(c_df: pd.DataFrame, year_days: float =
     sm = sum(_year_kind_days(y, "ΜΙΣΘΩΤΗ") for y in years)
     snm = sum(_year_kind_days(y, "ΜΗ ΜΙΣΘΩΤΗ") for y in years)
     sall = sm + snm
-    syears = (sall / year_days) if year_days else 0.0
-    return sm, snm, sall, syears
+    sdiadoch = compute_diadochiki_total_days_from_c_df(c_df)
+    syears = (sdiadoch / year_days) if year_days else 0.0
+    return sm, snm, sall, syears, sdiadoch
 
 
 def _count_kind_metrics_by_klados_map(
     count_df: pd.DataFrame, desc_map: dict, year_days: float = 300.0
 ) -> dict[str, list[float]]:
-    """Ένα entry ανά κωδικό ΚΛΑΔΟΣ/ΠΑΚΕΤΟ: [μισθωτή, μη μισθωτή, άθροισμα, έτη] για δυναμικά σύνολα στο HTML."""
+    """Ένα entry ανά κωδικό ΚΛΑΔΟΣ/ΠΑΚΕΤΟ: [μισθωτή, μη μισθωτή, άθροισμα, έτη, Διαδοχική] για δυναμικά σύνολα στο HTML."""
     c_df = build_count_c_dataframe(count_df, desc_map)
     if c_df is None or getattr(c_df, "empty", True):
         return {}
@@ -2300,8 +2302,8 @@ def _count_kind_metrics_by_klados_map(
     for code in c_df[col].dropna().unique():
         code_s = str(code).strip()
         sub = c_df[c_df[col].astype(str).str.strip() == code_s]
-        sm, snm, sall, sy = _compute_count_kind_summary_from_c_df(sub, year_days=year_days)
-        out[code_s] = [float(sm), float(snm), float(sall), float(sy)]
+        sm, snm, sall, sy, sdi = _compute_count_kind_summary_from_c_df(sub, year_days=year_days)
+        out[code_s] = [float(sm), float(snm), float(sall), float(sy), float(sdi)]
     return out
 
 
@@ -2634,7 +2636,7 @@ def build_count_with_filters(count_display_df, print_style_rows, count_df,
             f"{cdf_metrics_payload_html}"
             f'<div class="{_count_bar_class} count-kind-metrics atlas-header-split" id="count-kind-metrics-wrap" style="display:none">'
             f'<div class="atlas-header-info"><div class="totals-info-msg">{html_mod.escape(_count_info_msg)}</div></div>'
-            f'{build_atlas_metrics_frame_html("".join([_atlas_metric_cell_html("Σύνολο ημερών (μισθωτή)", "", "cnt-metric-misthoti", critical=True), _atlas_metric_cell_html("Σύνολο ημερών (μη μισθωτή)", "", "cnt-metric-nmisthoti", critical=True), _atlas_metric_cell_html("Άθροισμα ημερών", "", "cnt-metric-sum", critical=True), _atlas_metric_cell_html("Συνολικά έτη", "", "cnt-metric-years", critical=True)]))}'
+            f'{build_atlas_metrics_frame_html("".join([_atlas_metric_cell_html("Σύνολο ημερών (μισθωτή)", "", "cnt-metric-misthoti", critical=True), _atlas_metric_cell_html("Σύνολο ημερών (μη μισθωτή)", "", "cnt-metric-nmisthoti", critical=True), _atlas_metric_cell_html("Άθροισμα ημερών", "", "cnt-metric-sum", critical=True), _atlas_metric_cell_html("Διαδοχική", "", "cnt-metric-diadochiki", critical=True), _atlas_metric_cell_html("Συνολικά έτη", "", "cnt-metric-years", critical=True)]))}'
             "</div>"
         )
 
@@ -3012,6 +3014,10 @@ def _build_count_filter_js():
   function cntRecalcRowSynolo(tr,cm){
     if(cm.synoloIdx===undefined||tr.getAttribute('data-is-total')==='1')return;
     var tds=tr.querySelectorAll('td');
+    if(cm.perigrafi!==undefined&&tds[cm.perigrafi]&&(tds[cm.perigrafi].textContent||'').trim()==='Εισφορές μήνα'){
+      if(tds[cm.synoloIdx])tds[cm.synoloIdx].textContent='';
+      return;
+    }
     var total=0;
     cm.monthIdxs.forEach(function(colIdx){
       var v=parseGreekNum((tds[colIdx]&&tds[colIdx].textContent)||'');
@@ -3176,12 +3182,12 @@ def _build_count_filter_js():
         var u=String(t||'').toUpperCase();
         return (u.indexOf('ΙΚΑ')!==-1||u.indexOf('IKA')!==-1)?31:25;
       }
-      function yearKindDays(subRows,year,kindCode){
+      function yearKindMonthly(subRows,year,kindCode){
         var sub=subRows.filter(function(r){return r.y===year;});
         if(kindCode){
           sub=sub.filter(function(r){return insKindCls(r.k)===kindCode;});
         }
-        if(sub.length===0)return 0;
+        if(sub.length===0)return {};
         var g={};
         sub.forEach(function(r){
           var key=String(r.t||'')+'|'+r.m;
@@ -3196,8 +3202,45 @@ def _build_count_filter_js():
           var c=raw<capForT(tn)?raw:capForT(tn);
           byM[mi]=(byM[mi]||0)+c;
         });
+        return byM;
+      }
+      function yearKindDays(subRows,year,kindCode){
+        var byM=yearKindMonthly(subRows,year,kindCode);
         var s=0;
         Object.keys(byM).forEach(function(mi){s+=byM[mi];});
+        return s;
+      }
+      function yearIkaMisthotiMonthly(subRows,year){
+        var sub=subRows.filter(function(r){
+          if(r.y!==year)return false;
+          if(insKindCls(r.k)!=='ΜΙΣΘΩΤΗ')return false;
+          var u=String(r.t||'').toUpperCase();
+          return u.indexOf('ΙΚΑ')!==-1||u.indexOf('IKA')!==-1;
+        });
+        if(sub.length===0)return {};
+        var byM={};
+        sub.forEach(function(r){
+          var mi=parseInt(r.m,10);
+          var raw=(+r.d||0);
+          var c=raw<31?raw:31;
+          byM[mi]=(byM[mi]||0)+c;
+        });
+        return byM;
+      }
+      function yearDiadochikiDays(subRows,year){
+        var mdM=yearKindMonthly(subRows,year,'ΜΙΣΘΩΤΗ');
+        var mdNm=yearKindMonthly(subRows,year,'ΜΗ ΜΙΣΘΩΤΗ');
+        var mdIka=yearIkaMisthotiMonthly(subRows,year);
+        var s=0;
+        for(var m=1;m<=12;m++){
+          var ikaM=mdIka[m]||0;
+          var mDays=mdM[m]||0;
+          var nmDays=mdNm[m]||0;
+          var combined=mDays+nmDays;
+          var capped=Math.min(25,combined);
+          if(ikaM>25)s+=Math.min(combined,Math.max(ikaM,capped));
+          else s+=capped;
+        }
         return s;
       }
       var fr=allRows.filter(function(r){
@@ -3212,24 +3255,27 @@ def _build_count_filter_js():
       var yearsSet={};
       fr.forEach(function(r){yearsSet[r.y]=1;});
       var years=Object.keys(yearsSet).map(function(x){return parseInt(x,10);}).filter(function(y){return !isNaN(y);}).sort(function(a,b){return a-b;});
-      var sm=0,snm=0;
+      var sm=0,snm=0,sdi=0;
       years.forEach(function(y){
         sm+=yearKindDays(fr,y,'ΜΙΣΘΩΤΗ');
         snm+=yearKindDays(fr,y,'ΜΗ ΜΙΣΘΩΤΗ');
+        sdi+=yearDiadochikiDays(fr,y);
       });
       var sall=sm+snm;
-      var sy=yd?sall/yd:0;
+      var sy=yd?sdi/yd:0;
       function fi(n){return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g,'.');}
       function fd(n){return n.toFixed(1).replace('.',',');}
       function fy(n){var p=n.toFixed(2).split('.');return p[0].replace(/\B(?=(\d{3})+(?!\d))/g,'.')+','+p[1];}
       var e1=document.getElementById('cnt-metric-misthoti');
       var e2=document.getElementById('cnt-metric-nmisthoti');
       var e3=document.getElementById('cnt-metric-sum');
+      var e5=document.getElementById('cnt-metric-diadochiki');
       var e4=document.getElementById('cnt-metric-years');
       wrap.style.display='';
       if(e1)e1.textContent=fi(sm);
       if(e2)e2.textContent=fi(snm);
       if(e3)e3.textContent=fi(sall);
+      if(e5)e5.textContent=fi(sdi);
       if(e4)e4.textContent=fy(sy);
     })();
   }
@@ -3839,6 +3885,15 @@ def _apd_compute_display_rows(records, col_order, params):
         if int(year) >= 2002:
             tcells = {c: "" for c in col_order}
             tcells["Μήνας"] = f"Σύνολο {int(year)}"
+            if totals_only:
+                pkg_col, desc_col = _apd_pkg_desc_cols(col_order)
+                codes = _apd_sort_paketa_codes(
+                    _apd_paketo_code(r["klados"]) for r in yr_rows
+                )
+                if pkg_col:
+                    tcells[pkg_col] = ", ".join(codes)
+                if desc_col:
+                    tcells[desc_col] = ""
             tcells["Ημέρες Ασφ."] = _apd_fmt_days(days_total)
             tcells["Μικτές αποδοχές"] = format_currency(gross_sum)
             tcells["Συν. μήνα"] = format_currency(gross_sum)
@@ -3939,6 +3994,38 @@ def _apd_col_class(col):
 _APD_TOTAL_MERGE_COLS = ("Μήνας", "Ταμείο")
 
 
+def _apd_paketo_code(raw) -> str:
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    return re.split(r"\s*[\u2013\-]\s+", s, maxsplit=1)[0].strip()
+
+
+def _apd_sort_paketa_codes(codes) -> list[str]:
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for c in codes:
+        c = str(c or "").strip()
+        if not c or c in seen:
+            continue
+        seen.add(c)
+        uniq.append(c)
+
+    def _key(c: str):
+        try:
+            return (0, int(c))
+        except ValueError:
+            return (1, c)
+
+    return sorted(uniq, key=_key)
+
+
+def _apd_pkg_desc_cols(col_order: list) -> tuple[str | None, str | None]:
+    pkg = next((c for c in col_order if "Κλάδος" in c and "Πακέτο" in c), None)
+    desc = "Περιγραφή Κλάδου" if "Περιγραφή Κλάδου" in col_order else None
+    return pkg, desc
+
+
 def _apd_total_merge_range(col_order):
     """Εύρος στηλών για συγχωνευμένο «Σύνολο YYYY» (Μήνας → Ταμείο)."""
     indices = [col_order.index(c) for c in _APD_TOTAL_MERGE_COLS if c in col_order]
@@ -3951,9 +4038,23 @@ def _apd_total_merge_range(col_order):
     return start, end - start + 1
 
 
-def _apd_render_total_tds(col_order, col_cls, cells):
-    """Κελιά γραμμής συνόλου με colspan στο εύρος Μήνας–Ταμείο."""
+def _apd_pkg_merge_range(col_order, totals_only: bool):
+    """Εύρος στηλών Κλάδος/Πακέτο + Περιγραφή Κλάδου (μόνο ετήσια σύνολα)."""
+    if not totals_only:
+        return None, 0
+    pkg, desc = _apd_pkg_desc_cols(col_order)
+    if not pkg or not desc:
+        return None, 0
+    i, j = col_order.index(pkg), col_order.index(desc)
+    start, end = min(i, j), max(i, j)
+    return start, end - start + 1
+
+
+def _apd_render_total_tds(col_order, col_cls, cells, totals_only: bool = False):
+    """Κελιά γραμμής συνόλου με colspan στο εύρος Μήνας–Ταμείο (+ πακέτα αν totals_only)."""
     merge_start, merge_span = _apd_total_merge_range(col_order)
+    pkg_start, pkg_span = _apd_pkg_merge_range(col_order, totals_only)
+    pkg_col, _ = _apd_pkg_desc_cols(col_order)
     label = str(cells.get("Μήνας") or cells.get("Ταμείο") or "").strip()
     parts = []
     i = 0
@@ -3965,6 +4066,14 @@ def _apd_render_total_tds(col_order, col_cls, cells):
             )
             i += merge_span
             continue
+        if pkg_start is not None and i == pkg_start and pkg_span > 0:
+            val = html_mod.escape(str(cells.get(pkg_col, "") or "").strip())
+            parts.append(
+                f'<td colspan="{pkg_span}" class="apd-c-pkg apd-paketa-merged">'
+                f'{val}</td>'
+            )
+            i += pkg_span
+            continue
         c, cc = col_order[i], col_cls[i]
         val = html_mod.escape(str(cells.get(c, "")))
         parts.append(f'<td class="{cc}">{val}</td>' if cc else f"<td>{val}</td>")
@@ -3972,7 +4081,7 @@ def _apd_render_total_tds(col_order, col_cls, cells):
     return "".join(parts)
 
 
-def _apd_render_static_table(col_order, display_rows):
+def _apd_render_static_table(col_order, display_rows, totals_only: bool = False):
     """Στατικός πίνακας ΑΠΔ (προεπιλεγμένη κατάσταση) — για εκτύπωση/no-JS."""
     ncols = len(col_order)
     col_cls = [_apd_col_class(c) for c in col_order]
@@ -3989,7 +4098,7 @@ def _apd_render_static_table(col_order, display_rows):
             )
             continue
         if r["kind"] == "total":
-            tds = _apd_render_total_tds(col_order, col_cls, r["cells"])
+            tds = _apd_render_total_tds(col_order, col_cls, r["cells"], totals_only=totals_only)
             body.append(f'<tr class="apd-total-row" data-apd-kind="total">{tds}</tr>')
             continue
         cls = "apd-data-row" + (" apd-low" if r.get("low") else "")
@@ -4356,6 +4465,25 @@ def _build_apd_filter_js():
       if(year>=2002){
         var tc={};COLS.forEach(function(c){tc[c]='';});
         tc['Μήνας']='Σύνολο '+year;
+        if(P.totals_only){
+          var pkgSeen={},pkgOrder=[];
+          yr.forEach(function(o){
+            var k=String(o.rec.klados||'').split(/\s*[\u2013\-]\s+/)[0].trim();
+            if(k&&!pkgSeen[k]){pkgSeen[k]=1;pkgOrder.push(k);}
+          });
+          pkgOrder.sort(function(a,b){
+            var na=parseInt(a,10),nb=parseInt(b,10);
+            if(!isNaN(na)&&!isNaN(nb)&&String(na)===String(a).trim()&&String(nb)===String(b).trim())return na-nb;
+            return String(a).localeCompare(String(b),'el');
+          });
+          var pkgCol=null,descCol=null;
+          COLS.forEach(function(c){
+            if(String(c).indexOf('Κλάδος/Πακέτο')>=0||String(c).indexOf('ΚΛΑΔΟΣ')>=0)pkgCol=c;
+            if(String(c).indexOf('Περιγραφή Κλάδου')===0)descCol=c;
+          });
+          if(pkgCol)tc[pkgCol]=pkgOrder.join(', ');
+          if(descCol)tc[descCol]='';
+        }
         tc['Ημέρες Ασφ.']=fmtDays(dT);
         tc['Μικτές αποδοχές']=fmtCurr(gS);
         tc['Συν. μήνα']=fmtCurr(gS);
@@ -4386,6 +4514,25 @@ def _build_apd_filter_js():
   }
   var COLCLS=COLS.map(colClass);
   var TOTAL_MERGE_COLS=['Μήνας','Ταμείο'];
+  var _apdTotalsOnly=false;
+  function pkgDescMergeRange(totalsOnly){
+    if(!totalsOnly)return [null,0];
+    var pkgCol=null,descCol=null;
+    COLS.forEach(function(c,i){
+      if(String(c).indexOf('Κλάδος/Πακέτο')>=0||String(c).indexOf('ΚΛΑΔΟΣ')>=0)pkgCol=i;
+      if(String(c).indexOf('Περιγραφή Κλάδου')===0)descCol=i;
+    });
+    if(pkgCol===null||descCol===null)return [null,0];
+    var s=Math.min(pkgCol,descCol),e=Math.max(pkgCol,descCol);
+    return [s,e-s+1];
+  }
+  function findPkgColName(){
+    for(var i=0;i<COLS.length;i++){
+      var c=COLS[i];
+      if(String(c).indexOf('Κλάδος/Πακέτο')>=0||String(c).indexOf('ΚΛΑΔΟΣ')>=0)return c;
+    }
+    return null;
+  }
   function totalMergeRange(){
     var idx=[];
     TOTAL_MERGE_COLS.forEach(function(c){var i=COLS.indexOf(c);if(i>=0)idx.push(i);});
@@ -4396,14 +4543,21 @@ def _build_apd_filter_js():
     var s=Math.min.apply(null,idx),e=Math.max.apply(null,idx);
     return [s,e-s+1];
   }
-  function renderTotalTds(cells){
+  function renderTotalTds(cells,totalsOnly){
     var mr=totalMergeRange(),ms=mr[0],span=mr[1];
+    var pr=pkgDescMergeRange(totalsOnly),ps=pr[0],pspan=pr[1];
+    var pkgName=findPkgColName();
     var label=String(cells['Μήνας']||cells['Ταμείο']||'').trim();
     var html='',i=0;
     while(i<COLS.length){
       if(ms!==null&&i===ms&&span>0){
         html+='<td colspan="'+span+'" class="apd-total-label">'+esc(label)+'</td>';
         i+=span;continue;
+      }
+      if(ps!==null&&i===ps&&pspan>0){
+        var ptxt=pkgName?(cells[pkgName]||''):'';
+        html+='<td colspan="'+pspan+'" class="apd-c-pkg apd-paketa-merged">'+esc(ptxt)+'</td>';
+        i+=pspan;continue;
       }
       var cc=COLCLS[i];
       html+=cc?'<td class="'+cc+'">'+esc(cells[COLS[i]]||'')+'</td>':'<td>'+esc(cells[COLS[i]]||'')+'</td>';
@@ -4419,7 +4573,7 @@ def _build_apd_filter_js():
     rows.forEach(function(r){
       if(r.kind==='empty'){html+='<tr class="apd-year-gap" data-apd-kind="empty" aria-hidden="true"><td colspan="'+ncols+'"></td></tr>';return;}
       if(r.kind==='total'){
-        html+='<tr class="apd-total-row" data-apd-kind="total">'+renderTotalTds(r.cells)+'</tr>';
+        html+='<tr class="apd-total-row" data-apd-kind="total">'+renderTotalTds(r.cells,_apdTotalsOnly)+'</tr>';
         return;
       }
       var cls='apd-data-row'+(r.low?' apd-low':'');
@@ -4447,6 +4601,8 @@ def _build_apd_filter_js():
   function apply(){
     updateLockedBar();
     var P=readParams();
+    _apdTotalsOnly=!!P.totals_only;
+    sec.classList.toggle('apd-totals-only', _apdTotalsOnly);
     render(computeRows(P));
   }
 
@@ -7415,6 +7571,11 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .table-fullscreen .apd-table-scroll table.print-table { border-collapse: separate; border-spacing: 0; overflow: visible; box-shadow: none; border-radius: 0; }
 .table-fullscreen .apd-table-scroll table.print-table thead th { position: sticky; top: 0; z-index: 6; background: #f8fafc; border-bottom: 2px solid #cbd5e1; box-shadow: 0 1px 0 #cbd5e1; }
 .table-fullscreen .apd-table-scroll table.print-table tbody tr.apd-total-row td { background: #f5fafc !important; color: #000 !important; font-weight: 700 !important; border-top: 1px solid #c8dce8; }
+#apd-section.apd-totals-only .apd-table-scroll table.print-table tbody tr.apd-total-row td.apd-paketa-merged {
+  text-align: left;
+  white-space: normal;
+  font-weight: 700;
+}
 .table-fullscreen .apd-table-scroll table.print-table tbody tr.apd-data-row td.apd-cut { color: #d9534f; font-weight: 700; }
 /* Στήλες ΑΠΔ: νομισματικές/ποσοστό δεξιά χωρίς αναδίπλωση· περιγραφές αναδιπλώνονται */
 .apd-table-scroll table.print-table th.apd-c-money, .apd-table-scroll table.print-table td.apd-c-money,
