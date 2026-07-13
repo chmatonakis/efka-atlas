@@ -1984,6 +1984,37 @@ def format_insurance_years_from_days(days, year_days: float = 300.0, empty: str 
         return empty
 
 
+def format_maindata_display_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Ελληνική μορφοποίηση ποσών/αριθμών για εμφάνιση Κύριας Δεδομένα."""
+    if df is None or getattr(df, "empty", True):
+        return df
+    out = df.copy()
+    for pat in (["μικτές αποδοχές", "μικτες αποδοχες"], ["συνολικές εισφορές", "συνολικες εισφορες"]):
+        col = find_column_by_pattern(out, pat)
+        if col:
+            out[col] = out[col].apply(format_currency)
+    for col in out.columns:
+        cn = normalize_column_name(col).lower()
+        decimals = None
+        if "ημερολογιακ" in cn and "ημερ" in cn:
+            decimals = 0
+        elif cn in ("μήνες", "μηνες"):
+            decimals = 1
+        elif cn in ("έτη", "ετη"):
+            decimals = 1
+        elif cn in ("ημέρες", "ημερες"):
+            decimals = 0
+        if decimals is not None:
+            out[col] = out[col].apply(
+                lambda x, d=decimals: (
+                    format_number_greek(x, decimals=d)
+                    if pd.notna(x) and str(x).strip() not in ("", "-")
+                    else x
+                )
+            )
+    return out
+
+
 def clean_numeric_value(value, exclude_drx=False):
     """Καθαρισμός και μετατροπή αριθμητικών τιμών σε float
     
@@ -8412,31 +8443,21 @@ def show_results_page(df, filename):
             if st.session_state.get('show_filters', False):
                 st.info(f"Εμφανίζονται {len(main_df)} γραμμές")
         
-            # Δημιουργούμε αντίγραφο για εμφάνιση με μορφοποίηση
-            display_df = main_df.copy()
             try:
                 st.session_state["atlas_export_main_df"] = main_df.copy()
             except Exception:
                 st.session_state["atlas_export_main_df"] = pd.DataFrame(main_df)
 
-            # Εφαρμόζουμε μορφοποίηση νομισμάτων μόνο για εμφάνιση
-            currency_columns = ['Μικτές αποδοχές', 'Συνολικές εισφορές']
-            for col in currency_columns:
-                if col in display_df.columns:
-                    display_df[col] = display_df[col].apply(format_currency)
-        
-            # Εφαρμόζουμε ελληνική μορφοποίηση για αριθμητικές στήλες
-            numeric_columns = ['Ημερολογιακές ημέρες', 'Μήνες', 'Έτη']
-            for col in numeric_columns:
-                if col in display_df.columns:
-                    # Μήνες και Έτη με 1 δεκαδικό, ημέρες χωρίς δεκαδικά
-                    decimals = 1 if col in ['Μήνες', 'Έτη'] else 0
-                    display_df[col] = display_df[col].apply(lambda x: format_number_greek(x, decimals=decimals) if pd.notna(x) and x != '' else x)
-        
+            display_df = format_maindata_display_df(main_df)
+            main_col_config = {
+                str(c): st.column_config.TextColumn(str(c)) for c in display_df.columns
+            }
             st.markdown("### Κύρια Δεδομένα e-EFKA (Με χρονολογική σειρά)")
             st.dataframe(
                 display_df,
-                width="stretch"
+                width="stretch",
+                column_config=main_col_config,
+                hide_index=True,
             )
             register_view("Κύρια Δεδομένα", display_df, export_data=main_df)
             # Κουμπί εκτύπωσης για Κύρια Δεδομένα
