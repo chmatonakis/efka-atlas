@@ -1884,6 +1884,37 @@ def format_insurance_years_from_days(days, year_days: float = 300.0, empty: str 
         return empty
 
 
+def format_maindata_display_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Ελληνική μορφοποίηση ποσών/αριθμών για εμφάνιση Κύριας Δεδομένα."""
+    if df is None or getattr(df, "empty", True):
+        return df
+    out = df.copy()
+    for pat in (["μικτές αποδοχές", "μικτες αποδοχες"], ["συνολικές εισφορές", "συνολικες εισφορες"]):
+        col = find_column_by_pattern(out, pat)
+        if col:
+            out[col] = out[col].apply(format_currency)
+    for col in out.columns:
+        cn = normalize_column_name(col).lower()
+        decimals = None
+        if "ημερολογιακ" in cn and "ημερ" in cn:
+            decimals = 0
+        elif cn in ("μήνες", "μηνες"):
+            decimals = 1
+        elif cn in ("έτη", "ετη"):
+            decimals = 1
+        elif cn in ("ημέρες", "ημερες"):
+            decimals = 0
+        if decimals is not None:
+            out[col] = out[col].apply(
+                lambda x, d=decimals: (
+                    format_number_greek(x, decimals=d)
+                    if pd.notna(x) and str(x).strip() not in ("", "-")
+                    else x
+                )
+            )
+    return out
+
+
 def clean_numeric_value(value, exclude_drx=False):
     """Καθαρισμός και μετατροπή αριθμητικών τιμών σε float
     
@@ -2921,6 +2952,7 @@ def _parallel_month_groups_2017(base_df: pd.DataFrame):
             continue
     if not parallel_rows:
         return None, None
+
     p_df = pd.DataFrame(parallel_rows)
 
     def _is_ika(row):
@@ -5724,6 +5756,57 @@ def compute_kind_monthly_capped_from_c_df(c_df_src: pd.DataFrame, year: int, kin
     )
     by_m = g.groupby('Μήνας_Num')['_capped'].sum()
     return {m: float(by_m.get(m, 0.0) or 0.0) for m in range(1, 13)}
+
+
+def compute_ika_misthoti_monthly_from_c_df(c_df_src: pd.DataFrame, year: int) -> dict[int, float]:
+    """Μηνιαίες ημέρες μισθωτή ΙΚΑ (πλαφόν 31/μήνα) — για υπολογισμό Διαδοχικής."""
+    sub = c_df_src[c_df_src['ΕΤΟΣ'] == year].copy()
+    if sub.empty:
+        return {m: 0.0 for m in range(1, 13)}
+    sub['_k'] = sub['ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ'].apply(insurance_kind_classify_count)
+    sub = sub[sub['_k'] == 'ΜΙΣΘΩΤΗ']
+    tameio_u = sub['ΤΑΜΕΙΟ'].astype(str).str.upper()
+    sub = sub[tameio_u.str.contains('ΙΚΑ', na=False) | tameio_u.str.contains('IKA', na=False)]
+    if sub.empty:
+        return {m: 0.0 for m in range(1, 13)}
+    g = sub.groupby('Μήνας_Num', as_index=False)['Ημέρες'].sum()
+    g['_capped'] = g['Ημέρες'].apply(lambda d: min(float(d), 31.0))
+    return {int(r['Μήνας_Num']): float(r['_capped']) for _, r in g.iterrows()}
+
+
+def compute_diadochiki_monthly_from_c_df(c_df_src: pd.DataFrame, year: int) -> dict[int, float]:
+    """Διαδοχική ανά μήνα: συνδυασμός μισθωτή + μη μισθωτή με πλαφόν 25/μήνα,
+    εκτός ΙΚΑ μισθωτή όπου μπορεί να ξεπεράσει τις 25 (έως 31).
+    Ποτέ δεν υπερβαίνει το άθροισμα τύπων (μισθωτής + μη μισθωτής) στον ίδιο μήνα."""
+    md_m = compute_kind_monthly_capped_from_c_df(c_df_src, year, 'ΜΙΣΘΩΤΗ')
+    md_nm = compute_kind_monthly_capped_from_c_df(c_df_src, year, 'ΜΗ ΜΙΣΘΩΤΗ')
+    md_ika = compute_ika_misthoti_monthly_from_c_df(c_df_src, year)
+    out: dict[int, float] = {}
+    for m in range(1, 13):
+        ika_m = float(md_ika.get(m, 0.0) or 0.0)
+        m_days = float(md_m.get(m, 0.0) or 0.0)
+        nm_days = float(md_nm.get(m, 0.0) or 0.0)
+        combined = m_days + nm_days
+        capped = min(25.0, combined)
+        if ika_m > 25.0:
+            out[m] = min(combined, max(ika_m, capped))
+        else:
+            out[m] = capped
+    return out
+
+
+def compute_diadochiki_total_days_from_c_df(c_df_src: pd.DataFrame) -> float:
+    """Συνολικές ημέρες Διαδοχικής (άθροισμα όλων των ετών)."""
+    if c_df_src is None or c_df_src.empty:
+        return 0.0
+    try:
+        years = sorted({int(y) for y in c_df_src['ΕΤΟΣ'].dropna().unique()})
+    except Exception:
+        return 0.0
+    total = 0.0
+    for y in years:
+        total += sum(compute_diadochiki_monthly_from_c_df(c_df_src, y).values())
+    return total
 
 
 def build_syntaksi_annual_table(c_df: pd.DataFrame) -> pd.DataFrame:

@@ -2324,6 +2324,9 @@ def _count_filter_modal(
 
 
 _ATLAS_MONTH_COLS = {"ΙΑΝ", "ΦΕΒ", "ΜΑΡ", "ΑΠΡ", "ΜΑΙ", "ΙΟΥΝ", "ΙΟΥΛ", "ΑΥΓ", "ΣΕΠ", "ΟΚΤ", "ΝΟΕ", "ΔΕΚ"}
+_ATLAS_MONTH_COL_ORDER = (
+    "ΙΑΝ", "ΦΕΒ", "ΜΑΡ", "ΑΠΡ", "ΜΑΙ", "ΙΟΥΝ", "ΙΟΥΛ", "ΑΥΓ", "ΣΕΠ", "ΟΚΤ", "ΝΟΕ", "ΔΕΚ",
+)
 _ATLAS_MONTH_COL_WT = 1.8
 
 
@@ -2366,6 +2369,8 @@ def _atlas_table_col_weight(name) -> float:
         return 2.4
     if u in ("ΕΤΗ", "ΜΗΝΕΣ", "ΗΜΕΡΕΣ"):
         return 1.8
+    if u == "ΜΟΝΑΔΕΣ":
+        return 1.8
     if u == "ΑΡΙΘΜΟΣ ΕΓΓΡΑΦΩΝ":
         return 2.2
     if u == "ΑΠΟΔΟΧΕΣ" or "ΜΙΚΤΕΣ" in u:
@@ -2381,8 +2386,7 @@ def _atlas_table_col_weight(name) -> float:
     return 2.4
 
 
-def _atlas_colgroup_html(columns, *, month_shave: bool = True) -> str:
-    header_cells = [str(c) for c in columns]
+def _atlas_colgroup_weights(header_cells, *, month_shave: bool = True) -> list[float]:
     weights = [_atlas_table_col_weight(h) for h in header_cells]
     if month_shave:
         n_month = sum(1 for h in header_cells if _atlas_norm_col_name(h) in _ATLAS_MONTH_COLS)
@@ -2393,13 +2397,161 @@ def _atlas_colgroup_html(columns, *, month_shave: bool = True) -> str:
                 w - shave if _atlas_norm_col_name(h) not in _ATLAS_MONTH_COLS else _ATLAS_MONTH_COL_WT
                 for h, w in zip(header_cells, weights)
             ]
+    return weights
+
+
+def _atlas_colgroup_html_from_weights(header_cells, weights: list[float]) -> str:
     total_w = sum(weights) or 1.0
     return "<colgroup>" + "".join(
         f'<col style="width:{round(w / total_w * 100, 3)}%">' for w in weights
     ) + "</colgroup>"
 
 
-def _build_unified_count_table_html(per_year_html: str) -> str:
+def _atlas_colgroup_html(columns, *, month_shave: bool = True) -> str:
+    header_cells = [str(c) for c in columns]
+    weights = _atlas_colgroup_weights(header_cells, month_shave=month_shave)
+    return _atlas_colgroup_html_from_weights(header_cells, weights)
+
+
+def _atlas_full_count_layout_headers(
+    visible_header_cells, omit_cols=("ΤΑΜΕΙΟ", "ΠΕΡΙΓΡΑΦΗ"),
+) -> list[str]:
+    """Εισάγει «φανταστικές» στήλες Καταμέτρησης ώστε τα βάρη colgroup να ταιριάζουν."""
+    omit = {_atlas_norm_col_name(c) for c in omit_cols}
+    full: list[str] = []
+    for h in visible_header_cells:
+        nu = _atlas_norm_col_name(h)
+        full.append(h)
+        if nu == "ΕΤΟΣ" and "ΤΑΜΕΙΟ" in omit:
+            full.append("ΤΑΜΕΙΟ")
+        if ("ΚΛΑΔΟΣ" in nu or "ΠΑΚΕΤΟ" in nu) and "ΠΕΡΙΓΡΑΦΗ" in omit:
+            if not any(_atlas_norm_col_name(x) == "ΠΕΡΙΓΡΑΦΗ" for x in full):
+                full.append("ΠΕΡΙΓΡΑΦΗ")
+    return full
+
+
+def _atlas_colgroup_html_count_aligned(
+    visible_header_cells, *, omit_cols=("ΤΑΜΕΙΟ", "ΠΕΡΙΓΡΑΦΗ"), month_shave=True,
+) -> str:
+    """colgroup με ίδια % πλάτη μηνών (και λοιπών στηλών) όπως στην πλήρη Καταμέτρηση."""
+    full_headers = _atlas_full_count_layout_headers(visible_header_cells, omit_cols)
+    full_weights = _atlas_colgroup_weights(full_headers, month_shave=month_shave)
+    full_html = _atlas_colgroup_html_from_weights(full_headers, full_weights)
+    full_pcts = [
+        float(x) for x in re.findall(r"width:([\d.]+)%", full_html)
+    ]
+    pct_map = dict(zip(full_headers, full_pcts))
+    month_headers = [
+        h for h in visible_header_cells
+        if _atlas_norm_col_name(h) in _ATLAS_MONTH_COLS
+    ]
+    other_headers = [h for h in visible_header_cells if h not in month_headers]
+    month_pct_sum = sum(pct_map.get(h, 0.0) for h in month_headers)
+    other_budget = 100.0 - month_pct_sum
+    other_full_sum = sum(pct_map.get(h, 0.0) for h in other_headers)
+    vis_pcts: list[float] = []
+    for h in visible_header_cells:
+        if h in month_headers:
+            vis_pcts.append(pct_map[h])
+        elif other_full_sum:
+            vis_pcts.append(pct_map[h] / other_full_sum * other_budget)
+        else:
+            vis_pcts.append(0.0)
+    return _atlas_colgroup_html_from_weights(visible_header_cells, vis_pcts)
+
+
+def _atlas_colgroup_html_eipr(visible_header_cells) -> str:
+    """colgroup Ειδικής Προσαύξησης: ίδια % μηνών με Καταμέτρηση, βάρη ΈΤΗ/ΜΟΝΑΔΕΣ."""
+    month_headers = [
+        h for h in visible_header_cells
+        if _atlas_norm_col_name(h) in _ATLAS_MONTH_COLS
+    ]
+    meta = [
+        h for h in visible_header_cells
+        if h not in month_headers and h not in ("ΣΥΝΟΛΟ", "ΈΤΗ", "ΜΟΝΑΔΕΣ", "ΕΙΣΦΟΡΕΣ")
+    ]
+    ref_count_visible = meta + ["ΣΥΝΟΛΟ"] + month_headers + ["ΑΠΟΔΟΧΕΣ", "ΕΙΣΦΟΡΕΣ", "%"]
+    full_headers = _atlas_full_count_layout_headers(
+        ref_count_visible, omit_cols=("ΤΑΜΕΙΟ", "ΠΕΡΙΓΡΑΦΗ"),
+    )
+    full_weights = _atlas_colgroup_weights(full_headers, month_shave=True)
+    full_html = _atlas_colgroup_html_from_weights(full_headers, full_weights)
+    full_pcts = [float(x) for x in re.findall(r"width:([\d.]+)%", full_html)]
+    pct_map = dict(zip(full_headers, full_pcts))
+    freed = pct_map.get("ΑΠΟΔΟΧΕΣ", 0.0) + pct_map.get("%", 0.0)
+    w_eti = _atlas_table_col_weight("ΈΤΗ")
+    w_mon = _atlas_table_col_weight("ΜΟΝΑΔΕΣ")
+    w_new = w_eti + w_mon
+    other_headers = [h for h in visible_header_cells if h not in month_headers]
+    month_pct_sum = sum(pct_map.get(h, 0.0) for h in month_headers)
+    other_budget = 100.0 - month_pct_sum
+    other_weights: list[float] = []
+    for h in other_headers:
+        if h == "ΈΤΗ":
+            other_weights.append(w_eti + (freed * w_eti / w_new if w_new else 0.0))
+        elif h == "ΜΟΝΑΔΕΣ":
+            other_weights.append(w_mon + (freed * w_mon / w_new if w_new else 0.0))
+        elif h in pct_map:
+            other_weights.append(pct_map[h])
+        else:
+            other_weights.append(_atlas_table_col_weight(h))
+    ow_sum = sum(other_weights) or 1.0
+    vis_pcts: list[float] = []
+    for h in visible_header_cells:
+        if h in month_headers:
+            vis_pcts.append(pct_map[h])
+        else:
+            idx = other_headers.index(h)
+            vis_pcts.append(other_weights[idx] / ow_sum * other_budget)
+    return _atlas_colgroup_html_from_weights(visible_header_cells, vis_pcts)
+
+
+def _atlas_count_numeric_col_start(header_cells, *, numeric_from_synolo: bool = False) -> int:
+    """1-based index πρώτης δεξιά-στοιχισμένης στήλης (όπως στην Καταμέτρηση)."""
+    if numeric_from_synolo:
+        for i, h in enumerate(header_cells, start=1):
+            if _atlas_norm_col_name(h) == "ΣΥΝΟΛΟ":
+                return i
+    for i, h in enumerate(header_cells, start=1):
+        u = _atlas_norm_col_name(h)
+        if u in _ATLAS_MONTH_COLS or u == "ΣΥΝΟΛΟ":
+            return i
+        if "ΑΠΟΔΟΧΩΝ" in u and "ΤΥΠΟΣ" in u:
+            return i
+    return 7
+
+
+def _atlas_count_month_col_range(header_cells):
+    idxs = [
+        i for i, h in enumerate(header_cells, start=1)
+        if _atlas_norm_col_name(h) in _ATLAS_MONTH_COLS
+    ]
+    if not idxs:
+        return None, None
+    return min(idxs), max(idxs)
+
+
+def _atlas_count_unified_nth_child_css(
+    wrapper_id: str, header_cells, *, numeric_from_synolo: bool = False,
+) -> str:
+    num_start = _atlas_count_numeric_col_start(
+        header_cells, numeric_from_synolo=numeric_from_synolo,
+    )
+    m1, m2 = _atlas_count_month_col_range(header_cells)
+    css = (
+        f"#{wrapper_id} table.print-table.count-unified thead th:nth-child(n+{num_start}),\n"
+        f"#{wrapper_id} table.print-table.count-unified tbody td:nth-child(n+{num_start}) "
+        f"{{ text-align: right; white-space: nowrap; }}\n"
+    )
+    if m1 is not None and m2 is not None:
+        css += (
+            f"#{wrapper_id} table.print-table.count-unified tbody td:nth-child(n+{m1}):nth-child(-n+{m2}) "
+            f"{{ white-space: normal; }}\n"
+        )
+    return css
+
+
+def _build_unified_count_table_html(per_year_html: str, *, count_layout_omit=None) -> str:
     """Μετατρέπει τα ανά-έτος `.year-section` (build_yearly_print_html) σε ΕΝΑΝ πίνακα
     `.count-unified` με μπάντα έτους στην αρχή + κενή γραμμή στο τέλος κάθε έτους.
     Διατηρεί αυτούσια τα κελιά/στυλ/γραμμές συνόλου ώστε φίλτρα/σύνολα να δουλεύουν."""
@@ -2414,7 +2566,14 @@ def _build_unified_count_table_html(per_year_html: str) -> str:
         for h in re.findall(r"<th\b[^>]*>(.*?)</th>", thead, re.DOTALL)
     ]
     ncols = len(header_cells) or 1
-    colgroup = _atlas_colgroup_html(header_cells, month_shave=True)
+    if count_layout_omit == "eipr":
+        colgroup = _atlas_colgroup_html_eipr(header_cells)
+    elif count_layout_omit:
+        colgroup = _atlas_colgroup_html_count_aligned(
+            header_cells, omit_cols=tuple(count_layout_omit), month_shave=True,
+        )
+    else:
+        colgroup = _atlas_colgroup_html(header_cells, month_shave=True)
 
     rows_out = []
     for block in per_year_html.split("<div class='year-section'>")[1:]:
@@ -3334,6 +3493,812 @@ def _build_count_filter_js():
   apply();
 })();
 """
+
+
+def _build_special_increase_filter_js():
+    """JS καρτέλας «Ειδική Προσαύξηση»: πιστό αντίγραφο του JS της Καταμέτρησης με
+    ανεξάρτητα IDs (prefix `eipr`) ώστε να ΜΗΝ συνδέεται/συγκρούεται με την Καταμέτρηση
+    ή άλλες καρτέλες. Τα custom events μετονομάζονται (atlas-eipr-*) ώστε να μην
+    ενεργοποιούν συγχρονισμό σε ΑΠΔ/Συντάξιμες."""
+    js = _build_count_filter_js()
+    _repl = [
+        ("atlas-count-cdf-metrics-json", "atlas-eipr-cdf-metrics-json"),
+        ("atlas-count-klados-change", "atlas-eipr-klados-change"),
+        ("atlas-count-filters-change", "atlas-eipr-filters-change"),
+        ("count-tables-wrapper", "eipr-tables-wrapper"),
+        ("count-date-presets-bar", "eipr-date-presets-bar"),
+        ("count-kind-metrics-wrap", "eipr-kind-metrics-wrap"),
+        ("count-section", "eipr-section"),
+        ("cnt-filter-from", "eipr-filter-from"),
+        ("cnt-filter-to", "eipr-filter-to"),
+        ("cnt-filter-reset", "eipr-filter-reset"),
+        ("cnt-totals-only", "eipr-totals-only"),
+        ("cnt-year-sparse", "eipr-year-sparse"),
+        ("cnt-metric-misthoti", "eipr-metric-misthoti"),
+        ("cnt-metric-nmisthoti", "eipr-metric-nmisthoti"),
+        ("cnt-metric-sum", "eipr-metric-sum"),
+        ("cnt-metric-diadochiki", "eipr-metric-diadochiki"),
+        ("cnt-metric-years", "eipr-metric-years"),
+    ]
+    for _a, _b in _repl:
+        js = js.replace(_a, _b)
+    _contrib_fn = r"""
+  function isEiprContribRow(tr,cm){
+    if(!tr||tr.getAttribute('data-is-band')==='1'||tr.getAttribute('data-is-sep')==='1'||tr.getAttribute('data-is-total')==='1')return false;
+    if(cm&&cm.perigrafi!==undefined){
+      var tds=tr.querySelectorAll('td');
+      if(tds[cm.perigrafi]&&(tds[cm.perigrafi].textContent||'').trim()==='Εισφορές μήνα')return true;
+    }
+    var tds2=tr.querySelectorAll('td');
+    if(!cm||!cm.monthIdxs||!cm.monthIdxs.length)return false;
+    var hasEuro=false;
+    cm.monthIdxs.forEach(function(i){if(tds2[i]&&(tds2[i].textContent||'').indexOf('€')!==-1)hasEuro=true;});
+    if(!hasEuro)return false;
+    if(cm.synoloIdx!==undefined&&tds2[cm.synoloIdx]){
+      var sv=(tds2[cm.synoloIdx].textContent||'').trim();
+      if(sv){var nv=parseGreekNum(sv);if(!isNaN(nv)&&nv>0)return false;}
+    }
+    return true;
+  }
+  function eiprInsKindCls(t){
+    var s=String(t||'').trim().toUpperCase().replace(/\s+/g,' ');
+    if(!s)return '';
+    if(/ΜΗ\s*ΜΙΣΘΩΤ/.test(s))return 'ΜΗ ΜΙΣΘΩΤΗ';
+    if(s.indexOf('NON')!==-1&&s.indexOf('SAL')!==-1)return 'ΜΗ ΜΙΣΘΩΤΗ';
+    if(s.indexOf('ΜΙΣΘΩΤΗ')!==-1&&s.indexOf('ΜΗ ΜΙΣΘΩΤΗ')===-1&&s.indexOf('ΜΗ ')!==0)return 'ΜΙΣΘΩΤΗ';
+    return '';
+  }
+  function eiprPaketoCode(v){
+    var raw=String(v||'').trim();
+    if(!raw)return '';
+    var code=raw.split(/\s*[\u2013\-]\s+/)[0].trim().toUpperCase();
+    if(code==='ΕΙΠΡ'||code==='ΠΕΙΠ')return code;
+    var parts=raw.toUpperCase().split(/[^A-ZΑ-Ω0-9]+/);
+    for(var i=0;i<parts.length;i++){if(parts[i]==='ΕΙΠΡ'||parts[i]==='ΠΕΙΠ')return parts[i];}
+    return '';
+  }
+  function eiprMonadesFactor(paketo,kind,year){
+    var p=String(paketo||'').toUpperCase();
+    var y=parseInt(year,10)||0;
+    if(p==='ΠΕΙΠ')return 4;
+    if(p==='ΕΙΠΡ'){
+      if(kind==='ΜΙΣΘΩΤΗ')return y&&y<=2006?19.33:12;
+      if(kind==='ΜΗ ΜΙΣΘΩΤΗ')return 12;
+    }
+    return NaN;
+  }
+  function eiprResolvePaketo(tr,cm,lastPak){
+    var pk=eiprPaketoCode(tr.getAttribute('data-c-klados')||'');
+    if(!pk&&cm.klados!==undefined){
+      var tds=tr.querySelectorAll('td');
+      pk=eiprPaketoCode(tds[cm.klados]?(tds[cm.klados].textContent||''):'');
+    }
+    if(pk)return pk;
+    var kind=eiprInsKindCls(tr.getAttribute('data-c-typos')||'');
+    if(!kind&&cm.typos!==undefined){
+      var tds2=tr.querySelectorAll('td');
+      kind=eiprInsKindCls(tds2[cm.typos]?(tds2[cm.typos].textContent||''):'');
+    }
+    if(kind==='ΜΙΣΘΩΤΗ')return 'ΕΙΠΡ';
+    if(lastPak)return lastPak;
+    return '';
+  }
+  function eiprFormatMonades(n){
+    if(isNaN(n)||n===0)return '';
+    var r=Math.round(n*100)/100;
+    return String(r.toFixed(2)).replace('.',',');
+  }
+  function eiprIsInsTypeTotalRow(tr,cm){
+    if(!tr||tr.getAttribute('data-is-total')!=='1')return false;
+    var kind='';
+    if(cm.typos!==undefined){
+      var tds=tr.querySelectorAll('td');
+      kind=eiprInsKindCls(tds[cm.typos]?(tds[cm.typos].textContent||''):'');
+    }
+    if(kind!=='ΜΙΣΘΩΤΗ'&&kind!=='ΜΗ ΜΙΣΘΩΤΗ')return false;
+    if((tr.getAttribute('data-c-employer')||'').trim())return false;
+    if(cm.employer!==undefined){
+      var tdsE=tr.querySelectorAll('td');
+      if(tdsE[cm.employer]&&(tdsE[cm.employer].textContent||'').trim())return false;
+    }
+    if(cm.apodoxes!==undefined){
+      var tds2=tr.querySelectorAll('td');
+      if(tds2[cm.apodoxes]&&(tds2[cm.apodoxes].textContent||'').trim())return false;
+    }
+    return true;
+  }
+  function updateEiprMonadesSum(){
+    var el=document.getElementById('eipr-metric-monades-sum');
+    if(!el)return;
+    var sec=document.getElementById('eipr-section');
+    var cTable=sec?sec.querySelector('table.print-table'):null;
+    if(!cTable){el.textContent='';return;}
+    var cm=mapHeaders(cTable);
+    if(cm.monadesIdx===undefined){el.textContent='';return;}
+    var rows=cTable.querySelectorAll('tbody tr');
+    var sum=0;
+    rows.forEach(function(tr){
+      if(tr.getAttribute('data-is-band')==='1'||tr.getAttribute('data-is-sep')==='1')return;
+      if(tr.style.display==='none')return;
+      if(!eiprIsInsTypeTotalRow(tr,cm))return;
+      var tds=tr.querySelectorAll('td');
+      var v=parseGreekNum((tds[cm.monadesIdx]&&tds[cm.monadesIdx].textContent)||'');
+      if(!isNaN(v))sum+=v;
+    });
+    sum=Math.round(sum*100)/100;
+    el.textContent=sum?eiprFormatMonades(sum):'';
+  }
+  function eiprMonadesText(tr,cm,totalDays,lastPak,lastKind){
+    if(!totalDays)return '';
+    var yr=parseInt(tr.getAttribute('data-c-year')||'',10)||0;
+    var pk=eiprResolvePaketo(tr,cm,lastPak);
+    var kind=eiprInsKindCls(tr.getAttribute('data-c-typos')||'');
+    if(!kind&&cm.typos!==undefined){
+      var tds=tr.querySelectorAll('td');
+      kind=eiprInsKindCls(tds[cm.typos]?(tds[cm.typos].textContent||''):'');
+    }
+    if(!kind&&lastKind)kind=lastKind;
+    var eti=Math.round((totalDays/300)*100)/100;
+    var f=eiprMonadesFactor(pk,kind,yr);
+    if(isNaN(f)||!eti)return '';
+    return eiprFormatMonades(f*eti);
+  }
+"""
+    js = js.replace("  function mapHeaders(tbl){", _contrib_fn + "\n  function mapHeaders(tbl){")
+    js = js.replace(
+        "if(cm.perigrafi!==undefined&&tds[cm.perigrafi]&&(tds[cm.perigrafi].textContent||'').trim()==='Εισφορές μήνα')return;",
+        "if(isEiprContribRow(tr,cm))return;",
+    )
+    js = js.replace(
+        "if(cm.perigrafi!==undefined&&tdsF[cm.perigrafi]&&(tdsF[cm.perigrafi].textContent||'').trim()==='Εισφορές μήνα')return;",
+        "if(isEiprContribRow(tr,cm))return;",
+    )
+    js = js.replace(
+        "if(cm.perigrafi!==undefined&&tds[cm.perigrafi]&&(tds[cm.perigrafi].textContent||'').trim()==='Εισφορές μήνα')return false;",
+        "if(isEiprContribRow(tr,cm))return false;",
+    )
+    js = js.replace(
+        "if(cm.perigrafi!==undefined&&tds[cm.perigrafi]&&(tds[cm.perigrafi].textContent||'').trim()==='Εισφορές μήνα'){",
+        "if(isEiprContribRow(tr,cm)){",
+    )
+    js = js.replace(
+        "    var cm={tameio:undefined,typos:undefined,employer:undefined,klados:undefined,apodoxes:undefined,monthIdxs:[],synoloIdx:undefined,perigrafi:undefined,apodoxesCol:undefined,eisforcesCol:undefined,pctCol:undefined};",
+        "    var cm={tameio:undefined,typos:undefined,employer:undefined,klados:undefined,apodoxes:undefined,monthIdxs:[],synoloIdx:undefined,perigrafi:undefined,apodoxesCol:undefined,eisforcesCol:undefined,pctCol:undefined,etiIdx:undefined,monadesIdx:undefined};",
+    )
+    js = js.replace(
+        "      else if(t==='ΣΥΝΟΛΟ')cm.synoloIdx=i;",
+        "      else if(t==='ΣΥΝΟΛΟ')cm.synoloIdx=i;\n"
+        "      else if(t==='ΈΤΗ'||t==='ΕΤΗ')cm.etiIdx=i;\n"
+        "      else if(t==='ΜΟΝΑΔΕΣ')cm.monadesIdx=i;",
+    )
+    js = js.replace(
+        "  function formatDays(n){\n"
+        "    if(isNaN(n)||n===0)return '';\n"
+        "    var r=Math.round(n*100)/100;\n"
+        "    if(Math.abs(r-Math.round(r))<0.001)return String(Math.round(r));\n"
+        "    return String(r.toFixed(1)).replace('.',',');\n"
+        "  }",
+        "  function formatDays(n){\n"
+        "    if(isNaN(n)||n===0)return '';\n"
+        "    var r=Math.round(n*100)/100;\n"
+        "    if(Math.abs(r-Math.round(r))<0.001)return String(Math.round(r));\n"
+        "    return String(r.toFixed(1)).replace('.',',');\n"
+        "  }\n"
+        "  function formatYears(n){\n"
+        "    if(isNaN(n)||n===0)return '';\n"
+        "    var r=Math.round(n*100)/100;\n"
+        "    return String(r.toFixed(2)).replace('.',',');\n"
+        "  }",
+    )
+    js = js.replace(
+        "  function cntRecalcRowSynolo(tr,cm){\n"
+        "    if(cm.synoloIdx===undefined||tr.getAttribute('data-is-total')==='1')return;\n"
+        "    var tds=tr.querySelectorAll('td');\n"
+        "    if(cm.perigrafi!==undefined&&tds[cm.perigrafi]&&(tds[cm.perigrafi].textContent||'').trim()==='Εισφορές μήνα'){\n"
+        "      if(tds[cm.synoloIdx])tds[cm.synoloIdx].textContent='';\n"
+        "      return;\n"
+        "    }\n"
+        "    var total=0;\n"
+        "    cm.monthIdxs.forEach(function(colIdx){\n"
+        "      var v=parseGreekNum((tds[colIdx]&&tds[colIdx].textContent)||'');\n"
+        "      if(!isNaN(v))total+=v;\n"
+        "    });\n"
+        "    if(tds[cm.synoloIdx])tds[cm.synoloIdx].textContent=formatDays(total);\n"
+        "  }",
+        "  function cntRecalcRowSynolo(tr,cm,eiprCtx){\n"
+        "    if(!eiprCtx)eiprCtx={kind:'',pak:''};\n"
+        "    if(tr.getAttribute('data-is-band')==='1'){eiprCtx.kind='';eiprCtx.pak='';return;}\n"
+        "    var kindNow=eiprInsKindCls(tr.getAttribute('data-c-typos')||'');\n"
+        "    if(!kindNow&&cm.typos!==undefined){\n"
+        "      var tdsK=tr.querySelectorAll('td');\n"
+        "      kindNow=eiprInsKindCls(tdsK[cm.typos]?(tdsK[cm.typos].textContent||''):'');\n"
+        "    }\n"
+        "    if(kindNow)eiprCtx.kind=kindNow;\n"
+        "    var pkNow=eiprPaketoCode(tr.getAttribute('data-c-klados')||'');\n"
+        "    if(!pkNow&&cm.klados!==undefined){\n"
+        "      var tdsP=tr.querySelectorAll('td');\n"
+        "      pkNow=eiprPaketoCode(tdsP[cm.klados]?(tdsP[cm.klados].textContent||''):'');\n"
+        "    }\n"
+        "    if(pkNow)eiprCtx.pak=pkNow;\n"
+        "    if(cm.synoloIdx===undefined||tr.getAttribute('data-is-total')==='1')return;\n"
+        "    var tds=tr.querySelectorAll('td');\n"
+        "    if(isEiprContribRow(tr,cm)){\n"
+        "      if(tds[cm.synoloIdx])tds[cm.synoloIdx].textContent='';\n"
+        "      if(cm.etiIdx!==undefined&&tds[cm.etiIdx])tds[cm.etiIdx].textContent='';\n"
+        "      if(cm.monadesIdx!==undefined&&tds[cm.monadesIdx])tds[cm.monadesIdx].textContent='';\n"
+        "      return;\n"
+        "    }\n"
+        "    var total=0;\n"
+        "    cm.monthIdxs.forEach(function(colIdx){\n"
+        "      var v=parseGreekNum((tds[colIdx]&&tds[colIdx].textContent)||'');\n"
+        "      if(!isNaN(v))total+=v;\n"
+        "    });\n"
+        "    if(tds[cm.synoloIdx])tds[cm.synoloIdx].textContent=formatDays(total);\n"
+        "    if(cm.etiIdx!==undefined&&tds[cm.etiIdx])tds[cm.etiIdx].textContent='';\n"
+        "    if(cm.monadesIdx!==undefined&&tds[cm.monadesIdx])tds[cm.monadesIdx].textContent='';\n"
+        "  }",
+    )
+    js = js.replace(
+        "    if(cm.synoloIdx!==undefined)setCell(cm.synoloIdx,formatDays(totalDays));",
+        "    if(cm.synoloIdx!==undefined)setCell(cm.synoloIdx,formatDays(totalDays));\n"
+        "    if(eiprIsInsTypeTotalRow(tr,cm)){\n"
+        "      if(cm.etiIdx!==undefined)setCell(cm.etiIdx,totalDays?formatYears(totalDays/300):'');\n"
+        "      if(cm.monadesIdx!==undefined)setCell(cm.monadesIdx,eiprMonadesText(tr,cm,totalDays,segPaketo||'',segKind||''));\n"
+        "    }else{\n"
+        "      if(cm.etiIdx!==undefined)setCell(cm.etiIdx,'');\n"
+        "      if(cm.monadesIdx!==undefined)setCell(cm.monadesIdx,'');\n"
+        "    }",
+    )
+    js = js.replace(
+        "  function flushTotalRow(tr,sums,cm,segTameio,showFund){",
+        "  function flushTotalRow(tr,sums,cm,segTameio,showFund,segPaketo,segKind){",
+    )
+    js = js.replace(
+        "  function addTrToSums(tr,sums,cm,totOnly,segTameioRef,fromM,toM){",
+        "  function addTrToSums(tr,sums,cm,totOnly,segTameioRef,fromM,toM,segPaketoRef){",
+    )
+    js = js.replace(
+        "    if(segTameioRef){\n"
+        "      var tm=(tr.getAttribute('data-c-tameio')||'').trim();\n"
+        "      if(tm&&!segTameioRef.v)segTameioRef.v=tm;\n"
+        "    }",
+        "    if(segTameioRef){\n"
+        "      var tm=(tr.getAttribute('data-c-tameio')||'').trim();\n"
+        "      if(tm&&!segTameioRef.v)segTameioRef.v=tm;\n"
+        "    }\n"
+        "    if(segPaketoRef){\n"
+        "      var pk=eiprPaketoCode(tr.getAttribute('data-c-klados')||'');\n"
+        "      if(!pk&&cm.klados!==undefined){\n"
+        "        var tdsPk=tr.querySelectorAll('td');\n"
+        "        pk=eiprPaketoCode(tdsPk[cm.klados]?(tdsPk[cm.klados].textContent||''):'');\n"
+        "      }\n"
+        "      if(pk)segPaketoRef.v=pk;\n"
+        "    }",
+    )
+    js = js.replace(
+        "      var segTameioRef={v:''};\n"
+        "      for(var ri=0;ri<rows.length;ri++){\n"
+        "        var tr=rows[ri];\n"
+        "        if(tr.getAttribute('data-is-band')==='1'){sums=initSums(cm);segTameioRef.v='';continue;}\n"
+        "        if(tr.getAttribute('data-is-sep')==='1')continue;\n"
+        "        if(tr.getAttribute('data-is-total')==='1'){\n"
+        "          if(tr.style.display!=='none')\n"
+        "            flushTotalRow(tr,sums,cm,segTameioRef.v,totOnly);\n"
+        "          sums=initSums(cm);\n"
+        "          segTameioRef.v='';\n"
+        "          continue;\n"
+        "        }\n"
+        "        addTrToSums(tr,sums,cm,totOnly,segTameioRef,fromM,toM);\n"
+        "      }",
+        "      var segTameioRef={v:''};\n"
+        "      var segPaketoRef={v:''};\n"
+        "      var segKindRef={v:''};\n"
+        "      for(var ri=0;ri<rows.length;ri++){\n"
+        "        var tr=rows[ri];\n"
+        "        if(tr.getAttribute('data-is-band')==='1'){sums=initSums(cm);segTameioRef.v='';segPaketoRef.v='';segKindRef.v='';continue;}\n"
+        "        if(tr.getAttribute('data-is-sep')==='1')continue;\n"
+        "        var kindSeg=eiprInsKindCls(tr.getAttribute('data-c-typos')||'');\n"
+        "        if(!kindSeg&&cm.typos!==undefined){\n"
+        "          var tdsSeg=tr.querySelectorAll('td');\n"
+        "          kindSeg=eiprInsKindCls(tdsSeg[cm.typos]?(tdsSeg[cm.typos].textContent||''):'');\n"
+        "        }\n"
+        "        if(kindSeg)segKindRef.v=kindSeg;\n"
+        "        if(tr.getAttribute('data-is-total')==='1'){\n"
+        "          if(tr.style.display!=='none')\n"
+        "            flushTotalRow(tr,sums,cm,segTameioRef.v,totOnly,segPaketoRef.v,segKindRef.v);\n"
+        "          sums=initSums(cm);\n"
+        "          segTameioRef.v='';\n"
+        "          segPaketoRef.v='';\n"
+        "          segKindRef.v='';\n"
+        "          continue;\n"
+        "        }\n"
+        "        addTrToSums(tr,sums,cm,totOnly,segTameioRef,fromM,toM,segPaketoRef);\n"
+        "      }",
+    )
+    js = js.replace(
+        "      rows.forEach(function(tr){\n"
+        "        cntMaskMonthCells(tr,cm,fromM,toM);\n"
+        "        cntRecalcRowSynolo(tr,cm);\n"
+        "      });",
+        "      var eiprCtx={kind:'',pak:''};\n"
+        "      rows.forEach(function(tr){\n"
+        "        cntMaskMonthCells(tr,cm,fromM,toM);\n"
+        "        cntRecalcRowSynolo(tr,cm,eiprCtx);\n"
+        "      });",
+    )
+    js = js.replace(
+        "      if(e4)e4.textContent=fy(sy);\n    })();",
+        "      if(e4)e4.textContent=fy(sy);\n      updateEiprMonadesSum();\n    })();",
+    )
+    return js
+
+
+_EIPR_YEAR_DAYS = 300.0
+_EIPR_COL_RENAMES = {
+    "ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ": "ΑΠΟΔΟΧΕΣ",
+    "ΣΥΝΟΛΙΚΕΣ ΕΙΣΦΟΡΕΣ": "ΕΙΣΦΟΡΕΣ",
+    "ΠΟΣΟΣΤΟ ΕΙΣΦΟΡΑΣ": "%",
+}
+_EIPR_DROP_COLS = ("ΤΑΜΕΙΟ", "ΠΕΡΙΓΡΑΦΗ", "ΑΠΟΔΟΧΕΣ", "%")
+
+
+def _eipr_parse_days(val) -> float:
+    if val is None or val == "":
+        return 0.0
+    n = clean_numeric_value(val)
+    try:
+        return float(n) if n is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _eipr_format_eti_days(days: float, year_days: float = _EIPR_YEAR_DAYS) -> str:
+    if not days:
+        return ""
+    return format_number_greek(float(days) / year_days, decimals=2)
+
+
+def _eipr_paketo_code(val) -> str:
+    raw = str(val or "").strip()
+    if not raw:
+        return ""
+    code = re.split(r"\s*[\u2013\-]\s+", raw, maxsplit=1)[0].strip().upper()
+    if code in ("ΕΙΠΡ", "ΠΕΙΠ"):
+        return code
+    for tok in re.split(r"[^A-ZΑ-Ω0-9]+", raw.upper()):
+        if tok in ("ΕΙΠΡ", "ΠΕΙΠ"):
+            return tok
+    return ""
+
+
+def _eipr_insurance_kind(typos_val) -> str:
+    classified = insurance_kind_classify_count(str(typos_val or ""))
+    if classified in ("ΜΙΣΘΩΤΗ", "ΜΗ ΜΙΣΘΩΤΗ"):
+        return classified
+    return ""
+
+
+def _eipr_monades_factor(paketo: str, kind: str, cal_year: int) -> float | None:
+    p = str(paketo or "").upper()
+    if p == "ΠΕΙΠ":
+        return 4.0
+    if p == "ΕΙΠΡ":
+        if kind == "ΜΙΣΘΩΤΗ":
+            return 19.33 if cal_year and cal_year <= 2006 else 12.0
+        if kind == "ΜΗ ΜΙΣΘΩΤΗ":
+            return 12.0
+    return None
+
+
+def _eipr_resolve_paketo(klados_val, kind: str, last_paketo: str) -> str:
+    paketo = _eipr_paketo_code(klados_val)
+    if paketo:
+        return paketo
+    if kind == "ΜΙΣΘΩΤΗ":
+        return "ΕΙΠΡ"
+    if last_paketo:
+        return last_paketo
+    return ""
+
+
+def _eipr_format_monades_value(val: float) -> str:
+    if not val:
+        return ""
+    return format_number_greek(val, decimals=2)
+
+
+def _eipr_round_eti_days(days: float, year_days: float = _EIPR_YEAR_DAYS) -> float:
+    if not days:
+        return 0.0
+    return round(float(days) / year_days, 2)
+
+
+def _eipr_compute_monades(
+    days: float, cal_year: int, klados_val, typos_val, last_paketo: str = "",
+    last_kind: str = "",
+) -> str:
+    if not days:
+        return ""
+    eti = _eipr_round_eti_days(days)
+    kind = _eipr_insurance_kind(typos_val) or last_kind
+    paketo = _eipr_resolve_paketo(klados_val, kind, last_paketo)
+    factor = _eipr_monades_factor(paketo, kind, int(cal_year or 0))
+    if factor is None:
+        return ""
+    return _eipr_format_monades_value(eti * factor)
+
+
+def _eipr_is_insurance_type_total_row(row) -> bool:
+    """Γραμμή ετήσιου συνόλου τύπου ασφάλισης (ΜΙΣΘΩΤΗ / ΜΗ ΜΙΣΘΩΤΗ, χωρίς «ΑΣΦΑΛΙΣΗ»)."""
+    kind = _eipr_insurance_kind(row.get("ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ"))
+    if not kind:
+        return False
+    if str(row.get("ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ") or "").strip():
+        return False
+    if str(row.get("ΕΡΓΟΔΟΤΗΣ") or "").strip():
+        return False
+    return True
+
+
+def _eipr_prepare_display_df(count_display_df: pd.DataFrame) -> pd.DataFrame:
+    """Προετοιμασία πίνακα Ειδικής Προσαύξησης: αφαίρεση στηλών, ΈΤΗ/ΜΟΝΑΔΕΣ, σειρά."""
+    out = count_display_df.rename(
+        columns={k: v for k, v in _EIPR_COL_RENAMES.items() if k in count_display_df.columns}
+    )
+    contrib_mask = (
+        out["ΠΕΡΙΓΡΑΦΗ"].astype(str).str.strip() == "Εισφορές μήνα"
+        if "ΠΕΡΙΓΡΑΦΗ" in out.columns
+        else pd.Series(False, index=out.index)
+    )
+    eti_vals: list[str] = []
+    mon_vals: list[str] = []
+    current_year: int | None = None
+    last_paketo = ""
+    last_kind = ""
+    for idx, row in out.iterrows():
+        y_raw = row.get("ΕΤΟΣ")
+        if not pd.isna(y_raw) and str(y_raw).strip() not in ("", "nan", "NaN", "<NA>"):
+            try:
+                new_year = int(y_raw)
+                if new_year != current_year:
+                    current_year = new_year
+                    last_paketo = ""
+                    last_kind = ""
+            except (TypeError, ValueError):
+                pass
+        kind_cell = _eipr_insurance_kind(row.get("ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ"))
+        if kind_cell:
+            last_kind = kind_cell
+        if bool(contrib_mask.loc[idx]):
+            eti_vals.append("")
+            mon_vals.append("")
+            continue
+        paketo = _eipr_paketo_code(row.get("ΚΛΑΔΟΣ/ΠΑΚΕΤΟ"))
+        if paketo:
+            last_paketo = paketo
+        if not _eipr_is_insurance_type_total_row(row):
+            eti_vals.append("")
+            mon_vals.append("")
+            continue
+        days = _eipr_parse_days(row.get("ΣΥΝΟΛΟ"))
+        kind_for_row = _eipr_insurance_kind(row.get("ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ")) or last_kind
+        eti_vals.append(_eipr_format_eti_days(days) if days else "")
+        mon_vals.append(
+            _eipr_compute_monades(
+                days,
+                current_year or 0,
+                row.get("ΚΛΑΔΟΣ/ΠΑΚΕΤΟ"),
+                row.get("ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ"),
+                last_paketo,
+                kind_for_row,
+            )
+            if days
+            else ""
+        )
+    out["ΈΤΗ"] = eti_vals
+    out["ΜΟΝΑΔΕΣ"] = mon_vals
+    out = out.drop(columns=[c for c in _EIPR_DROP_COLS if c in out.columns])
+    month_cols = [c for c in _ATLAS_MONTH_COL_ORDER if c in out.columns]
+    fixed = ["ΕΤΟΣ", "ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ", "ΕΡΓΟΔΟΤΗΣ", "ΚΛΑΔΟΣ/ΠΑΚΕΤΟ", "ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ"]
+    mid = ["ΣΥΝΟΛΟ", "ΈΤΗ", "ΜΟΝΑΔΕΣ"] + month_cols
+    tail = ["ΕΙΣΦΟΡΕΣ"] if "ΕΙΣΦΟΡΕΣ" in out.columns else []
+    order = [c for c in fixed if c in out.columns] + mid + tail
+    return out[order]
+
+
+# CSS της καρτέλας «Ειδική Προσαύξηση»: πιστό αντίγραφο των id-scoped κανόνων της
+# Καταμέτρησης με prefix `eipr` (οι κοινές κλάσεις .count-*/.cnt-* επαναχρησιμοποιούνται).
+_EIPR_TAB_CSS_BASE = r"""
+#count-tables-wrapper table.print-table tbody tr.total-row td,
+#count-tables-wrapper table.print-table tbody tr[data-is-total="1"] td { background: #f5fafc !important; color: #000 !important; font-weight: 700 !important; border-top: 1px solid #c8dce8; }
+#count-tables-wrapper table.print-table tbody td.copy-target { transition: background-color 0.18s ease, box-shadow 0.18s ease; }
+#count-tables-wrapper table.print-table tbody td.copy-target:hover { background-color: rgba(99, 102, 241, 0.14) !important; box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.38); }
+#count-tables-wrapper table.print-table tbody td.copy-target:active { background-color: rgba(99, 102, 241, 0.24) !important; }
+#count-section { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+#count-tables-wrapper { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; background: #fff; padding: 0 2px; }
+#count-section h2, #count-section .atlas-tab-layout-top h2,
+#count-section .print-description, #count-section .atlas-tab-layout-top .print-description,
+#count-section .count-filters, #count-section .count-date-presets-bar,
+#count-section .count-kind-metrics { flex-shrink: 0; }
+#count-section .count-kind-metrics { margin-top: 12px; }
+#count-section .count-filters-grid.eipr-filters-layout {
+  display: grid !important;
+  grid-template-columns: minmax(100px, 1fr) minmax(100px, 1fr) minmax(140px, 1.15fr) minmax(115px, 1fr) 86px 86px auto auto auto;
+  grid-template-rows: auto auto;
+  gap: 4px 10px;
+  align-items: center;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+#count-section .count-filters-grid.eipr-filters-layout > .filter-modal-group,
+#count-section .count-filters-grid.eipr-filters-layout > .cnt-grid-apodox { display: contents; }
+#count-section .count-filters-grid.eipr-filters-layout .filter-modal-store { display: none !important; }
+#count-section .count-filters-grid.eipr-filters-layout > .filter-modal-group:nth-of-type(1) .filter-modal-trigger { grid-row: 1; grid-column: 1; }
+#count-section .count-filters-grid.eipr-filters-layout > .filter-modal-group:nth-of-type(1) .filter-selected-label { grid-row: 2; grid-column: 1; }
+#count-section .count-filters-grid.eipr-filters-layout > .filter-modal-group:nth-of-type(2) .filter-modal-trigger { grid-row: 1; grid-column: 2; }
+#count-section .count-filters-grid.eipr-filters-layout > .filter-modal-group:nth-of-type(2) .filter-selected-label { grid-row: 2; grid-column: 2; }
+#count-section .count-filters-grid.eipr-filters-layout > .filter-modal-group:nth-of-type(3) .filter-modal-trigger { grid-row: 1; grid-column: 3; }
+#count-section .count-filters-grid.eipr-filters-layout > .filter-modal-group:nth-of-type(3) .filter-selected-label { grid-row: 2; grid-column: 3; }
+#count-section .count-filters-grid.eipr-filters-layout > .cnt-grid-apodox .filter-modal-trigger { grid-row: 1; grid-column: 4; }
+#count-section .count-filters-grid.eipr-filters-layout > .cnt-grid-apodox .filter-selected-label { grid-row: 2; grid-column: 4; }
+#count-section .count-filters-grid.eipr-filters-layout > .filter-modal-group:nth-child(n) { grid-column: unset; grid-row: unset; }
+#count-section .count-filters-grid.eipr-filters-layout > .cnt-grid-apodox,
+#count-section .count-filters-grid.eipr-filters-layout > .cnt-grid-from,
+#count-section .count-filters-grid.eipr-filters-layout > .cnt-grid-to,
+#count-section .count-filters-grid.eipr-filters-layout > .cnt-grid-reset { grid-column: unset; grid-row: unset; }
+#count-section .count-filters-grid.eipr-filters-layout > .cnt-grid-from { grid-row: 1; grid-column: 5; min-width: 0; }
+#count-section .count-filters-grid.eipr-filters-layout > .cnt-grid-to { grid-row: 1; grid-column: 6; min-width: 0; }
+#count-section .count-filters-grid.eipr-filters-layout > .cnt-grid-cbs { grid-row: 1; grid-column: 7; display: flex; flex-direction: row; flex-wrap: nowrap; gap: 14px 18px; align-items: center; white-space: nowrap; }
+#count-section .count-filters-grid.eipr-filters-layout > .count-date-presets-bar { grid-row: 1; grid-column: 8; display: flex !important; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 8px; width: auto; margin: 0; padding: 0; grid-template-columns: unset; }
+#count-section .count-filters-grid.eipr-filters-layout > .cnt-grid-reset { grid-row: 1; grid-column: 9; justify-self: end; display: flex; align-items: center; }
+#count-section .count-filters-grid.eipr-filters-layout .filter-modal-trigger,
+#count-section .count-filters-grid.eipr-filters-layout .filter-date,
+#count-section .count-filters-grid.eipr-filters-layout .count-preset-btn,
+#count-section .count-filters-grid.eipr-filters-layout .filter-reset-btn { min-height: 42px; box-sizing: border-box; width: 100%; }
+#count-section .count-filters-grid.eipr-filters-layout .count-date-presets-bar .count-preset-btn { width: auto; flex: 0 0 auto; padding: 8px 12px; white-space: nowrap; }
+#count-section .count-filters-grid.eipr-filters-layout .filter-selected-label { margin: 0; min-height: 0; font-size: 12px; font-weight: 400; line-height: 1.25; }
+#count-section .count-filters-grid.eipr-filters-layout .filter-selected-label:empty { display: none !important; }
+#count-tables-wrapper .year-section { margin-bottom: 20px; }
+#count-section.count-year-sparse #count-tables-wrapper .year-section { margin-bottom: 80px; }
+#count-tables-wrapper .year-heading { font-size: 15px; font-weight: 800; padding: 8px 0 6px 0; border-bottom: 2px solid #6366f1; margin-top: 3px; margin-bottom: 11px; }
+#count-tables-wrapper table.print-table thead th { font-weight: 500 !important; }
+#count-tables-wrapper table.print-table.count-unified { table-layout: fixed; width: 100%; border-collapse: separate; border-spacing: 0; overflow: visible; box-shadow: none; border-radius: 0; font-size: 15px; }
+#count-tables-wrapper table.print-table.count-unified thead th { position: sticky; top: 0; z-index: 6; background: #f8fafc; border-bottom: 2px solid #cbd5e1; box-shadow: 0 1px 0 #cbd5e1; white-space: normal; padding: 6px 8px; font-size: 14px; line-height: 1.2; vertical-align: bottom; color: #111827; font-weight: 500; }
+#count-tables-wrapper table.print-table.count-unified tbody td { padding: 6px 8px; font-size: 15px; word-break: break-word; color: #1f2937; }
+.table-fullscreen .fs-body #count-tables-wrapper table.print-table.count-unified { table-layout: fixed !important; width: 100%; font-size: 16px; }
+.table-fullscreen .fs-body #count-tables-wrapper table.print-table.count-unified thead th { font-size: 15px; padding: 10px 12px; }
+.table-fullscreen .fs-body #count-tables-wrapper table.print-table.count-unified tbody td { font-size: 16px; padding: 8px 12px; }
+.table-fullscreen .fs-body #count-tables-wrapper table.print-table.count-unified tbody tr.count-year-band td { font-size: 17px; color: #1e40af !important; }
+#count-tables-wrapper table.print-table.count-unified tbody tr.count-year-band td { background: #fff; color: #1e40af !important; font-weight: 800; font-size: 16px; padding: 8px 12px; border: 0; }
+#count-tables-wrapper table.print-table.count-unified tbody tr.count-year-band td:first-child { color: #1e40af !important; }
+#count-tables-wrapper table.print-table.count-unified tbody tr.count-year-gap td { height: 41px; padding: 0; background: transparent; border: 0; }
+#count-section.count-year-sparse #count-tables-wrapper table.print-table.count-unified tbody tr.count-year-gap td { height: 115px; }
+#count-section.count-totals-only #count-tables-wrapper table.print-table.count-unified tbody tr[data-is-total="1"] td.cnt-paketa-merged { text-align: left; white-space: normal; font-weight: 700; }
+.table-fullscreen #count-section > .atlas-tab-layout-top { display: block !important; flex-shrink: 0; padding: 12px 20px 14px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+.table-fullscreen #count-section > .atlas-tab-layout-top > *:not(#count-filters-bar) { display: none !important; }
+.table-fullscreen #count-section #count-filters-bar.count-filters { display: block !important; margin: 0; padding: 0; background: transparent; border: none; border-radius: 0; }
+.table-fullscreen #count-section .count-filters-grid { display: flex !important; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 12px 14px; }
+.table-fullscreen #count-section .count-filters-grid > * { grid-column: auto !important; grid-row: auto !important; }
+.table-fullscreen #count-section .count-filters-grid > .filter-modal-group:not([data-filter-key="klados"]),
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-apodox { display: none !important; }
+.table-fullscreen #count-section .count-filters-grid > .filter-modal-group[data-filter-key="klados"] { flex: 0 1 300px; min-width: 200px; max-width: 340px; order: 1; }
+.table-fullscreen #count-section .count-filters-grid > .filter-modal-group[data-filter-key="klados"] .filter-selected-label { display: none; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-from { flex: 0 0 132px; min-width: 120px; order: 2; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-to { flex: 0 0 132px; min-width: 120px; order: 3; }
+.table-fullscreen #count-section .count-filters-grid.eipr-filters-layout > .cnt-grid-cbs { flex: 0 0 auto; display: flex !important; flex-wrap: nowrap; align-items: center; gap: 12px 14px; margin: 0; order: 4; }
+.table-fullscreen #count-section .count-filters-grid.eipr-filters-layout > .count-date-presets-bar { flex: 0 0 auto; order: 5; min-width: 0; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 { flex: 1 1 auto; min-width: 0; display: flex !important; flex-wrap: nowrap; align-items: center; gap: 12px 14px; margin: 0; padding: 0; order: 4; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .count-date-presets-bar { order: 1; flex: 1 1 auto; min-width: 0; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .cnt-grid-cbs { display: flex !important; flex: 0 0 auto; flex-shrink: 0; order: 2; margin: 0; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .cnt-grid-cbs .filter-cb:has(#cnt-year-sparse) { display: none !important; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .cnt-grid-cbs .filter-cb { font-size: 16px; white-space: nowrap; margin: 0; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-reset { flex: 0 0 auto; order: 5; margin-left: auto; }
+.table-fullscreen #count-section .count-date-presets-bar { display: flex !important; flex-wrap: nowrap; gap: 10px; overflow-x: auto; overflow-y: hidden; min-width: 0; width: auto; margin: 0; padding: 0; grid-template-columns: unset; -webkit-overflow-scrolling: touch; }
+.table-fullscreen #count-section .count-preset-btn { flex: 0 0 auto; width: auto; min-width: 0; padding: 10px 14px; font-size: 14px; line-height: 1.25; font-weight: 600; white-space: nowrap; }
+.table-fullscreen #count-section .count-filters .filter-date { padding: 10px 14px; font-size: 16px; }
+.table-fullscreen #count-section .count-filters .filter-modal-trigger { padding: 10px 14px; font-size: 16px; }
+.table-fullscreen #count-section .count-filters .filter-modal-badge { min-width: 24px; height: 24px; line-height: 24px; font-size: 13px; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-reset .filter-reset-btn { margin-left: 0; padding: 10px 14px; font-size: 22px; }
+"""
+
+
+def _special_increase_css(header_cells=None) -> str:
+    """Επιστρέφει το CSS της καρτέλας «Ειδική Προσαύξηση» (id-scoped + δυναμικά nth-child)."""
+    css = _EIPR_TAB_CSS_BASE
+    for _a, _b in (
+        ("#count-tables-wrapper", "#eipr-tables-wrapper"),
+        ("#count-filters-bar", "#eipr-filters-bar"),
+        ("#cnt-year-sparse", "#eipr-year-sparse"),
+        ("#count-section", "#eipr-section"),
+    ):
+        css = css.replace(_a, _b)
+    if header_cells:
+        css += "\n" + _atlas_count_unified_nth_child_css(
+            "eipr-tables-wrapper", header_cells, numeric_from_synolo=True,
+        )
+    return css
+
+
+def build_special_increase_with_filters(count_display_df, print_style_rows, count_df,
+                                         description_map=None, disclaimer_html=None,
+                                         warning_types=None, display_summary=None,
+                                         source_df=None, default_klados_codes=None):
+    """Καρτέλα «Ειδική Προσαύξηση» — πιστό αντίγραφο (copy-paste) της Καταμέτρησης με
+    ανεξάρτητα IDs (prefix `eipr`), προεπιλεγμένα πακέτα ΕΙΠΡ/ΠΕΙΠ και ενσωματωμένο CSS.
+    Δεν συνδέεται με άλλες καρτέλες."""
+    renamed_df = _eipr_prepare_display_df(count_display_df)
+
+    count_table_html = build_yearly_print_html(
+        renamed_df, year_column='ΕΤΟΣ', style_rows=print_style_rows,
+    )
+    count_table_html = re.sub(r'>ΣΥΝΟΛΟ\s+(\d{4})<', r'>\1<', count_table_html)
+    count_table_html = re.sub(r'>Σύνολο\s+(\d{4})<', r'>\1<', count_table_html)
+    count_table_html = _build_unified_count_table_html(
+        count_table_html, count_layout_omit="eipr",
+    )
+    _eipr_header_cells = [str(c) for c in renamed_df.columns]
+
+    desc_map = description_map or {}
+
+    def _vals(col):
+        if col in count_df.columns:
+            return sorted(count_df[col].dropna().astype(str).str.strip().unique().tolist())
+        return []
+
+    typos_vals = _vals('Τύπος Ασφάλισης')
+    employer_col = 'Α-Μ εργοδότη' if 'Α-Μ εργοδότη' in count_df.columns else 'Εργοδότης'
+    employer_vals = _vals(employer_col)
+    klados_vals = _vals('Κλάδος/Πακέτο Κάλυψης')
+    apodoxes_col = next((c for c in count_df.columns if 'Τύπος Αποδοχών' in c or 'Αποδοχών' in c), None)
+    apodoxes_vals = _vals(apodoxes_col) if apodoxes_col else []
+
+    _cnt_dd_typos = _count_filter_modal("Τύπος Ασφάλισης", typos_vals, "typos")
+    _cnt_dd_employer = _count_filter_modal("Εργοδότης", employer_vals, "employer")
+    _klados_pct_map = _klados_eisf_pct_map_from_totals(display_summary, source_df=source_df)
+    _cnt_dd_klados = _count_filter_modal(
+        "Κλάδος/Πακέτο και μέσο ποσοστό εισφοράς",
+        klados_vals, "klados", with_desc=True, desc_map=desc_map,
+        pct_map=_klados_pct_map, modal_wide=True,
+    )
+    # Προεπιλεγμένα τσεκαρισμένα πακέτα (ΕΙΠΡ/ΠΕΙΠ) — φιλτράρει αυτόματα στο άνοιγμα.
+    for _code in (default_klados_codes or []):
+        _needle = f'value="{html_mod.escape(str(_code))}" data-attr="klados">'
+        _cnt_dd_klados = _cnt_dd_klados.replace(
+            _needle, _needle[:-1] + ' checked>'
+        )
+    _cnt_apodoxes_dd = _count_filter_modal(
+        "Τύπος Αποδοχών", _apodoxes_option_pairs(apodoxes_vals), "apodoxes"
+    )
+    _cnt_to_current_year = f"31/12/{datetime.date.today().year}"
+    _cnt_preset_btns = (
+        '<button type="button" class="count-preset-btn" data-cnt-preset="from_2002" '
+        f'data-cnt-from="01/01/2002" data-cnt-to="{_cnt_to_current_year}" '
+        f'title="Φίλτρο από 01/01/2002 έως {_cnt_to_current_year} — ξανά κλικ για επαναφορά ημερομηνιών">Από 1/1/2002</button>'
+        '<button type="button" class="count-preset-btn" data-cnt-preset="until_2016" '
+        'data-cnt-from="01/01/1960" data-cnt-to="31/12/2016" '
+        'title="Φίλτρο από 01/01/1960 έως 31/12/2016 — ξανά κλικ για επαναφορά ημερομηνιών">Έως 31/12/2016</button>'
+    )
+    _cnt_reset_btn = (
+        '<button type="button" class="filter-reset-btn" id="eipr-filter-reset" '
+        'title="Επαναφορά φίλτρων" aria-label="Επαναφορά φίλτρων">&#x21bb;</button>'
+    )
+    filter_bar = (
+        '<div class="count-filters" id="eipr-filters-bar">'
+        '<div class="count-filters-grid eipr-filters-layout">'
+        f'{_cnt_dd_typos}{_cnt_dd_employer}{_cnt_dd_klados}'
+        f'<div class="cnt-grid-apodox">{_cnt_apodoxes_dd}</div>'
+        '<div class="cnt-grid-from">'
+        '<input type="text" id="eipr-filter-from" class="filter-date" '
+        'placeholder="01/2002" aria-label="Από (mm/yyyy)" autocomplete="off">'
+        '</div>'
+        '<div class="cnt-grid-to">'
+        '<input type="text" id="eipr-filter-to" class="filter-date" '
+        'placeholder="12/2026" aria-label="Έως (mm/yyyy)" autocomplete="off">'
+        '</div>'
+        '<div class="cnt-grid-cbs count-filter-cb-stack">'
+        '<label class="filter-cb">'
+        '<input type="checkbox" id="eipr-year-sparse"> Αραιή'
+        '</label>'
+        '<label class="filter-cb">'
+        '<input type="checkbox" id="eipr-totals-only"> Ετήσια σύνολα'
+        '</label>'
+        '</div>'
+        f'<div id="eipr-date-presets-bar" class="count-date-presets-bar cnt-grid-preset">{_cnt_preset_btns}</div>'
+        f'<div class="cnt-grid-reset">{_cnt_reset_btn}</div>'
+        '</div>'
+        '</div>'
+    )
+
+    warning_types = warning_types or []
+    if warning_types:
+        _warn_text = ", ".join(warning_types)
+        _count_info_msg = (
+            f"Προσοχή: υπάρχει πιθανή {_warn_text}. "
+            "Το άθροισμα ημερών μπορεί να δώσει λάθος αποτελέσματα."
+        )
+        _count_bar_class = "totals-info-bar totals-info-bar-warning"
+    else:
+        _count_info_msg = ""
+        _count_bar_class = "totals-info-bar"
+
+    cdf_metrics_payload_html = ""
+    try:
+        _c_df_exp = build_count_c_dataframe(count_df, desc_map)
+        if _c_df_exp is not None and not getattr(_c_df_exp, "empty", True):
+            _rows_compact = []
+            for _, _r in _c_df_exp.iterrows():
+                try:
+                    _rows_compact.append(
+                        {
+                            "y": int(_r["ΕΤΟΣ"]),
+                            "t": str(_r.get("ΤΑΜΕΙΟ", "") or ""),
+                            "k": str(_r.get("ΤΥΠΟΣ ΑΣΦΑΛΙΣΗΣ", "") or ""),
+                            "e": str(_r.get("ΕΡΓΟΔΟΤΗΣ", "") or ""),
+                            "p": str(_r.get("ΚΛΑΔΟΣ/ΠΑΚΕΤΟ", "") or "").strip(),
+                            "a": str(_r.get("ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ", "") or ""),
+                            "m": int(_r["Μήνας_Num"]),
+                            "d": float(_r["Ημέρες"] or 0),
+                        }
+                    )
+                except Exception:
+                    continue
+            if _rows_compact:
+                _cdf_payload = {"yearDays": 300.0, "rows": _rows_compact}
+                _json_cdf = json.dumps(_cdf_payload, ensure_ascii=False).replace("<", "\\u003c")
+                cdf_metrics_payload_html = (
+                    f'<script type="application/json" id="atlas-eipr-cdf-metrics-json">{_json_cdf}</script>'
+                )
+    except Exception:
+        cdf_metrics_payload_html = ""
+
+    count_metrics_bar = ""
+    if cdf_metrics_payload_html:
+        count_metrics_bar = (
+            f"{cdf_metrics_payload_html}"
+            f'<div class="{_count_bar_class} count-kind-metrics atlas-header-split" id="eipr-kind-metrics-wrap" style="display:none">'
+            f'<div class="atlas-header-info"><div class="totals-info-msg">{html_mod.escape(_count_info_msg)}</div></div>'
+            f'{build_atlas_metrics_frame_html("".join([_atlas_metric_cell_html("Σύνολο ημερών (μισθωτή)", "", "eipr-metric-misthoti", critical=True), _atlas_metric_cell_html("Σύνολο ημερών (μη μισθωτή)", "", "eipr-metric-nmisthoti", critical=True), _atlas_metric_cell_html("Άθροισμα ημερών", "", "eipr-metric-sum", critical=True), _atlas_metric_cell_html("Διαδοχική", "", "eipr-metric-diadochiki", critical=True), _atlas_metric_cell_html("Συνολικά έτη", "", "eipr-metric-years", critical=True), _atlas_metric_cell_html("Άθροισμα μονάδων", "", "eipr-metric-monades-sum", critical=True)]))}'
+            "</div>"
+        )
+
+    js = _build_special_increase_filter_js()
+
+    _count_info_sections = [
+        (
+            "info",
+            "Αναλυτική καταμέτρηση ημερών ανά έτος, εργοδότη και μήνα "
+            "(προεπιλογή: πακέτα ΕΙΠΡ/ΠΕΙΠ).",
+        ),
+        (
+            "warning",
+            "Διαστήματα που καλύπτουν πολλαπλούς μήνες επιμερίζονται και επισημαίνονται με κίτρινο χρώμα.",
+        ),
+        ("info", f"Εξαιρούνται: {EXCLUDED_PACKAGES_LABEL}"),
+    ]
+    _count_heading = _atlas_html_tab_heading_row_info(
+        "Πίνακας Ειδικής Προσαύξησης",
+        "Οδηγίες — Ειδική Προσαύξηση",
+        _count_info_sections,
+        "atlas-info-store-eipr",
+    )
+
+    return _build_tab_page(
+        section_id="eipr-section",
+        extra_section_classes="count-layout",
+        heading_html=_count_heading,
+        description_html=(
+            '<p class="print-description">Αναλυτική καταμέτρηση ημερών ασφάλισης ανά μήνα '
+            '— προεπιλεγμένα πακέτα ΕΙΠΡ/ΠΕΙΠ.</p>'
+        ),
+        metrics_html=count_metrics_bar,
+        filters_html=filter_bar,
+        body_html=(
+            f'<style>{_special_increase_css(_eipr_header_cells)}</style>'
+            '<div id="eipr-tables-wrapper" class="count-layout-middle">'
+            f'{count_table_html}</div>'
+        ),
+        scripts_html=f"<script>{js}</script>",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -6208,6 +7173,29 @@ def build_report_tab_entries(df, description_map=None, edition="lite"):
         if cnt_x is not None and not cnt_x.empty:
             excel_by_tid["count"] = ("Καταμέτρηση", cnt_x)
 
+    # -- Ειδική Προσαύξηση (αντίγραφο Καταμέτρησης· μόνο Pro & μόνο αν υπάρχουν ΕΙΠΡ/ΠΕΙΠ) --
+    if edition == "pro" and not count_display_df.empty:
+        try:
+            _eipr_codes = {"ΕΙΠΡ", "ΠΕΙΠ"}
+            _eipr_found: set[str] = set()
+            if "Κλάδος/Πακέτο Κάλυψης" in count_df.columns:
+                for _raw in count_df["Κλάδος/Πακέτο Κάλυψης"].dropna().astype(str):
+                    _code = _eipr_paketo_code(_raw)
+                    if _code in _eipr_codes:
+                        _eipr_found.add(_code)
+            _eipr_found_list = sorted(_eipr_found)
+            if _eipr_found_list:
+                eipr_html = build_special_increase_with_filters(
+                    count_display_df, print_style_rows, count_df, description_map,
+                    warning_types=warning_types,
+                    display_summary=display_summary,
+                    source_df=df,
+                    default_klados_codes=_eipr_found_list,
+                )
+                tab_entries.append(("eipr", "Ειδική Προσαύξηση", eipr_html))
+        except Exception:
+            pass
+
     # -- Συντάξιμες (Pro) — αμέσως μετά την Καταμέτρηση, εκτός αν ΤΣΜΕΔΕ μισθωτή --
     if edition == "pro" and not count_display_df.empty:
         try:
@@ -6855,13 +7843,17 @@ table.print-table tbody td:first-child { font-weight: 700; }
 table.print-table tbody tr.total-row td { background: #dbeafe !important; font-weight: 700 !important; border-top: 1px solid #93c5fd; }
 #count-tables-wrapper table.print-table tbody tr.total-row td,
 #count-tables-wrapper table.print-table tbody tr[data-is-total="1"] td { background: #f5fafc !important; color: #000 !important; font-weight: 700 !important; border-top: 1px solid #c8dce8; }
+#eipr-tables-wrapper table.print-table tbody tr.total-row td,
+#eipr-tables-wrapper table.print-table tbody tr[data-is-total="1"] td { background: #f5fafc !important; color: #000 !important; font-weight: 700 !important; border-top: 1px solid #c8dce8; }
 #parallel-section table.print-table tbody tr.total-row td,
 #parallel-section table.print-table tbody tr[data-is-total="1"] td { background: #f5fafc !important; color: #000 !important; font-weight: 700 !important; border-top: 1px solid #c8dce8; }
 #count-tables-wrapper table.print-table tbody td.copy-target { transition: background-color 0.18s ease, box-shadow 0.18s ease; }
 #count-tables-wrapper table.print-table tbody td.copy-target:hover { background-color: rgba(99, 102, 241, 0.14) !important; box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.38); }
-/* Ομοιόμορφη/responsive κατανομή στηλών στην Καταμέτρηση (ίδια λογική με full screen): αγνόηση των fixed πλατών του colgroup */
+/* Ομοιόμορφη/responsive κατανομή στηλών στην Καταμέτρηση / Ειδική Προσαύξηση (ίδια λογική με full screen): αγνόηση των fixed πλατών του colgroup */
 #count-tables-wrapper table.print-table { table-layout: auto; }
 #count-tables-wrapper table.print-table colgroup col { width: auto !important; }
+#eipr-tables-wrapper table.print-table { table-layout: auto; }
+#eipr-tables-wrapper table.print-table colgroup col { width: auto !important; }
 #apd-tables-wrapper table.print-table.apd-table { table-layout: fixed; width: 100%; }
 #apd-tables-wrapper table.print-table.apd-table colgroup col.apd-col-desc { width: 12% !important; max-width: 12%; }
 #apd-tables-wrapper table.print-table.apd-table th.apd-c-desc,
@@ -7542,6 +8534,32 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .table-fullscreen #count-section .count-filters .filter-modal-trigger { padding: 10px 14px; font-size: 16px; }
 .table-fullscreen #count-section .count-filters .filter-modal-badge { min-width: 24px; height: 24px; line-height: 24px; font-size: 13px; }
 .table-fullscreen #count-section .count-filters-grid > .cnt-grid-reset .filter-reset-btn { margin-left: 0; padding: 10px 14px; font-size: 22px; }
+/* Ειδική Προσαύξηση full screen: ίδια γραμμή φίλτρων με Καταμέτρηση (χωρίς Ταμείο) */
+.table-fullscreen #eipr-section > .atlas-tab-layout-top { display: block !important; flex-shrink: 0; padding: 12px 20px 14px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+.table-fullscreen #eipr-section > .atlas-tab-layout-top > *:not(#eipr-filters-bar) { display: none !important; }
+.table-fullscreen #eipr-section #eipr-filters-bar.count-filters { display: block !important; margin: 0; padding: 0; background: transparent; border: none; border-radius: 0; }
+.table-fullscreen #eipr-section .count-filters-grid { display: flex !important; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 12px 14px; }
+.table-fullscreen #eipr-section .count-filters-grid > * { grid-column: auto !important; grid-row: auto !important; }
+.table-fullscreen #eipr-section .count-filters-grid > .filter-modal-group:not([data-filter-key="klados"]),
+.table-fullscreen #eipr-section .count-filters-grid > .cnt-grid-apodox { display: none !important; }
+.table-fullscreen #eipr-section .count-filters-grid > .filter-modal-group[data-filter-key="klados"] { flex: 0 1 300px; min-width: 200px; max-width: 340px; order: 1; }
+.table-fullscreen #eipr-section .count-filters-grid > .filter-modal-group[data-filter-key="klados"] .filter-selected-label { display: none; }
+.table-fullscreen #eipr-section .count-filters-grid > .cnt-grid-from { flex: 0 0 132px; min-width: 120px; order: 2; }
+.table-fullscreen #eipr-section .count-filters-grid > .cnt-grid-to { flex: 0 0 132px; min-width: 120px; order: 3; }
+.table-fullscreen #eipr-section .count-filters-grid.eipr-filters-layout > .cnt-grid-cbs { flex: 0 0 auto; display: flex !important; flex-wrap: nowrap; align-items: center; gap: 12px 14px; margin: 0; order: 4; }
+.table-fullscreen #eipr-section .count-filters-grid.eipr-filters-layout > .count-date-presets-bar { flex: 0 0 auto; order: 5; min-width: 0; }
+.table-fullscreen #eipr-section .count-filters-grid > .cnt-grid-row2 { flex: 1 1 auto; min-width: 0; display: flex !important; flex-wrap: nowrap; align-items: center; gap: 12px 14px; margin: 0; padding: 0; order: 4; }
+.table-fullscreen #eipr-section .count-filters-grid > .cnt-grid-row2 .count-date-presets-bar { order: 1; flex: 1 1 auto; min-width: 0; }
+.table-fullscreen #eipr-section .count-filters-grid > .cnt-grid-row2 .cnt-grid-cbs { display: flex !important; flex: 0 0 auto; flex-shrink: 0; order: 2; margin: 0; }
+.table-fullscreen #eipr-section .count-filters-grid > .cnt-grid-row2 .cnt-grid-cbs .filter-cb:has(#eipr-year-sparse) { display: none !important; }
+.table-fullscreen #eipr-section .count-filters-grid > .cnt-grid-row2 .cnt-grid-cbs .filter-cb { font-size: 16px; white-space: nowrap; margin: 0; }
+.table-fullscreen #eipr-section .count-filters-grid > .cnt-grid-reset { flex: 0 0 auto; order: 5; margin-left: auto; }
+.table-fullscreen #eipr-section .count-date-presets-bar { display: flex !important; flex-wrap: nowrap; gap: 10px; overflow-x: auto; overflow-y: hidden; min-width: 0; width: auto; margin: 0; padding: 0; grid-template-columns: unset; -webkit-overflow-scrolling: touch; }
+.table-fullscreen #eipr-section .count-preset-btn { flex: 0 0 auto; width: auto; min-width: 0; padding: 10px 14px; font-size: 14px; line-height: 1.25; font-weight: 600; white-space: nowrap; }
+.table-fullscreen #eipr-section .count-filters .filter-date { padding: 10px 14px; font-size: 16px; }
+.table-fullscreen #eipr-section .count-filters .filter-modal-trigger { padding: 10px 14px; font-size: 16px; }
+.table-fullscreen #eipr-section .count-filters .filter-modal-badge { min-width: 24px; height: 24px; line-height: 24px; font-size: 13px; }
+.table-fullscreen #eipr-section .count-filters-grid > .cnt-grid-reset .filter-reset-btn { margin-left: 0; padding: 10px 14px; font-size: 22px; }
 .table-fullscreen .atlas-tab-layout,
 .table-fullscreen .count-layout { display: flex !important; flex-direction: column !important; height: 100% !important; }
 .table-fullscreen .atlas-tab-layout-body,
@@ -7936,6 +8954,9 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .count-filters-grid > .cnt-grid-row2 { grid-column: 1 / -1; flex-direction: column; align-items: stretch; }
 .count-filters-grid > .cnt-grid-row2 .count-date-presets-bar { flex: 1 1 auto; }
 .count-date-presets-bar { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
+#eipr-section .count-filters-grid.eipr-filters-layout { display: grid !important; align-items: center; }
+#eipr-section .count-filters-grid.eipr-filters-layout > .count-date-presets-bar { display: flex !important; flex-direction: row; align-items: center; grid-template-columns: unset; width: auto; }
+#eipr-section .count-filters-grid.eipr-filters-layout .filter-selected-label:empty { display: none !important; }
 }
 .count-filters .filter-modal-group { position: relative; }
 .count-filters .filter-modal-trigger { display: inline-flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 10px 14px; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 16px; color: #334155; cursor: pointer; user-select: none; font-family: inherit; text-align: left; transition: border-color .15s, background .15s, color .15s; }
@@ -8000,8 +9021,10 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .filter-reset-btn { margin-left: auto; padding: 9px 11px; font-size: 20px; line-height: 1; border-radius: 6px; border: 1px solid #cbd5e1; background: #fff; color: #6366f1; cursor: pointer; font-family: inherit; }
 .filter-reset-btn:hover { border-color: #6366f1; color: #4f46e5; background: #eef2ff; }
 #count-section { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+#eipr-section { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 #maindata-tables-wrapper { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; background: #fff; padding: 0 2px; }
 #count-tables-wrapper { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; background: #fff; padding: 0 2px; }
+#eipr-tables-wrapper { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; background: #fff; padding: 0 2px; }
 #count-tables-wrapper .year-section { margin-bottom: 20px; }
 #count-tables-wrapper .year-heading { font-size: 15px; font-weight: 800; padding: 8px 0 6px 0; border-bottom: 2px solid #6366f1; margin-top: 3px; margin-bottom: 11px; }
 #count-tables-wrapper table.print-table thead th { font-weight: 500 !important; }
@@ -8064,7 +9087,9 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 #count-tables-wrapper table.print-table.count-unified tbody tr.count-year-band td { background: #fff; color: #1e40af !important; font-weight: 800; font-size: 16px; padding: 8px 12px; border: 0; }
 #count-tables-wrapper table.print-table.count-unified tbody tr.count-year-band td:first-child { color: #1e40af !important; }
 #count-tables-wrapper table.print-table.count-unified tbody tr.count-year-gap td { height: 41px; padding: 0; background: transparent; border: 0; }
+#eipr-tables-wrapper table.print-table.count-unified tbody tr.count-year-gap td { height: 41px; padding: 0; background: transparent; border: 0; }
 #count-section.count-year-sparse #count-tables-wrapper table.print-table.count-unified tbody tr.count-year-gap td { height: 115px; }
+#eipr-section.count-year-sparse #eipr-tables-wrapper table.print-table.count-unified tbody tr.count-year-gap td { height: 115px; }
 #count-section.count-totals-only #count-tables-wrapper table.print-table.count-unified tbody tr[data-is-total="1"] td.cnt-paketa-merged {
   text-align: left;
   white-space: normal;
@@ -8351,7 +9376,7 @@ window._liteFilterModal = {
     var tr = e.target.closest('.filter-modal-trigger');
     if (tr) {
       var g = tr.closest('.filter-modal-group');
-      var sec = g && g.closest('#totals-section, #count-section, #apd-section');
+      var sec = g && g.closest('#totals-section, #count-section, #eipr-section, #apd-section');
       if (g && sec) {
         e.preventDefault();
         openModal(g, sec);
@@ -8363,7 +9388,7 @@ window._liteFilterModal = {
       e.preventDefault();
       var val = chip.getAttribute('data-value');
       var key = chip.getAttribute('data-filter-key');
-      var sec = chip.closest('#totals-section, #count-section, #apd-section');
+      var sec = chip.closest('#totals-section, #count-section, #eipr-section, #apd-section');
       if (!val || !key || !sec) return;
       var g = findGroupByKey(sec, key);
       if (!g) return;
@@ -8581,7 +9606,8 @@ function showTab(tabId){document.querySelectorAll('.tab-pane').forEach(function(
 document.addEventListener('DOMContentLoaded',function(){applyApodoxesTooltips();applyDescriptionColumn();initPersonalForm();buildPaketoTimeline();});
 function buildSinglePrintDoc(title,bodyContent){var styles=typeof _printStyles==='string'?_printStyles:'';var name=(typeof _clientName==='string'?_clientName:'').trim();var fullTitle=(name?name+' - '+(title||'')+' - ':(title||'ATLAS')+' - ')+(typeof _printBrandSuffix==='string'?_printBrandSuffix:'Atlas');var safeTitle=fullTitle.replace(/</g,'&lt;').replace(/"/g,'&quot;');var safeName=name.replace(/</g,'&lt;').replace(/&/g,'&amp;');var nameBlock=name?'<div class="prt-name">'+safeName+'</div>':'';return'<!DOCTYPE html><html lang="el"><head><meta charset="utf-8"><title>'+safeTitle+'</title><link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,200..900;1,200..900&display=swap" rel="stylesheet"><link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700;800&display=swap" rel="stylesheet"><style>'+styles+'</style></head><body>'+nameBlock+'<div class="prt-title">Ασφαλιστικό Βιογραφικό '+(typeof _printBrandSuffix==='string'?_printBrandSuffix:'Atlas')+'</div>'+bodyContent+'<div style="margin-top:12px;font-size:9px;color:#888;text-align:left;">© Syntaksi Pro - my advisor</div></body></html>';}
 function buildSyntaksiPrintDoc(title,bodyContent){var styles=typeof _printStyles==='string'?_printStyles:'';var name=(typeof _clientName==='string'?_clientName:'').trim().replace(/</g,'&lt;').replace(/&/g,'&amp;');var safeTitle=((name?name+' - ':'')+(title||'Συντάξιμες Αποδοχές')).replace(/"/g,'&quot;');var nameBlock=name?'<div class="print-client-name">'+name+'</div>':'';return'<!DOCTYPE html><html lang="el"><head><meta charset="utf-8"><title>'+safeTitle+'</title><link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700;800&display=swap" rel="stylesheet"><style>'+styles+'</style></head><body class="syntaksi-print-doc">'+nameBlock+bodyContent+'</body></html>';}
-function _stripHiddenCountForPrint(root){if(!root||!root.querySelectorAll)return;var sec=root.id==='count-section'?root:root.querySelector('#count-section');if(!sec||!sec.querySelector('#count-tables-wrapper'))return;sec.querySelectorAll('script').forEach(function(s){s.remove();});sec.querySelectorAll('#count-tables-wrapper tbody tr').forEach(function(tr){if(tr.style.display==='none')tr.remove();});var wrap=sec.querySelector('#count-tables-wrapper');var uni=wrap&&wrap.querySelector('table.count-unified');if(uni){var thead=uni.querySelector('thead');var theadHTML=thead?thead.outerHTML:'';var groups=[];var cur=null;Array.prototype.forEach.call(uni.querySelectorAll('tbody > tr'),function(tr){if(tr.getAttribute('data-is-band')==='1'){cur={year:(tr.getAttribute('data-c-year')||(tr.textContent||'').trim()),rows:[]};groups.push(cur);return;}if(tr.getAttribute('data-is-sep')==='1')return;if(!cur){cur={year:(tr.getAttribute('data-c-year')||''),rows:[]};groups.push(cur);}cur.rows.push(tr.outerHTML);});var out='';groups.forEach(function(g){if(!g.rows.length)return;out+='<div class="year-section"><div class="year-heading">'+(g.year||'')+'</div><table class="print-table">'+theadHTML+'<tbody>'+g.rows.join('')+'</tbody></table></div>';});if(out)wrap.innerHTML=out;}}
+function _stripHiddenUnifiedForPrint(sec,wrapId){if(!sec||!sec.querySelector('#'+wrapId))return;sec.querySelectorAll('script').forEach(function(s){s.remove();});sec.querySelectorAll('#'+wrapId+' tbody tr').forEach(function(tr){if(tr.style.display==='none')tr.remove();});var wrap=sec.querySelector('#'+wrapId);var uni=wrap&&wrap.querySelector('table.count-unified');if(uni){var thead=uni.querySelector('thead');var theadHTML=thead?thead.outerHTML:'';var groups=[];var cur=null;Array.prototype.forEach.call(uni.querySelectorAll('tbody > tr'),function(tr){if(tr.getAttribute('data-is-band')==='1'){cur={year:(tr.getAttribute('data-c-year')||(tr.textContent||'').trim()),rows:[]};groups.push(cur);return;}if(tr.getAttribute('data-is-sep')==='1')return;if(!cur){cur={year:(tr.getAttribute('data-c-year')||''),rows:[]};groups.push(cur);}cur.rows.push(tr.outerHTML);});var out='';groups.forEach(function(g){if(!g.rows.length)return;out+='<div class="year-section"><div class="year-heading">'+(g.year||'')+'</div><table class="print-table">'+theadHTML+'<tbody>'+g.rows.join('')+'</tbody></table></div>';});if(out)wrap.innerHTML=out;}}
+function _stripHiddenCountForPrint(root){if(!root||!root.querySelectorAll)return;[['count-section','count-tables-wrapper'],['eipr-section','eipr-tables-wrapper']].forEach(function(pair){var sec=root.id===pair[0]?root:root.querySelector('#'+pair[0]);if(sec)_stripHiddenUnifiedForPrint(sec,pair[1]);});}
 function _apdPrintSectionContent(sec){if(!sec)return'';if(typeof window._atlasApdApply==='function')window._atlasApdApply();var h2=sec.querySelector('h2');var desc=sec.querySelector('.print-description');var mount=sec.querySelector('#apd-tables-mount');var notes='';var plEl=document.getElementById('apd-plafond');if(plEl&&plEl.options&&plEl.options.length){var opt=plEl.options[plEl.selectedIndex];if(opt)notes+='<p class="print-description apd-print-plafond">Πλαφόν: '+String(opt.textContent||'').replace(/</g,'&lt;')+'</p>';}var toEl=document.getElementById('apd-totals-only');if(toEl&&toEl.checked)notes+='<p class="print-description">Μόνο ετήσιες γραμμές συνόλου</p>';return'<div class="print-section apd-layout">'+(h2?h2.outerHTML:'')+(desc?desc.outerHTML:'')+notes+(mount?'<div id="apd-tables-mount">'+mount.innerHTML+'</div>':'')+'</div>';}
 function _syntaksiPrefixFromSection(sec){var id=(sec&&sec.id)||'syntaksi-section';return id.replace(/-section$/,'')||'syntaksi';}
 function _syntaksiPrintBodyFor(sec){var pfx=_syntaksiPrefixFromSection(sec);var map=window._atlasSyntaksiPrint||{};if(typeof map[pfx]==='function')return map[pfx];if(typeof window._atlasSyntaksiGetPrintBody==='function')return window._atlasSyntaksiGetPrintBody;return null;}
@@ -8653,6 +9679,61 @@ function _atlasExtractTable(table){
   }
   return {cells:cells,headRows:(table.tHead&&table.tHead.rows.length?1:0)};
 }
+function _atlasRowToCells(tr,isHeader){
+  var tds=tr.cells,cells=[],c=0;
+  for(var k=0;k<tds.length;k++){
+    var td=tds[k];
+    if(!_atlasCellVisible(td))continue;
+    while(cells[c]!=null)c++;
+    var cs=td.colSpan||1;
+    var val=isHeader?{t:'s',v:_atlasCellText(td)}:_atlasParseCell(_atlasCellText(td));
+    for(var j=0;j<cs;j++){
+      if(cells.length<=c+j)cells.length=c+j+1;
+      if(cells[c+j]==null)cells[c+j]=(j===0)?val:null;
+    }
+    c+=cs;
+  }
+  while(cells.length&&cells[cells.length-1]==null)cells.pop();
+  return cells;
+}
+function _atlasCountRowYear(tr){
+  var y=(tr.getAttribute('data-c-year')||'').trim();
+  if(y)return y;
+  var tbl=tr.closest('table');
+  if(tr.cells&&tbl&&tbl.tHead&&tbl.tHead.rows[0]){
+    var hdr=_atlasRowToCells(tbl.tHead.rows[0],true);
+    for(var i=0;i<tr.cells.length&&i<hdr.length;i++){
+      var thTxt=(hdr[i]&&hdr[i].v!=null?String(hdr[i].v):'').trim();
+      if(thTxt.indexOf('ΠΕΡΙΓΡΑΦ')!==-1){
+        var m=(tr.cells[i].textContent||'').match(/ΣΥΝΟΛΟ\s+(\d{4})/i);
+        if(m)return m[1];
+      }
+    }
+  }
+  return '';
+}
+function _atlasExtractCountTable(table){
+  var headData=[];
+  if(table.tHead&&table.tHead.rows.length)headData=_atlasRowToCells(table.tHead.rows[0],true);
+  var nCol=headData.length;
+  var headRow=[{t:'s',v:'Έτος'}].concat(headData);
+  var cells=[headRow];
+  for(var b=0;b<table.tBodies.length;b++){
+    var trs=table.tBodies[b].rows;
+    for(var r=0;r<trs.length;r++){
+      var tr=trs[r];
+      if(!_atlasRowVisible(tr))continue;
+      if(tr.getAttribute('data-is-band')==='1')continue;
+      if(tr.getAttribute('data-is-sep')==='1')continue;
+      var year=_atlasCountRowYear(tr);
+      var dataCells=_atlasRowToCells(tr,false);
+      while(dataCells.length<nCol)dataCells.push({t:'s',v:''});
+      if(dataCells.length>nCol)dataCells=dataCells.slice(0,nCol);
+      cells.push([{t:'s',v:year}].concat(dataCells));
+    }
+  }
+  return {cells:cells,headRows:1};
+}
 function _atlasHeaderSig(cells){if(!cells.length)return '';return (cells[0]||[]).map(function(o){return o&&o.v!=null?String(o.v):'';}).join('\u0001');}
 function _atlasCellsToSheet(cells){
   var ws={},maxR=cells.length,maxC=0,r,c;
@@ -8669,10 +9750,12 @@ function _atlasPaneToSheets(root,label){
   var tables=root.querySelectorAll('table.print-table');
   var sheets=[],cur=null,curSig=null;
   for(var i=0;i<tables.length;i++){
-    var ext=_atlasExtractTable(tables[i]);
+    var tbl=tables[i];
+    var isCount=tbl.classList&&tbl.classList.contains('count-unified');
+    var ext=isCount?_atlasExtractCountTable(tbl):_atlasExtractTable(tbl);
     if(!ext.cells.length)continue;
     var sig=_atlasHeaderSig(ext.cells);
-    var yl=_atlasYearLabelBefore(tables[i]);
+    var yl=isCount?'':_atlasYearLabelBefore(tbl);
     if(cur&&sig===curSig){
       if(yl)cur.cells.push([{t:'s',v:yl}]);
       for(var r=ext.headRows;r<ext.cells.length;r++)cur.cells.push(ext.cells[r]);
@@ -8694,7 +9777,10 @@ function _atlasDownloadSheets(sheets,filename){
 function _atlasBaseName(){var base=(typeof getFullSaveFilename==='function'?getFullSaveFilename():(_downloadFilename||'ATLAS Pro.html'));return base.replace(/\.html$/i,'');}
 function exportTabExcel(sourceEl,label){
   var sheets=_atlasPaneToSheets(sourceEl,label||'Πίνακας');
-  if(!sheets.length&&sourceEl.matches&&sourceEl.matches('table.print-table')){var ext=_atlasExtractTable(sourceEl);if(ext.cells.length)sheets=[{name:label||'Πίνακας',cells:ext.cells}];}
+  if(!sheets.length&&sourceEl.matches&&sourceEl.matches('table.print-table')){
+    var ext=sourceEl.classList.contains('count-unified')?_atlasExtractCountTable(sourceEl):_atlasExtractTable(sourceEl);
+    if(ext.cells.length)sheets=[{name:label||'Πίνακας',cells:ext.cells}];
+  }
   _atlasDownloadSheets(sheets,_atlasSanitizeFilename(_atlasBaseName()+' - '+(label||'Πίνακας'))+'.xlsx');
 }
 function downloadExcelReport(){
