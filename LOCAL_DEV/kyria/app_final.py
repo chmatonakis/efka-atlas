@@ -127,57 +127,67 @@ var u=URL.createObjectURL(b);window.open(u,'_blank');}})();</script>
 
 
 def _atlas_inject_post_process_choice_buttons_style() -> None:
-    """Ίδιο ύψος / δύο γραμμές κειμένου στα κουμπιά επιλογής (μετά την επεξεργασία)."""
+    """Μεγάλο κουμπί HTML + μικρό text-link για Streamlit (μετά την επεξεργασία)."""
     components.html(
         r"""
         <script>
         (function () {
           var doc = (window.parent && window.parent.document) ? window.parent.document : document;
-          function isPostProcessChoiceBtn(b) {
-            var flat = (b.innerText || "").replace(/\s+/g, " ").trim();
-            return (flat.indexOf("ATLAS Pro") >= 0 && flat.indexOf("(παλιότερο)") >= 0) ||
-              (flat.indexOf("ATLAS Pro") >= 0 && flat.indexOf("(νέο)") >= 0);
+          function flatText(b) {
+            return (b.innerText || "").replace(/\s+/g, " ").trim();
           }
-          function isNewBtn(flat) {
-            return flat.indexOf("ATLAS Pro") >= 0 && flat.indexOf("(νέο)") >= 0;
+          function isHtmlOpenBtn(flat) {
+            return flat.indexOf("Προβολή Επεξεργασίας") >= 0 ||
+              flat.indexOf("Άνοιγμα HTML") >= 0 ||
+              (flat.indexOf("ATLAS Pro") >= 0 && flat.indexOf("HTML") >= 0);
+          }
+          function isStreamlitLinkBtn(flat) {
+            return flat.indexOf("Παλιότερη εκδοχή") >= 0 ||
+              flat.indexOf("Παλαιότερη προβολή") >= 0 ||
+              (flat.indexOf("Streamlit") >= 0 && flat.indexOf("παλαιότερ") >= 0) ||
+              (flat.indexOf("ATLAS Pro") >= 0 && flat.indexOf("(παλιότερο)") >= 0);
           }
           function run() {
             doc.querySelectorAll("button").forEach(function (b) {
-              if (!isPostProcessChoiceBtn(b)) return;
-              var flat = (b.innerText || "").replace(/\s+/g, " ").trim();
-              if (flat.indexOf("ATLAS Pro") >= 0 && flat.indexOf("(παλιότερο)") >= 0) {
-                b.textContent = "ATLAS Pro" + "\n" + "(παλιότερο)";
-              } else if (isNewBtn(flat)) {
-                b.textContent = "ATLAS Pro" + "\n" + "(νέο)";
-              }
-              b.style.setProperty("white-space", "pre-line", "important");
-              b.style.setProperty("text-align", "center", "important");
-              b.style.setProperty("display", "flex", "important");
-              b.style.setProperty("align-items", "center", "important");
-              b.style.setProperty("justify-content", "center", "important");
-              b.style.setProperty("min-height", "4.35rem", "important");
-              b.style.setProperty("height", "4.35rem", "important");
-              b.style.setProperty("padding", "0.5rem 1rem", "important");
-              b.style.setProperty("font-size", "1.02rem", "important");
-              b.style.setProperty("line-height", "1.35", "important");
-              b.style.setProperty("box-sizing", "border-box", "important");
-              if (isNewBtn(flat)) {
+              var flat = flatText(b);
+              if (isHtmlOpenBtn(flat)) {
+                b.style.setProperty("white-space", "normal", "important");
+                b.style.setProperty("text-align", "center", "important");
+                b.style.setProperty("display", "flex", "important");
+                b.style.setProperty("align-items", "center", "important");
+                b.style.setProperty("justify-content", "center", "important");
+                b.style.setProperty("min-height", "4.85rem", "important");
+                b.style.setProperty("height", "auto", "important");
+                b.style.setProperty("padding", "1.05rem 1.4rem", "important");
+                b.style.setProperty("font-size", "1.28rem", "important");
                 b.style.setProperty("font-weight", "700", "important");
-                b.style.setProperty("box-shadow", "0 2px 8px rgba(255,75,75,0.35)", "important");
-              } else {
-                b.style.setProperty("font-weight", "600", "important");
-                b.style.setProperty("opacity", "0.88", "important");
-              }
-              var col = b.closest('[data-testid="column"]');
-              if (col) {
-                col.style.setProperty("display", "flex", "important");
-                col.style.setProperty("align-items", "stretch", "important");
-                col.style.setProperty("justify-content", "center", "important");
-              }
-              var row = b.closest('[data-testid="stHorizontalBlock"]');
-              if (row) {
-                row.style.setProperty("align-items", "stretch", "important");
-                row.style.setProperty("justify-content", "center", "important");
+                b.style.setProperty("line-height", "1.3", "important");
+                b.style.setProperty("letter-spacing", "0.01em", "important");
+                b.style.setProperty("box-sizing", "border-box", "important");
+                b.style.setProperty("box-shadow", "0 4px 16px rgba(255,75,75,0.38)", "important");
+                b.style.setProperty("border-radius", "12px", "important");
+              } else if (isStreamlitLinkBtn(flat)) {
+                b.style.setProperty("background", "transparent", "important");
+                b.style.setProperty("background-color", "transparent", "important");
+                b.style.setProperty("border", "none", "important");
+                b.style.setProperty("box-shadow", "none", "important");
+                b.style.setProperty("color", "#64748b", "important");
+                b.style.setProperty("font-size", "0.78rem", "important");
+                b.style.setProperty("font-weight", "400", "important");
+                b.style.setProperty("text-decoration", "underline", "important");
+                b.style.setProperty("text-underline-offset", "2px", "important");
+                b.style.setProperty("min-height", "auto", "important");
+                b.style.setProperty("height", "auto", "important");
+                b.style.setProperty("padding", "0.15rem 0.35rem", "important");
+                b.style.setProperty("line-height", "1.35", "important");
+                b.style.setProperty("opacity", "0.92", "important");
+                b.style.setProperty("cursor", "pointer", "important");
+                var wrap = b.closest('[data-testid="stButton"]') || b.parentElement;
+                if (wrap) {
+                  wrap.style.setProperty("display", "flex", "important");
+                  wrap.style.setProperty("justify-content", "center", "important");
+                  wrap.style.setProperty("margin-top", "0.35rem", "important");
+                }
               }
             });
           }
@@ -264,7 +274,7 @@ def _atlas_show_post_extract_choices(
     html_btn_key: str = "open_html_pro_btn",
     streamlit_btn_key: str = "show_results_btn",
 ) -> None:
-    """Οθόνη επιλογής μετά την εξαγωγή PDF: HTML Pro ή Streamlit (παλιότερο)."""
+    """Οθόνη επιλογής μετά την εξαγωγή PDF: μεγάλο κουμπί HTML + μικρό link Streamlit."""
     _atlas_run_pending_html_report(df)
 
     st.markdown("### Επεξεργασία Ολοκληρώθηκε")
@@ -277,27 +287,24 @@ def _atlas_show_post_extract_choices(
 
     _pp_pad_l, _pp_mid, _pp_pad_r = st.columns([1, 2, 1], vertical_alignment="center")
     with _pp_mid:
-        _pp_b1, _pp_b2 = st.columns(2, vertical_alignment="center")
-        with _pp_b1:
-            if st.button(
-                "ATLAS Pro\n(νέο)",
-                type="primary",
-                use_container_width=True,
-                key=html_btn_key,
-                help="Πλήρης HTML αναφορά Pro σε νέα καρτέλα (επιτρέψτε pop-ups).",
-            ):
-                st.session_state["_atlas_pending_html_edition"] = "pro"
-                st.rerun()
-        with _pp_b2:
-            if st.button(
-                "ATLAS Pro\n(παλιότερο)",
-                type="secondary",
-                use_container_width=True,
-                key=streamlit_btn_key,
-                help="Πλήρης ανάλυση στην εφαρμογή (όλες οι καρτέλες).",
-            ):
-                st.session_state["show_results"] = True
-                st.rerun()
+        if st.button(
+            "Προβολή Επεξεργασίας",
+            type="primary",
+            use_container_width=True,
+            key=html_btn_key,
+            help="Πλήρης HTML αναφορά Pro σε νέα καρτέλα (επιτρέψτε pop-ups).",
+        ):
+            st.session_state["_atlas_pending_html_edition"] = "pro"
+            st.rerun()
+        if st.button(
+            "Παλιότερη εκδοχή",
+            type="tertiary",
+            use_container_width=True,
+            key=streamlit_btn_key,
+            help="Πλήρης ανάλυση μέσα στην εφαρμογή (όλες οι καρτέλες).",
+        ):
+            st.session_state["show_results"] = True
+            st.rerun()
     _atlas_inject_post_process_choice_buttons_style()
 
     st.success(

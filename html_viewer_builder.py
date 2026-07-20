@@ -7924,8 +7924,10 @@ def build_viewer_html_document(
     complex_modal_body_html="",
     excel_report_b64="",
     excel_export_enabled=False,
+    edition="lite",
 ):
     """Κατασκευή πλήρους interactive HTML viewer (sidebar + tabs + JS)."""
+    edition_norm = "pro" if str(edition or "").strip().lower() == "pro" else "lite"
     safe_name = html_mod.escape(client_name.strip()) if client_name.strip() else ""
     name_block = f'<div class="header-name">{safe_name}</div>' if safe_name else ""
 
@@ -7980,19 +7982,13 @@ def build_viewer_html_document(
     _save_suffix_attr = html_mod.escape(
         (full_save_suffix or "ATLAS Pro.html").strip(), quote=True
     )
-    _excel_btn = ""
     _excel_js_var = ""
     _excel_on = bool(excel_export_enabled or excel_report_b64)
     _sheetjs_script = (
         f"<script>{SHEETJS_JS}</script>" if (_excel_on and SHEETJS_JS) else ""
     )
-    if _excel_on:
-        _excel_btn = (
-            '<button type="button" class="btn-action btn-excel" '
-            'onclick="downloadExcelReport();" '
-            'title="Εξαγωγή όλων των καρτελών σε ένα Excel (όπως εμφανίζονται)">'
-            'Εξαγωγή Excel</button>'
-        )
+    _tools_modal_html = _build_tools_modal_html(excel_on=_excel_on, edition=edition_norm)
+    _edition_attr = html_mod.escape(edition_norm, quote=True)
 
     return f"""<!DOCTYPE html>
 <html lang="el">
@@ -8005,15 +8001,13 @@ def build_viewer_html_document(
 <style>{VIEWER_STYLES}</style>
 {_sheetjs_script}
 </head>
-<body data-atlas-save-file="{_save_suffix_attr}">
+<body data-atlas-save-file="{_save_suffix_attr}" data-atlas-edition="{_edition_attr}">
 <div class="app-layout">
   <nav class="sidebar">
     <div class="sidebar-header">{_esc_title}{_sidebar_small}</div>
     <div class="sidebar-nav">{nav_items}</div>
     <div class="sidebar-footer">
-      <button type="button" class="btn-action btn-save" onclick="downloadFullHtml();">Πλήρης Αποθήκευση</button>
-      {_excel_btn}
-      <button type="button" class="btn-action btn-print" onclick="openPrint();">Εκτύπωση</button>
+      <button type="button" class="btn-action btn-tools" onclick="openToolsModal();" title="Αποθήκευση, εκτύπωση, Excel και AI">Ενέργειες</button>
       <div class="sidebar-footer-copyright">© Syntaksi Pro - my advisor</div>
     </div>
   </nav>
@@ -8031,6 +8025,7 @@ def build_viewer_html_document(
 <div id="toast-container"></div>
 <div id="apodoxes-tooltip" class="apodoxes-tooltip" aria-hidden="true"></div>
 <div id="tl-paketo-tooltip" class="apodoxes-tooltip" aria-hidden="true"></div>
+{_tools_modal_html}
 {LITE_FILTER_MODAL_HTML}
 <script>
 var _apodoxesDescriptions = {apodoxes_js};
@@ -8041,6 +8036,9 @@ var _downloadFilename = {download_filename_js};
 var _printBrandSuffix = {print_brand_suffix_js};
 var _fullSaveSuffix = {full_save_suffix_js};
 {_excel_js_var}{VIEWER_JS}
+</script>
+<script>
+{ATLAS_AI_TOOLS_JS}
 </script>
 <script>
 {LITE_FILTER_MODAL_JS}
@@ -8109,6 +8107,7 @@ def generate_full_html_report(df, client_name="", app_title="ATLAS",
         show_complex_warning=show_complex_warning,
         complex_modal_body_html=complex_modal_body_html,
         excel_export_enabled=excel_export_enabled,
+        edition=edition,
     )
     return viewer_html, print_html
 
@@ -8393,9 +8392,40 @@ body { font-family: """ + FONT_MAIN + """; color: #1e293b; background: #fff; }
 .sidebar-footer { padding: 12px 16px; border-top: 1px solid #334155; display: flex; flex-direction: column; gap: 8px; }
 .sidebar-footer-copyright { margin-top: auto; padding-top: 12px; font-size: 11px; color: #94a3b8; text-align: left; }
 .btn-action { width: 100%; border: none; padding: 10px 0; border-radius: 6px; font-size: 14px; font-weight: 700; font-family: """ + FONT_MAIN + """; cursor: pointer; transition: background .15s; }
+.btn-tools { background: #2563eb; color: white; } .btn-tools:hover { background: #1d4ed8; }
 .btn-save { background: #2563eb; color: white; } .btn-save:hover { background: #1d4ed8; }
 .btn-excel { background: #059669; color: white; } .btn-excel:hover { background: #047857; }
 .btn-print { background: #dc3545; color: white; } .btn-print:hover { background: #b91c1c; }
+.btn-ai { background: #4f46e5; color: white; } .btn-ai:hover { background: #4338ca; }
+.btn-ai-secondary { background: #e0e7ff; color: #312e81; } .btn-ai-secondary:hover { background: #c7d2fe; }
+.tools-modal-overlay { position: fixed; inset: 0; z-index: 99997; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: rgba(15, 23, 42, 0.55); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.25s ease, visibility 0.25s ease; }
+.tools-modal-overlay.is-open { opacity: 1; visibility: visible; pointer-events: auto; }
+.tools-modal-panel { width: min(1180px, 96vw); max-height: min(90vh, 920px); display: flex; flex-direction: column; background: #fff; border-radius: 16px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(148, 163, 184, 0.15); overflow: hidden; transform: scale(0.96) translateY(12px); transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.tools-modal-overlay.is-open .tools-modal-panel { transform: scale(1) translateY(0); }
+.tools-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 20px 22px 16px; border-bottom: 1px solid #e2e8f0; background: linear-gradient(180deg, #f1f5f9 0%, #fff 100%); flex-shrink: 0; }
+.tools-modal-head h3 { margin: 0; font-size: 22px; font-weight: 800; color: #1e293b; line-height: 1.3; }
+.tools-modal-close { flex-shrink: 0; width: 40px; height: 40px; border: none; border-radius: 10px; background: #e2e8f0; color: #334155; font-size: 28px; line-height: 1; cursor: pointer; }
+.tools-modal-close:hover { background: #cbd5e1; color: #0f172a; }
+.tools-modal-body { padding: 0; overflow: hidden; display: grid; grid-template-columns: minmax(200px, 0.75fr) minmax(260px, 0.95fr) minmax(340px, 1.35fr); min-height: 0; flex: 1; }
+.tools-modal-section { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px 22px; min-height: 0; overflow-y: auto; }
+.tools-modal-section--file { border-right: 1px solid #e2e8f0; background: #fff; }
+.tools-modal-section--ai { border-right: 1px solid #e2e8f0; background: #f8fafc; }
+.tools-modal-section--prompts { background: #fff; }
+@media (max-width: 900px) {
+  .tools-modal-body { grid-template-columns: 1fr; }
+  .tools-modal-section--file,
+  .tools-modal-section--ai { border-right: none; border-bottom: 1px solid #e2e8f0; }
+}
+.tools-modal-section-title { margin: 0; font-size: 13px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: #64748b; }
+.tools-modal-actions { display: flex; flex-direction: column; gap: 8px; }
+.tools-modal-note { margin: 0; font-size: 13px; line-height: 1.5; color: #475569; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; }
+.tools-modal-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #3730a3; background: #eef2ff; border-radius: 999px; padding: 4px 10px; width: fit-content; }
+.tools-ai-prompts { display: flex; flex-direction: column; gap: 8px; }
+.tools-ai-prompt { border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; background: #fff; display: flex; flex-direction: column; gap: 8px; }
+.tools-ai-prompt-title { font-size: 14px; font-weight: 700; color: #1e293b; margin: 0; }
+.tools-ai-prompt-text { font-size: 12px; line-height: 1.45; color: #64748b; margin: 0; white-space: pre-wrap; }
+.tools-ai-prompt-copy { align-self: flex-start; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: 700; cursor: pointer; background: #f1f5f9; color: #334155; font-family: inherit; }
+.tools-ai-prompt-copy:hover { background: #e2e8f0; }
 html, body { height: 100%; min-height: 100vh; overflow: hidden; }
 body { overflow-x: hidden; }
 .app-layout { display: flex; height: 100vh; overflow: hidden; }
@@ -9975,6 +10005,512 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .personal-notes textarea { padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 16px; font-family: inherit; color: #334155; background: #fff; min-height: 180px; resize: vertical; }
 .personal-notes textarea:hover, .personal-notes textarea:focus { border-color: #6366f1; outline: none; }
 @media (max-width: 768px) { .personal-section-wrap { flex-direction: column; } .personal-notes { flex: 1 1 auto; width: 100%; } }
+@media print { .tools-modal-overlay { display: none !important; } }
+"""
+
+def _build_tools_modal_html(*, excel_on: bool, edition: str) -> str:
+    """Modal ενεργειών sidebar: αποθήκευση / Excel / εκτύπωση + AI εξαγωγή."""
+    package_key = "pro" if edition == "pro" else "lite"
+    package_label = "Pro" if package_key == "pro" else "Κανονικό"
+    if package_key == "pro":
+        package_tabs = (
+            "Σύνοψη, Σύνολα, Κενά, Παράλληλη/2017+/Πολλαπλή, "
+            "συνοπτική Καταμέτρηση, Συντάξιμες, ΑΠΔ, EIPR (όσα υπάρχουν)"
+        )
+    else:
+        package_tabs = (
+            "Σύνοψη, Σύνολα, Κενά, Παράλληλη/2017+/Πολλαπλή, "
+            "συνοπτική Καταμέτρηση (όσα υπάρχουν)"
+        )
+    excel_btn = ""
+    if excel_on:
+        excel_btn = (
+            '<button type="button" class="btn-action btn-excel" '
+            'onclick="downloadExcelReport(); closeToolsModal();" '
+            'title="Εξαγωγή όλων των καρτελών σε ένα Excel (όπως εμφανίζονται)">'
+            "Εξαγωγή Excel</button>"
+        )
+    return f"""
+<div id="tools-modal-overlay" class="tools-modal-overlay" aria-hidden="true">
+  <div class="tools-modal-panel" role="dialog" aria-modal="true" aria-labelledby="tools-modal-title">
+    <div class="tools-modal-head">
+      <h3 id="tools-modal-title">Ενέργειες</h3>
+      <button type="button" class="tools-modal-close" aria-label="Κλείσιμο" onclick="closeToolsModal();">&times;</button>
+    </div>
+    <div class="tools-modal-body">
+      <div class="tools-modal-section tools-modal-section--file">
+        <p class="tools-modal-section-title">Αρχείο</p>
+        <div class="tools-modal-actions">
+          <button type="button" class="btn-action btn-save" onclick="downloadFullHtml(); closeToolsModal();">Πλήρης Αποθήκευση</button>
+          {excel_btn}
+          <button type="button" class="btn-action btn-print" onclick="openPrint(); closeToolsModal();">Εκτύπωση</button>
+        </div>
+      </div>
+      <div class="tools-modal-section tools-modal-section--ai">
+        <p class="tools-modal-section-title">AI — λήψη</p>
+        <span class="tools-modal-badge">Πακέτο {html_mod.escape(package_label)}</span>
+        <p class="tools-modal-note">
+          Εξάγει μόνο αποτελέσματα καρτελών για χειροκίνητο ανέβασμα σε LLM.
+          <strong>Δεν περιλαμβάνει</strong> Προσωπικά Στοιχεία, ονοματεπώνυμο, ΑΜΚΑ, ΑΦΜ ή Κύρια Δεδομένα.
+          Καρτέλες πακέτου: {html_mod.escape(package_tabs)}.
+        </p>
+        <div class="tools-modal-actions">
+          <button type="button" class="btn-action btn-ai" onclick="downloadAtlasAiData();">Λήψη δεδομένων για AI (.txt)</button>
+          <button type="button" class="btn-action btn-ai-secondary" onclick="downloadAtlasAiPrompts();">Λήψη έτοιμων prompts (.txt)</button>
+        </div>
+      </div>
+      <div class="tools-modal-section tools-modal-section--prompts">
+        <p class="tools-modal-section-title">Έτοιμα prompts</p>
+        <div class="tools-ai-prompts" id="tools-ai-prompts-list" data-atlas-ai-package="{html_mod.escape(package_key)}"></div>
+      </div>
+    </div>
+  </div>
+</div>
+"""
+
+
+ATLAS_AI_TOOLS_JS = r"""
+(function () {
+  var AI_COMMON = [
+    'synopsis', 'totals', 'gaps', 'parallel', 'parallel2017', 'multi', 'count'
+  ];
+  var AI_PRO_EXTRA = ['syntaksi', 'syntaksipar', 'apd', 'eipr'];
+  var AI_PROMPTS = [
+    {
+      id: 'full_report',
+      title: 'Πλήρης έκθεση ασφαλισμένου',
+      text: 'Χρησιμοποίησε μόνο τα συνημμένα/παρακάτω ανώνυμα δεδομένα ATLAS. Αγνόησε οποιοδήποτε προσωπικό στοιχείο αν εμφανιστεί. Μην εφευρίσκεις αριθμούς ή γεγονότα και μην κάνεις νομική κρίση ή συμπέρασμα θεμελίωσης.\n\nΣύνταξε στα ελληνικά μία πλήρη, δομημένη έκθεση με τις εξής ενότητες:\n1) Συνολική εικόνα ασφαλιστικής πορείας (ταμεία, περίοδοι, είδος ασφάλισης).\n2) Σύνολα ημερών/ετών και βασικά μεγέθη όπως εμφανίζονται στα δεδομένα.\n3) Κενά, ασυνέχειες και περίοδοι που χρειάζονται προσοχή.\n4) Παράλληλη / πολλαπλή απασχόληση (αν υπάρχει).\n5) Σημεία ελέγχου από τη Σύνοψη/audit.\n6) Προτεινόμενες επαληθεύσεις πριν το κλείσιμο του φακέλου.\n7) Σύντομη αποποίηση: το κείμενο είναι υποβοηθητικό και δεν αποτελεί επίσημη ή νομική γνωμοδότηση.\n\nΓράψε πλήρεις παραγράφους όπου χρειάζεται, και bullets στα σημεία ελέγχου.'
+    },
+    {
+      id: 'summary',
+      title: 'Σύνοψη φακέλου',
+      text: 'Χρησιμοποίησε μόνο τα συνημμένα/παρακάτω ανώνυμα δεδομένα ATLAS. Αγνόησε οποιοδήποτε προσωπικό στοιχείο αν εμφανιστεί. Μην εφευρίσκεις αριθμούς ή γεγονότα. Γράψε στα ελληνικά μία ουδέτερη επαγγελματική σύνοψη 2–4 προτάσεων χωρίς νομική κρίση ή συμπέρασμα θεμελίωσης.'
+    },
+    {
+      id: 'timeline',
+      title: 'Χρονολόγιο σε αφήγηση',
+      text: 'Χρησιμοποίησε μόνο τα συνημμένα/παρακάτω ανώνυμα δεδομένα ATLAS. Αγνόησε προσωπικά στοιχεία. Μην εφευρίσκεις αριθμούς. Μετέτρεψε το ιστορικό σε συνεχή αφήγηση ανά δεκαετία ή ανά κύριο ταμείο/περίοδο, με ουδέτερο επαγγελματικό ύφος και χωρίς νομική κρίση.'
+    },
+    {
+      id: 'findings',
+      title: 'Κρίσιμα σημεία ελέγχου',
+      text: 'Χρησιμοποίησε μόνο τα συνημμένα/παρακάτω ανώνυμα δεδομένα ATLAS. Αγνόησε προσωπικά στοιχεία. Μην εφευρίσκεις αριθμούς. Δώσε 3–8 σύντομα bullets με τα πιο σημαντικά σημεία που χρειάζονται επαλήθευση ή προσοχή.'
+    },
+    {
+      id: 'checklist_only',
+      title: 'Μόνο λίστα ελέγχου',
+      text: 'Χρησιμοποίησε μόνο τα συνημμένα/παρακάτω ανώνυμα δεδομένα ATLAS, ιδίως Σύνοψη, Κενά και Παράλληλη. Παράγαγε αποκλειστικά checklist «πρέπει να δω» σε bullets, χωρίς αφήγηση και χωρίς νομική κρίση.'
+    },
+    {
+      id: 'gaps',
+      title: 'Κενά σε απλά ελληνικά',
+      text: 'Χρησιμοποίησε μόνο τα συνημμένα/παρακάτω ανώνυμα δεδομένα ATLAS, ιδίως την ενότητα Κενά. Εξήγησε σε απλά ελληνικά τι δείχνουν τα κενά/ελλείψεις, χωρίς νομική κρίση και χωρίς εφεύρεση στοιχείων.'
+    },
+    {
+      id: 'parallel',
+      title: 'Παράλληλη εξήγηση',
+      text: 'Χρησιμοποίησε μόνο τα συνημμένα/παρακάτω ανώνυμα δεδομένα ATLAS για Παράλληλη / 2017+ / Πολλαπλή. Εξήγησε σε απλά ελληνικά τι εμφανίζεται, τι χρειάζεται προσοχή και τι πρέπει να επαληθευτεί. Χωρίς νομική κρίση και χωρίς εφεύρεση αριθμών.'
+    },
+    {
+      id: 'employee_vs_self',
+      title: 'Μισθωτή vs μη μισθωτή',
+      text: 'Με βάση μόνο τα συνημμένα/παρακάτω ανώνυμα δεδομένα ATLAS, περιέγραψε τι κυριαρχεί μεταξύ μισθωτής και μη μισθωτής ασφάλισης, ποια μεγέθη ξεχωρίζουν και τι χρειάζεται προσοχή. Χωρίς νομική κρίση και χωρίς εφεύρεση αριθμών.'
+    },
+    {
+      id: 'client',
+      title: 'Σύντομο κείμενο για πελάτη',
+      text: 'Με βάση μόνο τα συνημμένα/παρακάτω ανώνυμα δεδομένα ATLAS, γράψε ένα σύντομο ουδέτερο κείμενο 4–7 προτάσεων κατάλληλο για ενημέρωση πελάτη. Χωρίς ταυτοποίηση, χωρίς νομική γνωμοδότηση, χωρίς εφεύρεση αριθμών.'
+    },
+    {
+      id: 'study_notes',
+      title: 'Κείμενο για φάκελο μελέτης',
+      text: 'Με βάση μόνο τα συνημμένα/παρακάτω ανώνυμα δεδομένα ATLAS, γράψε εσωτερικές σημειώσεις μελετητή: τεχνικό ύφος, σημεία προσοχής, τι να διασταυρωθεί, τι παραμένει αβέβαιο. Χωρίς νομική κρίση και χωρίς εφεύρεση αριθμών.'
+    },
+    {
+      id: 'missing',
+      title: 'Τι λείπει / αβεβαιότητες',
+      text: 'Με βάση μόνο τα συνημμένα/παρακάτω ανώνυμα δεδομένα ATLAS, καταγράψε ρητή λίστα ελλείψεων, αβεβαιοτήτων και στοιχείων που δεν επαρκούν για πλήρη εικόνα. Μην εφευρίσκεις δεδομένα.'
+    },
+    {
+      id: 'faq',
+      title: 'FAQ πελάτη',
+      text: 'Με βάση μόνο τα συνημμένα/παρακάτω ανώνυμα δεδομένα ATLAS, πρότεινε 5–8 πιθανές ερωτήσεις πελάτη και σύντομες απαντήσεις αποκλειστικά από τα δεδομένα. Χωρίς ταυτοποίηση και χωρίς νομική γνωμοδότηση.'
+    },
+    {
+      id: 'efka_letter',
+      title: 'Draft επιστολής διευκρινίσεων',
+      text: 'Με βάση μόνο τα συνημμένα/παρακάτω ανώνυμα δεδομένα ATLAS, σύνταξε ουδέτερο draft αιτήματος διευκρινίσεων προς φορέα/ΕΦΚΑ για τα σημεία που χρήζουν επαλήθευσης. Χωρίς ταυτοποίηση, χωρίς νομική κρίση, χωρίς εφεύρεση στοιχείων.'
+    },
+    {
+      id: 'syntaksi_pro',
+      title: 'Συντάξιμες — σύνοψη (Pro)',
+      text: 'Χρησιμοποίησε μόνο τα συνημμένα/παρακάτω ανώνυμα δεδομένα ATLAS για Συντάξιμες (αν υπάρχουν). Σύνοψε τους υπολογισμούς/μεγέθη όπως εμφανίζονται και λίστασε τι πρέπει να επαληθευτεί. Χωρίς συμπέρασμα δικαιώματος και χωρίς εφεύρεση αριθμών.'
+    },
+    {
+      id: 'apd_pro',
+      title: 'ΑΠΔ / πλαφόν — σύνοψη (Pro)',
+      text: 'Χρησιμοποίησε μόνο τα συνημμένα/παρακάτω ανώνυμα δεδομένα ATLAS για ΑΠΔ/πλαφόν (αν υπάρχουν). Περιέγραψε τι δείχνουν τα metrics και τι χρειάζεται έλεγχος. Χωρίς συμπέρασμα δικαιώματος και χωρίς εφεύρεση αριθμών.'
+    },
+    {
+      id: 'checklist',
+      title: 'Ερωτήσεις ελέγχου πριν το κλείσιμο',
+      text: 'Με βάση μόνο τα συνημμένα/παρακάτω ανώνυμα δεδομένα ATLAS, πρότεινε 5–10 πρακτικές ερωτήσεις/ενέργειες που πρέπει να ελέγξει ο μελετητής πριν κλείσει τον φάκελο. Χωρίς νομική κρίση.'
+    },
+    {
+      id: 'free',
+      title: 'Ελεύθερη ερώτηση (πρόθεμα)',
+      text: 'Απάντησε μόνο από τα συνημμένα/παρακάτω ανώνυμα δεδομένα ATLAS. Αγνόησε προσωπικά στοιχεία. Μην εφευρίσκεις αριθμούς. Ερώτηση: '
+    }
+  ];
+
+  function editionIsPro() {
+    var body = document.body;
+    var ed = (body && body.getAttribute('data-atlas-edition')) || '';
+    if (ed === 'pro') return true;
+    var list = document.getElementById('tools-ai-prompts-list');
+    return !!(list && list.getAttribute('data-atlas-ai-package') === 'pro');
+  }
+
+  function aiTabIds() {
+    return editionIsPro() ? AI_COMMON.concat(AI_PRO_EXTRA) : AI_COMMON.slice();
+  }
+
+  window.openToolsModal = function () {
+    var ov = document.getElementById('tools-modal-overlay');
+    if (!ov) return;
+    ov.classList.add('is-open');
+    ov.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+  };
+
+  window.closeToolsModal = function () {
+    var ov = document.getElementById('tools-modal-overlay');
+    if (!ov) return;
+    ov.classList.remove('is-open');
+    ov.setAttribute('aria-hidden', 'true');
+    var other = document.querySelector('.lite-filter-modal-overlay.is-open, .synopsis-modal-overlay.is-open, .totals-exceeded-modal-overlay.is-open, .cnt-extra-filters-overlay.is-open');
+    if (!other) document.body.style.overflow = '';
+  };
+
+  function downloadTextFile(filename, text) {
+    var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function stripPiiText(s) {
+    var t = String(s || '');
+    t = t.replace(/ΑΜΚΑ\s*[:：]?\s*\S+/gi, 'ΑΜΚΑ: [ΑΦΑΙΡΕΘΗΚΕ]');
+    t = t.replace(/ΑΦΜ\s*[:：]?\s*\S+/gi, 'ΑΦΜ: [ΑΦΑΙΡΕΘΗΚΕ]');
+    /* 11ψήφια ακολουθία (πιθανό ΑΜΚΑ) — όχι γενικά 9ψήφια (μπορεί να είναι ποσά/κωδικοί) */
+    t = t.replace(/(^|[^\d])(\d{11})(?=[^\d]|$)/g, '$1[ΑΜΚΑ_ΑΦΑΙΡΕΘΗΚΕ]');
+    return t;
+  }
+
+  function cleanCellText(el) {
+    if (!el) return '';
+    return stripPiiText((el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim());
+  }
+
+  function tableToText(tbl, maxRows) {
+    if (!tbl) return '';
+    var lines = [];
+    var rows = tbl.querySelectorAll('tr');
+    var limit = (typeof maxRows === 'number' && maxRows > 0) ? maxRows : 400;
+    var n = 0;
+    for (var i = 0; i < rows.length && n < limit; i++) {
+      var cells = rows[i].querySelectorAll('th,td');
+      if (!cells.length) continue;
+      var parts = [];
+      for (var c = 0; c < cells.length; c++) {
+        var tx = cleanCellText(cells[c]);
+        if (tx) parts.push(tx);
+      }
+      if (parts.length) {
+        lines.push(parts.join(' | '));
+        n++;
+      }
+    }
+    if (rows.length > limit) lines.push('… (κόπηκαν επιπλέον γραμμές για όριο μεγέθους)');
+    return lines.join('\n');
+  }
+
+  function metricsToText(root) {
+    if (!root) return '';
+    var cells = root.querySelectorAll('.atlas-metric-item');
+    var lines = [];
+    var seen = {};
+    cells.forEach(function (cell) {
+      var label = cleanCellText(cell.querySelector('.atlas-metric-label'));
+      var val = cleanCellText(cell.querySelector('.atlas-metric-value'));
+      var line = (label && val) ? (label + ': ' + val) : (label || val);
+      if (line && !seen[line]) {
+        seen[line] = 1;
+        lines.push(line);
+      }
+    });
+    if (lines.length) return lines.join('\n');
+    var bar = root.querySelector('.totals-info-bar, .syntaksi-metrics');
+    return bar ? cleanCellText(bar) : '';
+  }
+
+  function synopsisToText(pane) {
+    var cards = pane.querySelectorAll('.audit-row, .audit-card');
+    var blocks = [];
+    cards.forEach(function (card) {
+      var h = cleanCellText(card.querySelector('.audit-card-header'));
+      var r = cleanCellText(card.querySelector('.audit-card-result'));
+      var d = cleanCellText(card.querySelector('.audit-card-details'));
+      var a = cleanCellText(card.querySelector('.audit-card-actions'));
+      var parts = [];
+      if (h) parts.push('Τίτλος: ' + h);
+      if (r) parts.push('Αποτέλεσμα: ' + r);
+      if (d) parts.push('Λεπτομέρειες: ' + d);
+      if (a) parts.push('Ενέργειες: ' + a);
+      if (parts.length) blocks.push(parts.join('\n'));
+    });
+    return blocks.join('\n\n');
+  }
+
+  function sanitizeJsonValue(v) {
+    if (Array.isArray(v)) return v.map(sanitizeJsonValue);
+    if (v && typeof v === 'object') {
+      var out = {};
+      Object.keys(v).forEach(function (k) {
+        var lk = String(k).toLowerCase();
+        if (/amka|αμκα|afm|αφμ|όνομα|ονομα|fullname|client|εργοδότης|εργοδοτη|employer|name/.test(lk)) return;
+        out[k] = sanitizeJsonValue(v[k]);
+      });
+      return out;
+    }
+    if (typeof v === 'string') return stripPiiText(v);
+    return v;
+  }
+
+  function jsonScriptToText(id) {
+    var el = document.getElementById(id);
+    if (!el) return '';
+    try {
+      var raw = JSON.parse(el.textContent || 'null');
+      var clean = sanitizeJsonValue(raw);
+      return JSON.stringify(clean, null, 2);
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function extractCountSection(pane) {
+    var parts = [];
+    var metrics = metricsToText(pane);
+    if (metrics) parts.push('Μετρήσεις:\n' + metrics);
+    var synTbl = pane.querySelector('table.cnt-synoptiko-table');
+    if (synTbl && synTbl.offsetParent !== null) {
+      parts.push('Συνοπτική καταμέτρηση:\n' + tableToText(synTbl, 250));
+      return parts.join('\n\n');
+    }
+    var synBody = document.getElementById('cnt-synoptiko-body');
+    if (synBody) {
+      var built = synBody.querySelector('table.cnt-synoptiko-table');
+      if (built) {
+        parts.push('Συνοπτική καταμέτρηση:\n' + tableToText(built, 250));
+        return parts.join('\n\n');
+      }
+    }
+    var cdf = jsonScriptToText('atlas-count-cdf-metrics-json');
+    if (cdf) parts.push('Συνοπτικά metrics (JSON):\n' + cdf);
+    var totRows = pane.querySelectorAll('tr.total-row, tr.count-year-total, .year-heading');
+    if (totRows.length) {
+      var lines = [];
+      totRows.forEach(function (el) {
+        var t = cleanCellText(el);
+        if (t) lines.push(t);
+      });
+      if (lines.length) parts.push('Σύνολα ετών / γραμμές συνόλων:\n' + lines.slice(0, 200).join('\n'));
+    } else {
+      var tbl = pane.querySelector('table.print-table');
+      if (tbl) parts.push('Πίνακας (περικομμένος):\n' + tableToText(tbl, 80));
+    }
+    return parts.join('\n\n');
+  }
+
+  function extractPane(tid) {
+    var pane = document.getElementById('pane-' + tid);
+    if (!pane) return '';
+    if (tid === 'synopsis') return synopsisToText(pane);
+    if (tid === 'count' || tid === 'eipr') {
+      var base = extractCountSection(pane);
+      if (tid === 'eipr') {
+        var ej = jsonScriptToText('atlas-eipr-cdf-metrics-json');
+        if (ej) base = (base ? base + '\n\n' : '') + 'EIPR metrics JSON:\n' + ej;
+      }
+      return base;
+    }
+    if (tid === 'syntaksi' || tid === 'syntaksipar') {
+      var parts = [];
+      var m = metricsToText(pane);
+      if (m) parts.push('Μετρήσεις:\n' + m);
+      var pfx = tid === 'syntaksipar' ? 'syntaksipar' : 'syntaksi';
+      var j = jsonScriptToText('atlas-' + pfx + '-data-json');
+      if (j) parts.push('Δεδομένα JSON (ανώνυμα πεδία):\n' + j);
+      var tbl = pane.querySelector('table.print-table');
+      if (tbl) parts.push('Πίνακας (περικομμένος):\n' + tableToText(tbl, 120));
+      return parts.join('\n\n');
+    }
+    if (tid === 'apd') {
+      var partsA = [];
+      var mA = metricsToText(pane);
+      if (mA) partsA.push('Μετρήσεις:\n' + mA);
+      var aj = jsonScriptToText('atlas-apd-data-json');
+      if (aj) partsA.push('ΑΠΔ JSON (ανώνυμα πεδία):\n' + aj);
+      var tblA = pane.querySelector('table.print-table');
+      if (tblA) partsA.push('Πίνακας (περικομμένος):\n' + tableToText(tblA, 120));
+      return partsA.join('\n\n');
+    }
+    var partsG = [];
+    var mG = metricsToText(pane);
+    if (mG) partsG.push('Μετρήσεις:\n' + mG);
+    var tables = pane.querySelectorAll('table.print-table');
+    for (var i = 0; i < tables.length; i++) {
+      var tx = tableToText(tables[i], 200);
+      if (tx) partsG.push(tx);
+    }
+    if (!partsG.length) {
+      var clone = pane.cloneNode(true);
+      clone.querySelectorAll('script, style, .section-actions, .filter-modal-group, .count-filters, .totals-filters, button, .atlas-tabinfo-btn').forEach(function (n) { n.remove(); });
+      var plain = cleanCellText(clone);
+      if (plain) partsG.push(plain.slice(0, 12000));
+    }
+    return partsG.join('\n\n');
+  }
+
+  function tabLabel(tid) {
+    if (typeof _atlasTabLabel === 'function') {
+      var l = _atlasTabLabel(tid);
+      if (l) return l;
+    }
+    var map = {
+      synopsis: 'Σύνοψη', totals: 'Σύνολα', gaps: 'Κενά', parallel: 'Παράλληλη',
+      parallel2017: 'Παράλληλη 2017+', multi: 'Πολλαπλή', count: 'Καταμέτρηση',
+      syntaksi: 'Συντάξιμες', syntaksipar: 'Συντάξιμες (παράλληλη)', apd: 'ΑΠΔ', eipr: 'EIPR'
+    };
+    return map[tid] || tid;
+  }
+
+  function buildAiDataText() {
+    var today = new Date();
+    var ds = today.toISOString().slice(0, 10);
+    var pack = editionIsPro() ? 'Pro' : 'Κανονικό';
+    var lines = [];
+    lines.push('ATLAS — Ανώνυμα δεδομένα για AI');
+    lines.push('Ημερομηνία εξαγωγής: ' + ds);
+    lines.push('Πακέτο: ' + pack);
+    lines.push('ΣΗΜΑΝΤΙΚΟ: Το αρχείο δεν πρέπει να περιέχει προσωπικά στοιχεία. Αν δείτε όνομα/ΑΜΚΑ/ΑΦΜ, αγνοήστε τα.');
+    lines.push('');
+    var ids = aiTabIds();
+    var any = false;
+    for (var i = 0; i < ids.length; i++) {
+      var tid = ids[i];
+      var body = extractPane(tid);
+      if (!body || !String(body).trim()) continue;
+      any = true;
+      lines.push('===== ' + tabLabel(tid).toUpperCase() + ' =====');
+      lines.push(stripPiiText(body).trim());
+      lines.push('');
+    }
+    if (!any) {
+      lines.push('(Δεν βρέθηκαν διαθέσιμες καρτέλες αποτελεσμάτων για εξαγωγή.)');
+    }
+    return lines.join('\n');
+  }
+
+  function buildAiPromptsText() {
+    var lines = [];
+    lines.push('ATLAS — Έτοιμα prompts για AI (ανώνυμη χρήση)');
+    lines.push('Οδηγία: Ανεβάστε πρώτα το αρχείο δεδομένων ATLAS_AI_data_anon_*.txt και μετά επικολλήστε ένα από τα παρακάτω prompts.');
+    lines.push('');
+    AI_PROMPTS.forEach(function (p, idx) {
+      lines.push((idx + 1) + ') ' + p.title);
+      lines.push(p.text);
+      lines.push('');
+    });
+    return lines.join('\n');
+  }
+
+  window.downloadAtlasAiData = function () {
+    var text = buildAiDataText();
+    var ds = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    downloadTextFile('ATLAS_AI_data_anon_' + ds + '.txt', text);
+    if (typeof showToast === 'function') showToast('Λήφθηκαν ανώνυμα δεδομένα για AI.');
+  };
+
+  window.downloadAtlasAiPrompts = function () {
+    downloadTextFile('ATLAS_AI_prompts.txt', buildAiPromptsText());
+    if (typeof showToast === 'function') showToast('Λήφθηκαν τα έτοιμα prompts.');
+  };
+
+  function copyPrompt(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        if (typeof showToast === 'function') showToast('Το prompt αντιγράφηκε.');
+      }).catch(function () {
+        fallbackCopy(text);
+      });
+    } else {
+      fallbackCopy(text);
+    }
+  }
+
+  function fallbackCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); if (typeof showToast === 'function') showToast('Το prompt αντιγράφηκε.'); }
+    catch (e) {}
+    document.body.removeChild(ta);
+  }
+
+  function renderPromptList() {
+    var mount = document.getElementById('tools-ai-prompts-list');
+    if (!mount || mount.getAttribute('data-atlas-ai-ready') === '1') return;
+    mount.setAttribute('data-atlas-ai-ready', '1');
+    AI_PROMPTS.forEach(function (p) {
+      var card = document.createElement('div');
+      card.className = 'tools-ai-prompt';
+      var h = document.createElement('p');
+      h.className = 'tools-ai-prompt-title';
+      h.textContent = p.title;
+      var t = document.createElement('p');
+      t.className = 'tools-ai-prompt-text';
+      t.textContent = p.text;
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'tools-ai-prompt-copy';
+      b.textContent = 'Αντιγραφή prompt';
+      b.addEventListener('click', function () { copyPrompt(p.text); });
+      card.appendChild(h);
+      card.appendChild(t);
+      card.appendChild(b);
+      mount.appendChild(card);
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    renderPromptList();
+    var ov = document.getElementById('tools-modal-overlay');
+    if (!ov || ov._atlasToolsInited) return;
+    ov._atlasToolsInited = true;
+    ov.addEventListener('click', function (e) {
+      if (e.target === ov) closeToolsModal();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && ov.classList.contains('is-open')) closeToolsModal();
+    });
+  });
+})();
 """
 
 LITE_FILTER_MODAL_HTML = """
