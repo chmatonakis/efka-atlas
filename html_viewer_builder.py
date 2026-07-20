@@ -2636,6 +2636,304 @@ def _count_unified_to_per_year_html(html: str) -> str:
     return html[: m.start()] + "".join(sections) + html[m.end():]
 
 
+def _count_synoptiko_btn_html():
+    """Κουμπί εναλλαγής αναλυτικού ↔ συνοπτικού πίνακα (γραμμή φίλτρων)."""
+    return (
+        '<div class="cnt-grid-synoptiko">'
+        '<button type="button" class="count-synoptiko-btn" id="cnt-synoptiko-toggle" '
+        'aria-pressed="false" data-cnt-view="analytic" '
+        'title="Εναλλαγή αναλυτικού / συνοπτικού πίνακα">'
+        'Συνοπτικός πίνακας</button>'
+        '</div>'
+    )
+
+
+def _count_synoptiko_panel_html():
+    """Panel συνοπτικού πίνακα (κρυφό· εμφανίζεται με εναλλαγή προβολής)."""
+    return (
+        '<div id="cnt-synoptiko-panel" class="cnt-synoptiko-panel" hidden aria-hidden="true">'
+        '<div id="cnt-synoptiko-body" class="cnt-synoptiko-body">'
+        '<div class="cnt-synoptiko-empty">Δεν υπάρχουν δεδομένα για εμφάνιση.</div>'
+        '</div></div>'
+    )
+
+
+def _build_count_synoptiko_js():
+    """JS: εναλλαγή αναλυτικού/συνοπτικού πίνακα· ο συνοπτικός ακολουθεί τα φίλτρα."""
+    return r"""
+(function(){
+  var sec=document.getElementById('count-section');
+  if(!sec)return;
+  var toggleBtn=document.getElementById('cnt-synoptiko-toggle');
+  var panel=document.getElementById('cnt-synoptiko-panel');
+  var bodyEl=document.getElementById('cnt-synoptiko-body');
+  var analyticWrap=document.getElementById('count-analytic-wrap');
+  if(!toggleBtn||!panel||!bodyEl||!analyticWrap)return;
+
+  var synMode=false;
+
+  function insKindCls(typos){
+    var s=String(typos||'').trim().toUpperCase().replace(/\s+/g,' ');
+    if(!s)return null;
+    if(/ΜΗ\s*ΜΙΣΘΩΤ/.test(s))return 'ΜΗ ΜΙΣΘΩΤΗ';
+    if(s.indexOf('NON')!==-1&&s.indexOf('SAL')!==-1)return 'ΜΗ ΜΙΣΘΩΤΗ';
+    if(s.indexOf('ΜΙΣΘΩΤΗ')!==-1&&s.indexOf('ΜΗ ΜΙΣΘΩΤΗ')===-1&&s.indexOf('ΜΗ ')!==0)return 'ΜΙΣΘΩΤΗ';
+    return null;
+  }
+  function capForT(t){
+    var u=String(t||'').toUpperCase();
+    return (u.indexOf('ΙΚΑ')!==-1||u.indexOf('IKA')!==-1)?31:25;
+  }
+  function liteCollectChecked(key){
+    var out=[],seen={};
+    function add(cb){
+      if(!cb||cb.type!=='checkbox'||!cb.checked)return;
+      if((cb.getAttribute('data-attr')||'')!==key)return;
+      if(seen[cb.value])return;seen[cb.value]=1;out.push(cb.value);
+    }
+    sec.querySelectorAll('.filter-modal-group[data-filter-key="'+key+'"] input[type="checkbox"]').forEach(add);
+    var m=document.getElementById('lite-filter-modal-options-mount');
+    if(m)m.querySelectorAll('input[type="checkbox"]').forEach(add);
+    return out;
+  }
+  function cntMonthIntFromInput(id,fallback,isEnd){
+    var el=document.getElementById(id);var s=el&&el.value?String(el.value).trim():'';
+    if(!s)return fallback;
+    var m3=s.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/);
+    if(m3){var mo=parseInt(m3[2],10),y=parseInt(m3[3],10);if(mo>=1&&mo<=12)return y*100+mo;}
+    var m2=s.match(/^(\d{1,2})[./](\d{4})$/);
+    if(m2){var mo2=parseInt(m2[1],10),y2=parseInt(m2[2],10);if(mo2>=1&&mo2<=12)return y2*100+mo2;}
+    var yOnly=parseInt(s,10);
+    if(!isNaN(yOnly)&&yOnly>=1000&&yOnly<=9999)return isEnd?(yOnly*100+12):(yOnly*100+1);
+    return fallback;
+  }
+  function cntMonthInRange(y,m,fromM,toM){
+    var key=(parseInt(y,10)||0)*100+(parseInt(m,10)||0);
+    return key>=fromM&&key<=toM;
+  }
+  function esc(s){
+    return String(s==null?'':s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;');
+  }
+  function fmtDays(n){
+    if(!n||Math.abs(n)<1e-9)return '';
+    return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+  }
+  function fmtMoney(n){
+    if(!n||Math.abs(n)<1e-9)return '';
+    var neg=n<0;var a=Math.abs(n);
+    var p=a.toFixed(2).split('.');
+    var whole=p[0].replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+    return (neg?'-':'')+whole+','+p[1]+' €';
+  }
+  function yearFundKindDays(rows,year,tameio,kindCode){
+    var sub=rows.filter(function(r){
+      return r.y===year&&String(r.t||'')===tameio&&insKindCls(r.k)===kindCode;
+    });
+    if(!sub.length)return 0;
+    var byM={};
+    sub.forEach(function(r){
+      var mi=parseInt(r.m,10);
+      byM[mi]=(byM[mi]||0)+(+r.d||0);
+    });
+    var cap=capForT(tameio),s=0;
+    Object.keys(byM).forEach(function(mi){
+      var raw=byM[mi];s+=raw<cap?raw:cap;
+    });
+    return s;
+  }
+  function yearFundKindMoney(rows,year,tameio,kindCode,field){
+    var s=0;
+    rows.forEach(function(r){
+      if(r.y!==year)return;
+      if(String(r.t||'')!==tameio)return;
+      if(insKindCls(r.k)!==kindCode)return;
+      s+=(+r[field]||0);
+    });
+    return s;
+  }
+  function yearFundKindPackages(rows,year,tameio,kindCode){
+    var seen={},list=[];
+    rows.forEach(function(r){
+      if(r.y!==year)return;
+      if(String(r.t||'')!==tameio)return;
+      if(insKindCls(r.k)!==kindCode)return;
+      var p=String(r.p||'').trim();
+      if(!p)return;
+      if(!(+r.d||0)&&!(+r.g||0)&&!(+r.c||0))return;
+      if(seen[p])return;seen[p]=1;list.push(p);
+    });
+    list.sort(function(a,b){return a.localeCompare(b,'el');});
+    return list.join(', ');
+  }
+  function isTsmede(tameio){
+    var u=String(tameio||'').toUpperCase();
+    return u.indexOf('ΤΣΜΕΔΕ')!==-1||u.indexOf('TSMEDE')!==-1;
+  }
+  /** ΤΣΜΕΔΕ: πάντα ΕΙΣΦΟΡΕΣ (ακόμα και σε ΜΙΣΘΩΤΗ)· αλλιώς ΜΙΣΘΩΤΗ→αποδοχές, ΜΗ ΜΙΣΘΩΤΗ→εισφορές. */
+  function synUsesEisfores(c){
+    if(isTsmede(c.tameio))return true;
+    return c.kind!=='ΜΙΣΘΩΤΗ';
+  }
+  function getFilteredRows(){
+    var je=document.getElementById('atlas-count-cdf-metrics-json');
+    var payload={rows:[]};
+    try{payload=JSON.parse((je&&je.textContent)||'{}');}catch(e){}
+    var allRows=payload.rows||[];
+    var f={
+      tameio:liteCollectChecked('tameio'),
+      typos:liteCollectChecked('typos'),
+      employer:liteCollectChecked('employer'),
+      klados:liteCollectChecked('klados'),
+      apodoxes:liteCollectChecked('apodoxes')
+    };
+    var fromM=cntMonthIntFromInput('cnt-filter-from',0,false);
+    var toM=cntMonthIntFromInput('cnt-filter-to',999912,true);
+    return allRows.filter(function(r){
+      if(!cntMonthInRange(r.y,r.m,fromM,toM))return false;
+      if(f.tameio.length&&f.tameio.indexOf(r.t)===-1)return false;
+      if(f.typos.length&&f.typos.indexOf(r.k)===-1)return false;
+      if(f.employer.length&&f.employer.indexOf(r.e)===-1)return false;
+      if(f.klados.length&&f.klados.indexOf(r.p)===-1)return false;
+      if(f.apodoxes.length&&f.apodoxes.indexOf(r.a)===-1)return false;
+      return true;
+    });
+  }
+  function buildCols(rows){
+    var seen={},cols=[];
+    rows.forEach(function(r){
+      var kind=insKindCls(r.k);
+      if(!kind)return;
+      var t=String(r.t||'').trim();
+      if(!t)return;
+      if(!(+r.d||0))return;
+      var key=t+'\u0001'+kind;
+      var ym=(parseInt(r.y,10)||0)*100+(parseInt(r.m,10)||0);
+      if(!seen[key]){
+        seen[key]={tameio:t,kind:kind,firstYm:ym};
+        cols.push(seen[key]);
+      }else if(ym<seen[key].firstYm){
+        seen[key].firstYm=ym;
+      }
+    });
+    cols.sort(function(a,b){
+      if(a.firstYm!==b.firstYm)return a.firstYm-b.firstYm;
+      var ta=a.tameio.localeCompare(b.tameio,'el');
+      if(ta!==0)return ta;
+      if(a.kind===b.kind)return 0;
+      return a.kind==='ΜΙΣΘΩΤΗ'?-1:1;
+    });
+    return cols;
+  }
+  function renderTable(){
+    var rows=getFilteredRows();
+    var cols=buildCols(rows);
+    if(!cols.length){
+      bodyEl.innerHTML='<div class="cnt-synoptiko-empty">Δεν υπάρχουν δεδομένα για εμφάνιση με τα τρέχοντα φίλτρα.</div>';
+      return;
+    }
+    var yearsSet={};
+    rows.forEach(function(r){yearsSet[r.y]=1;});
+    var years=Object.keys(yearsSet).map(function(x){return parseInt(x,10);})
+      .filter(function(y){return !isNaN(y);}).sort(function(a,b){return a-b;});
+    if(!years.length){
+      bodyEl.innerHTML='<div class="cnt-synoptiko-empty">Δεν υπάρχουν δεδομένα για εμφάνιση με τα τρέχοντα φίλτρα.</div>';
+      return;
+    }
+    var yMin=years[0],yMax=years[years.length-1];
+    var allYears=[];
+    for(var y=yMin;y<=yMax;y++)allYears.push(y);
+
+    var h1='<tr><th class="cnt-synoptiko-year-h" rowspan="2">ΕΤΟΣ</th>';
+    cols.forEach(function(c){
+      h1+='<th colspan="3" class="cnt-synoptiko-group-h">'+esc(c.tameio)+' — '+esc(c.kind)+'</th>';
+    });
+    h1+='</tr>';
+    var h2='<tr>';
+    cols.forEach(function(c){
+      h2+='<th class="cnt-synoptiko-metric-h">ΠΑΚΕΤΟ</th>';
+      h2+='<th class="cnt-synoptiko-metric-h">ΗΜΕΡΕΣ</th>';
+      h2+='<th class="cnt-synoptiko-metric-h">'+(synUsesEisfores(c)?'ΕΙΣΦΟΡΕΣ':'ΜΙΚΤΕΣ ΑΠΟΔΟΧΕΣ')+'</th>';
+    });
+    h2+='</tr>';
+
+    var body='';
+    allYears.forEach(function(year){
+      body+='<tr><td class="cnt-synoptiko-year">'+year+'</td>';
+      cols.forEach(function(c){
+        var useEis=synUsesEisfores(c);
+        var days=yearFundKindDays(rows,year,c.tameio,c.kind);
+        var money=yearFundKindMoney(rows,year,c.tameio,c.kind,useEis?'c':'g');
+        var paketa=yearFundKindPackages(rows,year,c.tameio,c.kind);
+        var daysTxt=fmtDays(days);
+        var moneyTxt=fmtMoney(money);
+        var moneyLabel=useEis?'Εισφορές':'Αποδοχές';
+        body+='<td class="cnt-synoptiko-paketa'+(paketa?' copy-target':'')+'"'
+          +(paketa?' title="Κλικ για αντιγραφή (Πακέτο)"':'')+'>'+esc(paketa)+'</td>';
+        body+='<td class="cnt-synoptiko-num'+(daysTxt?' copy-target':'')+'"'
+          +(daysTxt?' title="Κλικ για αντιγραφή (Ημέρες)"':'')+'>'+esc(daysTxt)+'</td>';
+        body+='<td class="cnt-synoptiko-num'+(moneyTxt?' copy-target':'')+'"'
+          +(moneyTxt?' title="Κλικ για αντιγραφή ('+moneyLabel+')"':'')+'>'+esc(moneyTxt)+'</td>';
+      });
+      body+='</tr>';
+    });
+
+    bodyEl.innerHTML=(
+      '<div class="cnt-synoptiko-table-scroll">'
+      +'<table class="cnt-synoptiko-table print-table">'
+      +'<thead>'+h1+h2+'</thead>'
+      +'<tbody>'+body+'</tbody>'
+      +'</table></div>'
+    );
+    (function syncStickyHeaderTops(){
+      var tbl=bodyEl.querySelector('table.cnt-synoptiko-table');
+      if(!tbl)return;
+      var r1=tbl.querySelector('thead tr:nth-child(1)');
+      if(!r1)return;
+      var h=Math.ceil(r1.getBoundingClientRect().height)||40;
+      tbl.querySelectorAll('thead tr:nth-child(2) th').forEach(function(th){
+        th.style.top=h+'px';
+      });
+    })();
+  }
+  function setView(syn){
+    synMode=!!syn;
+    sec.classList.toggle('count-synoptiko-mode',synMode);
+    if(synMode){
+      analyticWrap.hidden=true;
+      analyticWrap.setAttribute('aria-hidden','true');
+      panel.hidden=false;
+      panel.setAttribute('aria-hidden','false');
+      toggleBtn.setAttribute('aria-pressed','true');
+      toggleBtn.setAttribute('data-cnt-view','synoptiko');
+      toggleBtn.textContent='Αναλυτικός πίνακας';
+      toggleBtn.title='Επιστροφή στον αναλυτικό πίνακα καταμέτρησης';
+      toggleBtn.classList.add('is-active');
+      renderTable();
+    }else{
+      panel.hidden=true;
+      panel.setAttribute('aria-hidden','true');
+      analyticWrap.hidden=false;
+      analyticWrap.setAttribute('aria-hidden','false');
+      toggleBtn.setAttribute('aria-pressed','false');
+      toggleBtn.setAttribute('data-cnt-view','analytic');
+      toggleBtn.textContent='Συνοπτικός πίνακας';
+      toggleBtn.title='Εναλλαγή αναλυτικού / συνοπτικού πίνακα';
+      toggleBtn.classList.remove('is-active');
+    }
+  }
+  toggleBtn.addEventListener('click',function(e){
+    e.preventDefault();
+    setView(!synMode);
+  });
+  window.addEventListener('atlas-count-filters-change',function(){
+    if(synMode)renderTable();
+  });
+})();
+"""
+
+
 def build_count_with_filters(count_display_df, print_style_rows, count_df,
                              description_map=None, disclaimer_html=None,
                              warning_types=None, display_summary=None,
@@ -2717,11 +3015,41 @@ def build_count_with_filters(count_display_df, print_style_rows, count_df,
         '<button type="button" class="filter-reset-btn" id="cnt-filter-reset" '
         'title="Επαναφορά φίλτρων" aria-label="Επαναφορά φίλτρων">&#x21bb;</button>'
     )
+    _cnt_synoptiko_btn = _count_synoptiko_btn_html()
+    # Compact γραμμή: πακέτο + presets + ετήσια/συνοπτικό.
+    # Από/Έως + Ταμείο / Τύπος / Εργοδότης / Αποδοχές / Αραιή → modal «Άλλα φίλτρα».
     filter_bar = (
         '<div class="count-filters" id="count-filters-bar">'
-        '<div class="count-filters-grid">'
-        f'{_cnt_dd_tameio}{_cnt_dd_typos}{_cnt_dd_employer}{_cnt_dd_klados}'
-        f'<div class="cnt-grid-apodox">{_cnt_apodoxes_dd}</div>'
+        '<div class="count-filters-grid count-filters-compact">'
+        f'{_cnt_dd_klados}'
+        '<div class="cnt-grid-row2">'
+        f'<div id="count-date-presets-bar" class="count-date-presets-bar cnt-grid-preset">{_cnt_preset_btns}</div>'
+        '<div class="cnt-grid-cbs count-filter-cb-stack">'
+        '<label class="filter-cb">'
+        '<input type="checkbox" id="cnt-totals-only"> Ετήσια σύνολα'
+        '</label>'
+        '</div>'
+        f'{_cnt_synoptiko_btn}'
+        '</div>'
+        '<div class="cnt-grid-extra">'
+        '<button type="button" class="cnt-extra-filters-btn" id="cnt-extra-filters-btn" '
+        'aria-haspopup="dialog" aria-controls="cnt-extra-filters-overlay" '
+        'title="Από/έως, ταμείο, τύπος ασφάλισης, εργοδότης, τύπος αποδοχών, αραιή">'
+        '<span class="cnt-extra-filters-btn-label">Άλλα φίλτρα</span>'
+        '<span class="filter-modal-badge" id="cnt-extra-filters-badge" hidden aria-hidden="true"></span>'
+        '</button>'
+        '</div>'
+        f'<div class="cnt-grid-reset">{_cnt_reset_btn}</div>'
+        '</div>'
+        '<div id="cnt-extra-filters-overlay" class="cnt-extra-filters-overlay" aria-hidden="true">'
+        '<div class="cnt-extra-filters-panel" role="dialog" aria-modal="true" '
+        'aria-labelledby="cnt-extra-filters-title">'
+        '<div class="cnt-extra-filters-head">'
+        '<h3 id="cnt-extra-filters-title">Άλλα φίλτρα</h3>'
+        '<button type="button" class="cnt-extra-filters-close" aria-label="Κλείσιμο">&times;</button>'
+        '</div>'
+        '<div class="cnt-extra-filters-body">'
+        '<div class="cnt-extra-filters-dates">'
         '<div class="cnt-grid-from">'
         '<input type="text" id="cnt-filter-from" class="filter-date" '
         'placeholder="01/2002" aria-label="Από (mm/yyyy)" autocomplete="off">'
@@ -2730,17 +3058,15 @@ def build_count_with_filters(count_display_df, print_style_rows, count_df,
         '<input type="text" id="cnt-filter-to" class="filter-date" '
         'placeholder="12/2026" aria-label="Έως (mm/yyyy)" autocomplete="off">'
         '</div>'
-        f'<div class="cnt-grid-reset">{_cnt_reset_btn}</div>'
-        '<div class="cnt-grid-row2">'
-        '<div class="cnt-grid-cbs count-filter-cb-stack">'
+        '</div>'
+        f'{_cnt_dd_tameio}{_cnt_dd_typos}{_cnt_dd_employer}'
+        f'<div class="cnt-grid-apodox">{_cnt_apodoxes_dd}</div>'
+        '<div class="cnt-extra-filters-cbs count-filter-cb-stack">'
         '<label class="filter-cb">'
         '<input type="checkbox" id="cnt-year-sparse"> Αραιή'
         '</label>'
-        '<label class="filter-cb">'
-        '<input type="checkbox" id="cnt-totals-only"> Ετήσια σύνολα'
-        '</label>'
         '</div>'
-        f'<div id="count-date-presets-bar" class="count-date-presets-bar cnt-grid-preset">{_cnt_preset_btns}</div>'
+        '</div>'
         '</div>'
         '</div>'
         '</div>'
@@ -2760,6 +3086,7 @@ def build_count_with_filters(count_display_df, print_style_rows, count_df,
 
     # Γραμμές c_df σε JSON: τα metrics στο HTML φιλτράρονται client-side όπως στην Κυρία
     # (ταμείο, τύπος ασφάλισης, εργοδότης, πακέτο, τύπος αποδοχών, έτος) — όχι μόνο πακέτα.
+    # g/c: μικτές/εισφορές για συνοπτικό πίνακα modal.
     cdf_metrics_payload_html = ""
     try:
         _c_df_exp = build_count_c_dataframe(count_df, desc_map)
@@ -2777,6 +3104,8 @@ def build_count_with_filters(count_display_df, print_style_rows, count_df,
                             "a": str(_r.get("ΤΥΠΟΣ ΑΠΟΔΟΧΩΝ", "") or ""),
                             "m": int(_r["Μήνας_Num"]),
                             "d": float(_r["Ημέρες"] or 0),
+                            "g": float(_r.get("Μικτές_Part") or 0),
+                            "c": float(_r.get("Εισφορές_Part") or 0),
                         }
                     )
                 except Exception:
@@ -2801,6 +3130,7 @@ def build_count_with_filters(count_display_df, print_style_rows, count_df,
         )
 
     js = _build_count_filter_js()
+    js_syn = _build_count_synoptiko_js()
 
     _count_info_sections = [
         (
@@ -2831,9 +3161,11 @@ def build_count_with_filters(count_display_df, print_style_rows, count_df,
         filters_html=filter_bar,
         body_html=(
             '<div id="count-tables-wrapper" class="count-layout-middle">'
-            f'{count_table_html}</div>'
+            f'<div id="count-analytic-wrap">{count_table_html}</div>'
+            f'{_count_synoptiko_panel_html()}'
+            '</div>'
         ),
-        scripts_html=f"<script>{js}</script>",
+        scripts_html=f"<script>{js}</script><script>{js_syn}</script>",
     )
 
 
@@ -3239,6 +3571,17 @@ def _build_count_filter_js():
     var sparseGap=document.getElementById('cnt-year-sparse')&&document.getElementById('cnt-year-sparse').checked;
     sec.classList.toggle('count-year-sparse', !!sparseGap);
     sec.classList.toggle('count-totals-only', !!totOnly);
+    var extraN=(f.tameio.length+f.typos.length+f.employer.length+f.apodoxes.length)+(sparseGap?1:0);
+    var fromElBadge=document.getElementById('cnt-filter-from');
+    var toElBadge=document.getElementById('cnt-filter-to');
+    if(fromElBadge&&(fromElBadge.value||'').trim())extraN+=1;
+    if(toElBadge&&(toElBadge.value||'').trim())extraN+=1;
+    var xb=document.getElementById('cnt-extra-filters-badge');
+    var xbtn=document.getElementById('cnt-extra-filters-btn');
+    if(xb){
+      if(extraN){xb.textContent=String(extraN);xb.hidden=false;xb.setAttribute('aria-hidden','false');if(xbtn)xbtn.classList.add('has-selection');}
+      else{xb.hidden=true;xb.textContent='';xb.setAttribute('aria-hidden','true');if(xbtn)xbtn.classList.remove('has-selection');}
+    }
 
     if(cTable){
       var cm=mapHeaders(cTable);
@@ -3489,6 +3832,33 @@ def _build_count_filter_js():
     if(!el)return;
     el.addEventListener('input',cntSyncPresetActiveFromInputs);
     el.addEventListener('change',cntSyncPresetActiveFromInputs);
+  });
+  var extraOv=document.getElementById('cnt-extra-filters-overlay');
+  var extraBtn=document.getElementById('cnt-extra-filters-btn');
+  function openCntExtra(){
+    if(!extraOv)return;
+    extraOv.classList.add('is-open');
+    extraOv.setAttribute('aria-hidden','false');
+    document.body.style.overflow='hidden';
+  }
+  function closeCntExtra(){
+    if(!extraOv)return;
+    extraOv.classList.remove('is-open');
+    extraOv.setAttribute('aria-hidden','true');
+    var liteOv=document.getElementById('lite-filter-modal-overlay');
+    if(!liteOv||!liteOv.classList.contains('is-open'))document.body.style.overflow='';
+  }
+  if(extraBtn)extraBtn.addEventListener('click',function(e){e.preventDefault();openCntExtra();});
+  if(extraOv){
+    var xClose=extraOv.querySelector('.cnt-extra-filters-close');
+    if(xClose)xClose.addEventListener('click',closeCntExtra);
+    extraOv.addEventListener('click',function(e){if(e.target===extraOv)closeCntExtra();});
+  }
+  document.addEventListener('keydown',function(e){
+    if(e.key!=='Escape'||!extraOv||!extraOv.classList.contains('is-open'))return;
+    var liteOv=document.getElementById('lite-filter-modal-overlay');
+    if(liteOv&&liteOv.classList.contains('is-open'))return;
+    closeCntExtra();
   });
   apply();
 })();
@@ -4090,8 +4460,10 @@ _EIPR_TAB_CSS_BASE = r"""
 .table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 { flex: 1 1 auto; min-width: 0; display: flex !important; flex-wrap: nowrap; align-items: center; gap: 12px 14px; margin: 0; padding: 0; order: 4; }
 .table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .count-date-presets-bar { order: 1; flex: 1 1 auto; min-width: 0; }
 .table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .cnt-grid-cbs { display: flex !important; flex: 0 0 auto; flex-shrink: 0; order: 2; margin: 0; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .cnt-grid-synoptiko { display: flex !important; flex: 0 0 auto; order: 3; }
 .table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .cnt-grid-cbs .filter-cb:has(#cnt-year-sparse) { display: none !important; }
 .table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .cnt-grid-cbs .filter-cb { font-size: 16px; white-space: nowrap; margin: 0; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .count-synoptiko-btn { padding: 10px 14px; font-size: 14px; }
 .table-fullscreen #count-section .count-filters-grid > .cnt-grid-reset { flex: 0 0 auto; order: 5; margin-left: auto; }
 .table-fullscreen #count-section .count-date-presets-bar { display: flex !important; flex-wrap: nowrap; gap: 10px; overflow-x: auto; overflow-y: hidden; min-width: 0; width: auto; margin: 0; padding: 0; grid-template-columns: unset; -webkit-overflow-scrolling: touch; }
 .table-fullscreen #count-section .count-preset-btn { flex: 0 0 auto; width: auto; min-width: 0; padding: 10px 14px; font-size: 14px; line-height: 1.25; font-weight: 600; white-space: nowrap; }
@@ -7864,8 +8236,53 @@ table.print-table.apd-table tbody tr.apd-total-row td.apd-total-label { text-ali
 table.print-table.apd-table tbody tr.apd-year-gap td { background: transparent !important; border: 0 !important; height: 10px; padding: 0; }
 table.print-table.apd-table tbody tr.apd-data-row td.apd-cut { color: #d9534f; font-weight: 700; }
 .apd-print-plafond { font-style: normal; font-weight: 600; color: #334155; }
+/* Συνοπτική καταμέτρηση — ίδιο στυλ εκτύπωσης με Συντάξιμες */
+.count-synoptiko-print .cnt-synoptiko-print-wrap { overflow: visible !important; width: 100%; margin-top: 2px; }
+.syntaksi-print.count-synoptiko-print table.print-table.cnt-synoptiko-table {
+  border-collapse: collapse; width: 100%; font-size: 8.5px; table-layout: auto; border: none;
+}
+.syntaksi-print.count-synoptiko-print table.print-table.cnt-synoptiko-table thead th {
+  position: static !important; top: auto !important; left: auto !important; z-index: auto !important;
+  background: #f3f4f6; border-bottom: 1px solid #d0d7de; border-right: none; padding: 4px 3px;
+  text-align: left !important; font-weight: 700; color: #111827; font-size: 7.5px; vertical-align: bottom;
+  white-space: normal; word-break: break-word; box-shadow: none !important;
+}
+.syntaksi-print.count-synoptiko-print table.print-table.cnt-synoptiko-table .cnt-synoptiko-group-h {
+  background: #dbeafe; color: #1e3a8a; text-align: left !important;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+.syntaksi-print.count-synoptiko-print table.print-table.cnt-synoptiko-table .cnt-synoptiko-metric-h {
+  background: #f8fafc; font-weight: 600; text-align: left !important;
+}
+.syntaksi-print.count-synoptiko-print table.print-table.cnt-synoptiko-table tbody td {
+  position: static !important; left: auto !important; border-bottom: 0.5px solid #e8eaed;
+  padding: 2px 3px; white-space: nowrap; font-size: 8.5px; box-shadow: none !important;
+  text-align: left !important;
+}
+.syntaksi-print.count-synoptiko-print table.print-table.cnt-synoptiko-table tbody tr:nth-child(even) td { background-color: #f9fafb; }
+.syntaksi-print.count-synoptiko-print table.print-table.cnt-synoptiko-table .cnt-synoptiko-year {
+  font-weight: 700; background: #fff; text-align: left !important;
+}
+.syntaksi-print.count-synoptiko-print table.print-table.cnt-synoptiko-table .cnt-synoptiko-num {
+  text-align: left !important; font-variant-numeric: tabular-nums; font-weight: 400 !important;
+}
+.syntaksi-print.count-synoptiko-print table.print-table.cnt-synoptiko-table .cnt-synoptiko-paketa {
+  text-align: left !important; white-space: normal; word-break: break-word; font-size: 7.5px; line-height: 1.25; font-weight: 400 !important;
+}
+.syntaksi-print.count-synoptiko-print .print-synt-summary .atlas-metrics-row--print { flex-wrap: wrap; gap: 10px 14px; justify-content: flex-start; }
+.syntaksi-print.count-synoptiko-print .print-synt-summary .atlas-metric-item { text-align: left !important; align-items: flex-start !important; }
+.syntaksi-print.count-synoptiko-print .print-synt-summary .atlas-metric-value { font-size: 18px; text-align: left !important; }
+.syntaksi-print.count-synoptiko-print .print-synt-summary .atlas-metric-label { font-size: 10px; white-space: normal; text-align: left !important; }
 table.print-table tbody td:nth-last-child(2),
 table.print-table tbody td:nth-last-child(3) { font-weight: 700 !important; }
+/* Συνοπτική: το γενικό nth-last-child bold δεν ισχύει (πολλές στήλες ανά ταμείο) */
+table.print-table.cnt-synoptiko-table tbody td:nth-last-child(2),
+table.print-table.cnt-synoptiko-table tbody td:nth-last-child(3),
+table.print-table.cnt-synoptiko-table tbody td.cnt-synoptiko-num,
+table.print-table.cnt-synoptiko-table tbody td.cnt-synoptiko-paketa {
+  font-weight: 400 !important;
+}
+table.print-table.cnt-synoptiko-table tbody td.cnt-synoptiko-year { font-weight: 700 !important; }
 table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { white-space: normal; word-break: break-word; }
 .year-section { margin-bottom: 10px; }
 .year-heading { font-size: 12px; font-weight: 800; padding: 4px 0 2px 0; border-bottom: 1.5px solid #6f42c1; margin-bottom: 3px; }
@@ -8510,30 +8927,16 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .count-layout .count-layout-bottom { display: none !important; }
 .table-fullscreen .atlas-tab-layout-top,
 .table-fullscreen .count-layout-top { display: none !important; }
-/* Καταμέτρηση full screen: πακέτα + ημερομηνίες (custom + presets) σε μία γραμμή */
+/* Καταμέτρηση full screen: ίδια compact γραμμή φίλτρων με κανονική προβολή */
 .table-fullscreen #count-section > .atlas-tab-layout-top { display: block !important; flex-shrink: 0; padding: 12px 20px 14px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
 .table-fullscreen #count-section > .atlas-tab-layout-top > *:not(#count-filters-bar) { display: none !important; }
 .table-fullscreen #count-section #count-filters-bar.count-filters { display: block !important; margin: 0; padding: 0; background: transparent; border: none; border-radius: 0; }
-.table-fullscreen #count-section .count-filters-grid { display: flex !important; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 12px 14px; }
-.table-fullscreen #count-section .count-filters-grid > * { grid-column: auto !important; grid-row: auto !important; }
-.table-fullscreen #count-section .count-filters-grid > .filter-modal-group:not([data-filter-key="klados"]),
-.table-fullscreen #count-section .count-filters-grid > .cnt-grid-apodox { display: none !important; }
-.table-fullscreen #count-section .count-filters-grid > .filter-modal-group[data-filter-key="klados"] { flex: 0 1 300px; min-width: 200px; max-width: 340px; order: 1; }
-.table-fullscreen #count-section .count-filters-grid > .filter-modal-group[data-filter-key="klados"] .filter-selected-label { display: none; }
-.table-fullscreen #count-section .count-filters-grid > .cnt-grid-from { flex: 0 0 132px; min-width: 120px; order: 2; }
-.table-fullscreen #count-section .count-filters-grid > .cnt-grid-to { flex: 0 0 132px; min-width: 120px; order: 3; }
-.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 { flex: 1 1 auto; min-width: 0; display: flex !important; flex-wrap: nowrap; align-items: center; gap: 12px 14px; margin: 0; padding: 0; order: 4; }
-.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .count-date-presets-bar { order: 1; flex: 1 1 auto; min-width: 0; }
-.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .cnt-grid-cbs { display: flex !important; flex: 0 0 auto; flex-shrink: 0; order: 2; margin: 0; }
-.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .cnt-grid-cbs .filter-cb:has(#cnt-year-sparse) { display: none !important; }
-.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .cnt-grid-cbs .filter-cb { font-size: 16px; white-space: nowrap; margin: 0; }
-.table-fullscreen #count-section .count-filters-grid > .cnt-grid-reset { flex: 0 0 auto; order: 5; margin-left: auto; }
-.table-fullscreen #count-section .count-date-presets-bar { display: flex !important; flex-wrap: nowrap; gap: 10px; overflow-x: auto; overflow-y: hidden; min-width: 0; width: auto; margin: 0; padding: 0; grid-template-columns: unset; -webkit-overflow-scrolling: touch; }
-.table-fullscreen #count-section .count-preset-btn { flex: 0 0 auto; width: auto; min-width: 0; padding: 10px 14px; font-size: 14px; line-height: 1.25; font-weight: 600; white-space: nowrap; }
+.table-fullscreen #count-section .count-filters-grid.count-filters-compact { display: flex !important; flex-wrap: nowrap; }
 .table-fullscreen #count-section .count-filters .filter-date { padding: 10px 14px; font-size: 16px; }
 .table-fullscreen #count-section .count-filters .filter-modal-trigger { padding: 10px 14px; font-size: 16px; }
 .table-fullscreen #count-section .count-filters .filter-modal-badge { min-width: 24px; height: 24px; line-height: 24px; font-size: 13px; }
 .table-fullscreen #count-section .count-filters-grid > .cnt-grid-reset .filter-reset-btn { margin-left: 0; padding: 10px 14px; font-size: 22px; }
+.table-fullscreen #count-section .count-filters-grid > .cnt-grid-row2 .count-synoptiko-btn { padding: 10px 14px; font-size: 14px; }
 /* Ειδική Προσαύξηση full screen: ίδια γραμμή φίλτρων με Καταμέτρηση (χωρίς Ταμείο) */
 .table-fullscreen #eipr-section > .atlas-tab-layout-top { display: block !important; flex-shrink: 0; padding: 12px 20px 14px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
 .table-fullscreen #eipr-section > .atlas-tab-layout-top > *:not(#eipr-filters-bar) { display: none !important; }
@@ -8687,6 +9090,25 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .has-apodoxes-tooltip { cursor: help; }
 .cell-description { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
 @media print { .section-actions { display: none !important; } .btn-fs { display: none !important; } .btn-print-tab { display: none !important; } .apodoxes-tooltip { display: none !important; } #tl-paketo-tooltip { display: none !important; } .totals-filters { display: none !important; } .count-filters { display: none !important; } .count-date-presets-bar { display: none !important; } .totals-info-bar { display: none !important; } .syntaksi-metrics.totals-info-bar { display: flex !important; } .totals-exceeded-wrap, .totals-exceeded-modal-overlay { display: none !important; } .lite-filter-modal-overlay { display: none !important; } .complex-file-warning { display: none !important; } .atlas-tabinfo-btn { display: none !important; } .complex-file-readmore-btn { display: none !important; } .lite-exclusion-note { display: none !important; } .tl-zoom-controls { display: none !important; } #tl-zoom-inner, #tl-paketo-zoom-inner { transform: none !important; } .tl-zoom-wrapper, .tl-paketo-zoom-scroll { overflow-x: hidden !important; } .personal-form { display: none !important; } .personal-notes { display: none !important; } .synopsis-modal-overlay, .synopsis-expand-btn { display: none !important; } }
+@media print {
+  #count-section.count-synoptiko-mode #count-analytic-wrap { display: none !important; }
+  #count-section.count-synoptiko-mode #cnt-synoptiko-panel[hidden] { display: block !important; }
+  #count-section.count-synoptiko-mode #cnt-synoptiko-panel,
+  #count-section.count-synoptiko-mode .cnt-synoptiko-body,
+  #count-section.count-synoptiko-mode .cnt-synoptiko-table-scroll,
+  #count-section.count-synoptiko-mode #count-tables-wrapper {
+    display: block !important; overflow: visible !important; height: auto !important; max-height: none !important;
+    flex: none !important; min-height: 0 !important; position: static !important;
+  }
+  #count-section.count-synoptiko-mode .cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table {
+    width: 100% !important; min-width: 0 !important;
+  }
+  #count-section.count-synoptiko-mode .cnt-synoptiko-table-scroll thead th,
+  #count-section.count-synoptiko-mode .cnt-synoptiko-year {
+    position: static !important; top: auto !important; left: auto !important; box-shadow: none !important;
+  }
+  #count-section.count-synoptiko-mode #count-kind-metrics-wrap { display: flex !important; }
+}
 .year-section { margin-bottom: 20px; }
 .year-heading { font-size: 15px; font-weight: 800; color: #1e293b; padding: 8px 0 4px 0; border-bottom: 2px solid #6366f1; margin-bottom: 6px; }
 .print-disclaimer { font-size: 12px; color: #64748b; margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; line-height: 1.6; }
@@ -8913,18 +9335,293 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .totals-filters .filter-modal-trigger-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .totals-filters .filter-modal-badge { flex-shrink: 0; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; background: #6366f1; color: #fff; font-size: 12px; font-weight: 700; line-height: 22px; text-align: center; }
 .count-filters { margin-bottom: 20px; padding: 16px 20px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
-.count-filters-grid { display: grid; grid-template-columns: minmax(138px, 0.92fr) minmax(138px, 0.92fr) minmax(138px, 0.92fr) minmax(182px, 1.28fr) minmax(158px, 1.02fr) 118px 118px auto; grid-template-rows: auto auto; gap: 12px 14px; align-items: start; }
-.count-filters-grid > .filter-modal-group:nth-child(1) { grid-column: 1; grid-row: 1; }
-.count-filters-grid > .filter-modal-group:nth-child(2) { grid-column: 2; grid-row: 1; }
-.count-filters-grid > .filter-modal-group:nth-child(3) { grid-column: 3; grid-row: 1; }
-.count-filters-grid > .filter-modal-group:nth-child(4) { grid-column: 4; grid-row: 1; }
-.count-filters-grid > .cnt-grid-apodox { grid-column: 5; grid-row: 1; min-width: 0; }
-.count-filters-grid > .cnt-grid-from { grid-column: 6; grid-row: 1; min-width: 0; }
-.count-filters-grid > .cnt-grid-to { grid-column: 7; grid-row: 1; min-width: 0; }
-.count-filters-grid > .cnt-grid-reset { grid-column: 8; grid-row: 1; justify-self: end; align-self: center; }
-.count-filters-grid > .cnt-grid-row2 { grid-column: 1 / -1; grid-row: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; }
-.count-filters-grid > .cnt-grid-row2 .cnt-grid-cbs { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 16px 24px; align-items: center; flex-shrink: 0; }
-.count-filters-grid > .cnt-grid-row2 .count-date-presets-bar { flex: 1 1 520px; min-width: 0; }
+/* Καταμέτρηση: ίδια compact γραμμή με fullscreen (πακέτο + ημερομηνίες + presets) */
+#count-section .count-filters-grid.count-filters-compact,
+.count-filters-grid.count-filters-compact {
+  display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 12px 14px;
+}
+#count-section .count-filters-grid.count-filters-compact > .filter-modal-group[data-filter-key="klados"],
+.count-filters-grid.count-filters-compact > .filter-modal-group[data-filter-key="klados"] {
+  flex: 0 1 300px; min-width: 200px; max-width: 340px; order: 1;
+}
+#count-section .count-filters-grid.count-filters-compact > .filter-modal-group[data-filter-key="klados"] .filter-selected-label,
+.count-filters-grid.count-filters-compact > .filter-modal-group[data-filter-key="klados"] .filter-selected-label { display: none; }
+#count-section .count-filters-grid.count-filters-compact > .cnt-grid-row2,
+.count-filters-grid.count-filters-compact > .cnt-grid-row2 {
+  flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: nowrap; align-items: center; gap: 12px 14px; margin: 0; padding: 0; order: 2;
+}
+#count-section .count-filters-grid.count-filters-compact > .cnt-grid-row2 .count-date-presets-bar,
+.count-filters-grid.count-filters-compact > .cnt-grid-row2 .count-date-presets-bar {
+  order: 1; flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: nowrap; gap: 10px; overflow-x: auto; overflow-y: hidden;
+  width: auto; margin: 0; padding: 0; grid-template-columns: unset; -webkit-overflow-scrolling: touch;
+}
+#count-section .count-filters-grid.count-filters-compact > .cnt-grid-row2 .cnt-grid-cbs,
+.count-filters-grid.count-filters-compact > .cnt-grid-row2 .cnt-grid-cbs {
+  display: flex; flex: 0 0 auto; flex-shrink: 0; flex-direction: row; flex-wrap: nowrap; gap: 12px 14px; align-items: center; order: 2; margin: 0;
+}
+#count-section .count-filters-grid.count-filters-compact > .cnt-grid-row2 .cnt-grid-synoptiko,
+.count-filters-grid.count-filters-compact > .cnt-grid-row2 .cnt-grid-synoptiko { display: flex; flex: 0 0 auto; align-items: center; order: 3; }
+#count-section .count-filters-grid.count-filters-compact > .cnt-grid-row2 .cnt-grid-cbs .filter-cb,
+.count-filters-grid.count-filters-compact > .cnt-grid-row2 .cnt-grid-cbs .filter-cb { font-size: 16px; white-space: nowrap; margin: 0; }
+#count-section .count-filters-grid.count-filters-compact > .cnt-grid-extra,
+.count-filters-grid.count-filters-compact > .cnt-grid-extra { flex: 0 0 auto; order: 3; display: flex; align-items: center; }
+#count-section .count-filters-grid.count-filters-compact > .cnt-grid-reset,
+.count-filters-grid.count-filters-compact > .cnt-grid-reset { flex: 0 0 auto; order: 4; margin-left: auto; }
+#count-section .count-filters-grid.count-filters-compact .count-preset-btn,
+.count-filters-grid.count-filters-compact .count-preset-btn {
+  flex: 0 0 auto; width: auto; min-width: 0; padding: 10px 14px; font-size: 14px; line-height: 1.25; font-weight: 600; white-space: nowrap;
+}
+.cnt-extra-filters-btn {
+  display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; min-height: 42px; box-sizing: border-box;
+  background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 15px; font-weight: 600; font-family: inherit;
+  color: #334155; cursor: pointer; white-space: nowrap; transition: border-color .15s, background .15s, color .15s;
+}
+.cnt-extra-filters-btn:hover { border-color: #6366f1; color: #4f46e5; background: #eef2ff; }
+.cnt-extra-filters-btn.has-selection { border-color: #6366f1; background: #eef2ff; color: #4338ca; }
+.cnt-extra-filters-overlay {
+  position: fixed; inset: 0; z-index: 10050; display: flex; align-items: center; justify-content: center;
+  padding: 24px 16px; background: rgba(15, 23, 42, 0.55); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.25s ease, visibility 0.25s ease;
+}
+.table-fullscreen .cnt-extra-filters-overlay { z-index: 10050; }
+.cnt-extra-filters-overlay.is-open { opacity: 1; visibility: visible; pointer-events: auto; }
+.cnt-extra-filters-panel {
+  width: min(560px, 100%); max-height: min(85vh, 720px); display: flex; flex-direction: column; background: #fff;
+  border-radius: 16px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(148, 163, 184, 0.15);
+  overflow: hidden; transform: scale(0.96) translateY(12px); transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.cnt-extra-filters-overlay.is-open .cnt-extra-filters-panel { transform: scale(1) translateY(0); }
+.cnt-extra-filters-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 20px 24px 16px;
+  border-bottom: 1px solid #e2e8f0; background: linear-gradient(180deg, #eef2ff 0%, #fff 100%); flex-shrink: 0;
+}
+.cnt-extra-filters-head h3 { margin: 0; font-size: 22px; font-weight: 800; color: #1e293b; line-height: 1.3; }
+.cnt-extra-filters-close {
+  flex-shrink: 0; width: 44px; height: 44px; border: none; border-radius: 10px; background: #e0e7ff; color: #4338ca;
+  font-size: 32px; line-height: 1; cursor: pointer; transition: background 0.2s, color 0.2s;
+}
+.cnt-extra-filters-close:hover { background: #c7d2fe; color: #312e81; }
+.cnt-extra-filters-body {
+  flex: 1; min-height: 0; overflow: auto; padding: 20px 24px 24px; display: flex; flex-direction: column; gap: 14px;
+  -webkit-overflow-scrolling: touch;
+}
+.cnt-extra-filters-dates {
+  display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 12px; width: 100%;
+}
+.cnt-extra-filters-dates > .cnt-grid-from,
+.cnt-extra-filters-dates > .cnt-grid-to { flex: 1 1 0; min-width: 0; }
+.cnt-extra-filters-dates .filter-date { width: 100%; box-sizing: border-box; }
+.cnt-extra-filters-body > .filter-modal-group,
+.cnt-extra-filters-body > .cnt-grid-apodox { width: 100%; min-width: 0; }
+.cnt-extra-filters-body .filter-modal-trigger { width: 100%; }
+.cnt-extra-filters-body .filter-selected-label { margin-top: 6px; }
+.cnt-extra-filters-cbs { padding-top: 4px; }
+@media print { .cnt-extra-filters-overlay { display: none !important; } }
+.count-synoptiko-btn {
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  line-height: 1.25;
+  white-space: nowrap;
+  color: #1e40af;
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.count-synoptiko-btn:hover { background: #dbeafe; border-color: #60a5fa; color: #1d4ed8; }
+.count-synoptiko-btn.is-active {
+  background: #1d4ed8;
+  border-color: #1e40af;
+  color: #fff;
+}
+.count-synoptiko-btn.is-active:hover { background: #1e40af; border-color: #1e3a8a; color: #fff; }
+#count-section.count-synoptiko-mode #count-analytic-wrap { display: none !important; }
+#count-section:not(.count-synoptiko-mode) #cnt-synoptiko-panel { display: none !important; }
+/* Ένα μόνο scroll context ώστε sticky κεφαλίδες + στήλη ΕΤΟΣ να δουλεύουν ίδια σε κανονική & fullscreen */
+#count-section.count-synoptiko-mode #count-tables-wrapper.count-layout-middle {
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+.cnt-synoptiko-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #fff;
+}
+.cnt-synoptiko-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0 2px 8px;
+}
+.cnt-synoptiko-empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: #64748b;
+  font-size: 15px;
+}
+.cnt-synoptiko-table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  max-height: none;
+  height: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+.cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate !important;
+  border-spacing: 0;
+  overflow: visible !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  font-size: 16px;
+  background: #fff;
+}
+.cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table thead th {
+  position: sticky;
+  background: #f8fafc;
+  border-bottom: 1px solid #cbd5e1;
+  border-right: 1px solid #e2e8f0;
+  padding: 10px 12px;
+  font-weight: 700;
+  color: #1e293b;
+  text-align: left;
+  white-space: nowrap;
+  font-size: 15px;
+  z-index: 3;
+  box-shadow: 0 1px 0 #cbd5e1;
+}
+.cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table thead tr:nth-child(1) th { top: 0; z-index: 4; }
+.cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table thead tr:nth-child(2) th { top: 40px; z-index: 3; }
+.cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table .cnt-synoptiko-year-h {
+  position: sticky;
+  left: 0;
+  top: 0;
+  z-index: 6;
+  text-align: left;
+  min-width: 72px;
+  max-width: 80px;
+  width: 72px;
+  background: #f8fafc;
+  box-shadow: 1px 0 0 #cbd5e1, 0 1px 0 #cbd5e1;
+}
+.cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table .cnt-synoptiko-group-h {
+  background: #dbeafe;
+  color: #1e3a8a;
+  font-size: 15px;
+  max-width: 280px;
+  text-align: left;
+}
+.cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table .cnt-synoptiko-metric-h {
+  font-size: 15px;
+  color: #475569;
+  max-width: 140px;
+  width: 120px;
+  background: #f8fafc;
+  text-align: left;
+}
+.cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table tbody td {
+  border-bottom: 1px solid #f1f5f9;
+  border-right: 1px solid #eef2f7;
+  padding: 8px 12px;
+  white-space: nowrap;
+  text-align: left;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 16px;
+  color: #1f2937;
+  background: #fff;
+}
+.cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table tbody tr:hover td { background: #f8fafc; }
+.cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table .cnt-synoptiko-year {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  font-weight: 700;
+  background: #fff;
+  text-align: left;
+  min-width: 72px;
+  max-width: 80px;
+  width: 72px;
+  box-shadow: 1px 0 0 #e2e8f0;
+}
+.cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table tbody tr:hover .cnt-synoptiko-year { background: #f8fafc; }
+.cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table .cnt-synoptiko-num {
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  color: #0f172a;
+  max-width: 140px;
+  width: 120px;
+}
+.cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table .cnt-synoptiko-paketa {
+  text-align: left;
+  font-weight: 400;
+  white-space: normal;
+  word-break: break-word;
+  overflow: visible;
+  text-overflow: clip;
+  max-width: 200px;
+  min-width: 88px;
+  font-size: 14px;
+  color: #334155;
+  line-height: 1.35;
+}
+.cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table tbody td.copy-target {
+  cursor: pointer;
+  transition: background-color 0.18s ease, box-shadow 0.18s ease;
+}
+.cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table tbody td.copy-target:hover {
+  background-color: rgba(99, 102, 241, 0.14) !important;
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.38);
+}
+.cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table tbody td.copy-target:active {
+  background-color: rgba(99, 102, 241, 0.24) !important;
+}
+.table-fullscreen #count-section.count-synoptiko-mode #count-tables-wrapper.count-layout-middle {
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+.table-fullscreen #count-section.count-synoptiko-mode #cnt-synoptiko-panel,
+.table-fullscreen #count-section.count-synoptiko-mode .cnt-synoptiko-body {
+  flex: 1 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+.table-fullscreen #count-section.count-synoptiko-mode .cnt-synoptiko-table-scroll {
+  flex: 1 !important;
+  min-height: 0 !important;
+  overflow: auto !important;
+}
+.table-fullscreen .cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table {
+  border-collapse: separate !important;
+  border-spacing: 0;
+  overflow: visible !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+.table-fullscreen .cnt-synoptiko-table-scroll table.print-table.cnt-synoptiko-table thead th {
+  position: sticky;
+  background: #f8fafc;
+}
 .count-filters-grid .filter-modal-group { min-width: 0; }
 .count-filters-grid .filter-modal-trigger { min-width: 0; width: 100%; box-sizing: border-box; }
 .count-filters-grid .filter-date { width: 100%; box-sizing: border-box; min-width: 0; }
@@ -8947,12 +9644,12 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .count-date-presets-bar .count-preset-btn.active { border-color: #6366f1; background: #6366f1; color: #fff; }
 .count-date-presets-bar .count-preset-btn.active:hover { border-color: #4f46e5; background: #4f46e5; color: #fff; }
 @media (max-width: 1280px) {
-.count-filters-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
-.count-filters-grid > .filter-modal-group:nth-child(n) { grid-column: auto; grid-row: auto; }
-.count-filters-grid > .cnt-grid-apodox, .count-filters-grid > .cnt-grid-from, .count-filters-grid > .cnt-grid-to { grid-column: auto; grid-row: auto; }
-.count-filters-grid > .cnt-grid-reset { grid-column: auto; grid-row: auto; justify-self: end; }
-.count-filters-grid > .cnt-grid-row2 { grid-column: 1 / -1; flex-direction: column; align-items: stretch; }
-.count-filters-grid > .cnt-grid-row2 .count-date-presets-bar { flex: 1 1 auto; }
+#count-section .count-filters-grid.count-filters-compact,
+.count-filters-grid.count-filters-compact { flex-wrap: wrap; }
+#count-section .count-filters-grid.count-filters-compact > .cnt-grid-row2,
+.count-filters-grid.count-filters-compact > .cnt-grid-row2 { flex: 1 1 100%; order: 10; }
+#count-section .count-filters-grid.count-filters-compact > .cnt-grid-reset,
+.count-filters-grid.count-filters-compact > .cnt-grid-reset { margin-left: 0; }
 .count-date-presets-bar { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
 #eipr-section .count-filters-grid.eipr-filters-layout { display: grid !important; align-items: center; }
 #eipr-section .count-filters-grid.eipr-filters-layout > .count-date-presets-bar { display: flex !important; flex-direction: row; align-items: center; grid-template-columns: unset; width: auto; }
@@ -8992,6 +9689,35 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .lite-filter-modal-overlay.is-open { opacity: 1; visibility: visible; pointer-events: auto; }
 .lite-filter-modal-panel { width: min(720px, 100%); max-height: min(85vh, 880px); display: flex; flex-direction: column; background: #fff; border-radius: 16px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(148, 163, 184, 0.15); overflow: hidden; transform: scale(0.96) translateY(12px); transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .lite-filter-modal-panel.lite-filter-modal-panel--wide { width: min(792px, 100%); }
+.lite-filter-modal-panel.lite-filter-modal-panel--count-study {
+  width: min(1120px, 96vw);
+  height: min(94vh, 1000px);
+  max-height: min(94vh, 1000px);
+  display: grid;
+  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.lite-filter-modal-panel--count-study .lite-filter-modal-head {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 18px;
+  border-bottom: none;
+  border-right: 1px solid #e2e8f0;
+  padding: 28px 22px 24px;
+  background: linear-gradient(180deg, #eef2ff 0%, #f8fafc 45%, #fff 100%);
+}
+.lite-filter-modal-panel--count-study .lite-filter-modal-close { align-self: flex-end; order: -1; margin-bottom: 4px; }
+.lite-filter-modal-panel--count-study .lite-filter-modal-head h3 {
+  font-size: 22px;
+  line-height: 1.4;
+  flex: 1 1 auto;
+}
+.lite-filter-modal-panel--count-study .lite-filter-modal-toolbar { grid-column: 2; grid-row: 1; }
+.lite-filter-modal-panel--count-study .lite-filter-modal-body { grid-column: 2; grid-row: 2; }
+.lite-filter-modal-panel--count-study .lite-filter-modal-foot { grid-column: 2; grid-row: 3; }
 .lite-filter-modal-overlay.is-open .lite-filter-modal-panel { transform: scale(1) translateY(0); }
 .lite-filter-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 22px 26px 18px; border-bottom: 1px solid #e2e8f0; background: linear-gradient(180deg, #eef2ff 0%, #fff 100%); flex-shrink: 0; }
 .lite-filter-modal-head h3 { margin: 0; font-size: 24px; font-weight: 800; color: #1e293b; line-height: 1.35; letter-spacing: -0.01em; }
@@ -9222,7 +9948,7 @@ table.print-table.wrap-cells thead th, table.print-table.wrap-cells tbody td { w
 .copy-target { cursor: pointer; position: relative; transition: background-color 0.15s; }
 .copy-target:hover { background-color: rgba(99,102,241,0.15) !important; }
 .copy-target:active { background-color: rgba(99,102,241,0.25) !important; }
-#toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 9999; pointer-events: none; }
+#toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 2147483646; pointer-events: none; }
 .toast { background: #1e293b; color: #fff; padding: 10px 16px; border-radius: 8px; margin-top: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-size: 15px; font-weight: 600; opacity: 0; transform: translateY(10px); transition: opacity 0.3s, transform 0.3s; }
 .toast.show { opacity: 1; transform: translateY(0); }
 .complex-file-warning { background: rgba(254,242,242,0.88); border: none; border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; color: #991b1b; font-weight: 700; font-size: 15px; line-height: 1.45; }
@@ -9319,31 +10045,45 @@ window._liteFilterModal = {
     activeSection = null;
     ov.classList.remove('is-open');
     ov.setAttribute('aria-hidden', 'true');
-    document.body.style.overflow = '';
-    if (panelEl) panelEl.classList.remove('lite-filter-modal-panel--wide');
+    var extraStillOpen = document.querySelector('.cnt-extra-filters-overlay.is-open');
+    if (!extraStillOpen) document.body.style.overflow = '';
+    if (panelEl) {
+      panelEl.classList.remove('lite-filter-modal-panel--wide');
+      panelEl.classList.remove('lite-filter-modal-panel--count-study');
+    }
     if (searchEl) searchEl.value = '';
     if (indexEl) indexEl.hidden = true;
     filterSearch('');
     if (secBeforeClose) window._liteFilterModal.runApply(secBeforeClose);
   }
 
-  function openModal(group, section) {
-    closeModal();
+  function openModal(group, section, opts) {
+    opts = opts || {};
+    if (ov.classList.contains('is-open')) {
+      closeModal();
+    } else if (panelEl) {
+      panelEl.classList.remove('lite-filter-modal-panel--wide');
+      panelEl.classList.remove('lite-filter-modal-panel--count-study');
+    }
     activeGroup = group;
     activeSection = section;
     storeEl = group.querySelector('.filter-modal-store');
-    var opts = storeEl && storeEl.querySelector('.filter-options');
-    if (opts) optsMount.appendChild(opts);
-    if (titleEl) titleEl.textContent = group.getAttribute('data-filter-name') || '';
+    var optsEl = storeEl && storeEl.querySelector('.filter-options');
+    if (optsEl && optsMount) optsMount.appendChild(optsEl);
+    if (titleEl) {
+      titleEl.textContent = opts.title || group.getAttribute('data-filter-name') || '';
+    }
     var filterKey = group.getAttribute('data-filter-key') || '';
     if (indexEl) {
       indexEl.hidden = !(filterKey === 'paketo' || filterKey === 'klados');
     }
     if (panelEl) {
-      if (group.getAttribute('data-modal-wide') === '1') {
+      panelEl.classList.remove('lite-filter-modal-panel--wide');
+      panelEl.classList.remove('lite-filter-modal-panel--count-study');
+      if (opts.studyLayout) {
+        panelEl.classList.add('lite-filter-modal-panel--count-study');
+      } else if (group.getAttribute('data-modal-wide') === '1') {
         panelEl.classList.add('lite-filter-modal-panel--wide');
-      } else {
-        panelEl.classList.remove('lite-filter-modal-panel--wide');
       }
     }
     ov.classList.add('is-open');
@@ -9355,6 +10095,14 @@ window._liteFilterModal = {
       setTimeout(function () { searchEl.focus(); }, 60);
     }
   }
+
+  window._liteFilterModal.openForGroup = function (section, filterKey, opts) {
+    if (!section || !filterKey) return false;
+    var g = findGroupByKey(section, filterKey);
+    if (!g) return false;
+    openModal(g, section, opts || {});
+    return true;
+  };
 
   function filterSearch(q) {
     var ql = (q || '').toLowerCase();
@@ -9421,6 +10169,39 @@ window._liteFilterModal = {
       window._liteFilterModal.runApply(activeSection);
     }
   });
+
+  function atlasPromptCountKladosOnce() {
+    if (window._atlasCountKladosPromptDone) return;
+    var sec = document.getElementById('count-section');
+    if (!sec) return;
+    var g = findGroupByKey(sec, 'klados');
+    if (!g) return;
+    try {
+      openModal(g, sec, {
+        title: '\u0395\u03c0\u03b9\u03bb\u03ad\u03be\u03c4\u03b5 \u03c4\u03b1 \u03c0\u03b1\u03ba\u03ad\u03c4\u03b1 \u03ba\u03ac\u03bb\u03c5\u03c8\u03b7\u03c2 \u03b3\u03b9\u03b1 \u03b1\u03bd\u03b1\u03bb\u03c5\u03c4\u03b9\u03ba\u03ae \u03bc\u03b5\u03bb\u03ad\u03c4\u03b7',
+        studyLayout: true
+      });
+      window._atlasCountKladosPromptDone = true;
+    } catch (err) {}
+  }
+
+  function atlasScheduleCountKladosPrompt() {
+    setTimeout(atlasPromptCountKladosOnce, 200);
+  }
+
+  var _atlasOrigShowTab = window.showTab;
+  if (typeof _atlasOrigShowTab === 'function') {
+    window.showTab = function (tabId) {
+      _atlasOrigShowTab.apply(this, arguments);
+      if (tabId === 'count') atlasScheduleCountKladosPrompt();
+    };
+  }
+
+  document.addEventListener('click', function (e) {
+    var nav = e.target && e.target.closest && e.target.closest('.nav-item[data-tab="count"]');
+    if (nav) atlasScheduleCountKladosPrompt();
+  }, true);
+
 })();
 """
 
@@ -9609,13 +10390,75 @@ function buildSyntaksiPrintDoc(title,bodyContent){var styles=typeof _printStyles
 function _stripHiddenUnifiedForPrint(sec,wrapId){if(!sec||!sec.querySelector('#'+wrapId))return;sec.querySelectorAll('script').forEach(function(s){s.remove();});sec.querySelectorAll('#'+wrapId+' tbody tr').forEach(function(tr){if(tr.style.display==='none')tr.remove();});var wrap=sec.querySelector('#'+wrapId);var uni=wrap&&wrap.querySelector('table.count-unified');if(uni){var thead=uni.querySelector('thead');var theadHTML=thead?thead.outerHTML:'';var groups=[];var cur=null;Array.prototype.forEach.call(uni.querySelectorAll('tbody > tr'),function(tr){if(tr.getAttribute('data-is-band')==='1'){cur={year:(tr.getAttribute('data-c-year')||(tr.textContent||'').trim()),rows:[]};groups.push(cur);return;}if(tr.getAttribute('data-is-sep')==='1')return;if(!cur){cur={year:(tr.getAttribute('data-c-year')||''),rows:[]};groups.push(cur);}cur.rows.push(tr.outerHTML);});var out='';groups.forEach(function(g){if(!g.rows.length)return;out+='<div class="year-section"><div class="year-heading">'+(g.year||'')+'</div><table class="print-table">'+theadHTML+'<tbody>'+g.rows.join('')+'</tbody></table></div>';});if(out)wrap.innerHTML=out;}}
 function _stripHiddenCountForPrint(root){if(!root||!root.querySelectorAll)return;[['count-section','count-tables-wrapper'],['eipr-section','eipr-tables-wrapper']].forEach(function(pair){var sec=root.id===pair[0]?root:root.querySelector('#'+pair[0]);if(sec)_stripHiddenUnifiedForPrint(sec,pair[1]);});}
 function _apdPrintSectionContent(sec){if(!sec)return'';if(typeof window._atlasApdApply==='function')window._atlasApdApply();var h2=sec.querySelector('h2');var desc=sec.querySelector('.print-description');var mount=sec.querySelector('#apd-tables-mount');var notes='';var plEl=document.getElementById('apd-plafond');if(plEl&&plEl.options&&plEl.options.length){var opt=plEl.options[plEl.selectedIndex];if(opt)notes+='<p class="print-description apd-print-plafond">Πλαφόν: '+String(opt.textContent||'').replace(/</g,'&lt;')+'</p>';}var toEl=document.getElementById('apd-totals-only');if(toEl&&toEl.checked)notes+='<p class="print-description">Μόνο ετήσιες γραμμές συνόλου</p>';return'<div class="print-section apd-layout">'+(h2?h2.outerHTML:'')+(desc?desc.outerHTML:'')+notes+(mount?'<div id="apd-tables-mount">'+mount.innerHTML+'</div>':'')+'</div>';}
+function _countIsSynoptikoMode(sec){return !!(sec&&sec.classList&&sec.classList.contains('count-synoptiko-mode'));}
+function _countSynoptikoPrintSectionContent(sec){
+  if(!sec)return'';
+  function esc(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
+  function metricVal(id){var el=document.getElementById(id);var t=el?(el.textContent||'').trim():'';return t||'•';}
+  function cell(lbl,val,wide){
+    var cls='atlas-metric-item'+(wide?' atlas-metric-item--wide':'');
+    return '<div class="'+cls+'"><span class="atlas-metric-label">'+esc(lbl)+'</span><strong class="atlas-metric-value">'+esc(val)+'</strong></div>';
+  }
+  function selectedKladosLabels(){
+    var out=[],seen={};
+    function add(cb){
+      if(!cb||!cb.checked||(cb.getAttribute('data-attr')||'')!=='klados')return;
+      if(seen[cb.value])return;seen[cb.value]=1;
+      var lab=cb.closest('label');
+      var txt='';
+      if(lab){
+        var span=lab.querySelector('.lite-filter-opt-label');
+        txt=(span?span.textContent:lab.textContent)||'';
+      }
+      txt=String(txt||cb.value||'').replace(/\s+/g,' ').trim();
+      out.push(txt||cb.value);
+    }
+    sec.querySelectorAll('.filter-modal-group[data-filter-key="klados"] input[type="checkbox"]').forEach(add);
+    var m=document.getElementById('lite-filter-modal-options-mount');
+    if(m)m.querySelectorAll('input[type="checkbox"]').forEach(add);
+    return out;
+  }
+  var titleText=(sec.querySelector('h2')&&sec.querySelector('h2').textContent)||'Συνοπτική Καταμέτρηση';
+  var safeTitle=esc(titleText);
+  var pk=selectedKladosLabels();
+  var pkTxt=pk.length?pk.map(esc).join(', '):'—';
+  var fromEl=document.getElementById('cnt-filter-from');
+  var toEl=document.getElementById('cnt-filter-to');
+  var fromV=(fromEl&&fromEl.value||'').trim();
+  var toV=(toEl&&toEl.value||'').trim();
+  var rangeNote='Συνοπτική καταμέτρηση ημερών ασφάλισης ανά ταμείο και τύπο.';
+  if(fromV||toV)rangeNote+=' Διάστημα: '+(fromV||'…')+' – '+(toV||'…')+'.';
+  var calcNote='<p class="print-description syntaksi-print-calc-note">'+esc(rangeNote)+'</p>';
+  var summary=
+    '<div class="print-synt-summary print-synt-summary--no-ex">'+
+    '<div class="print-synt-col-pk"><span class="print-synt-pk-h">Επιλεγμένα πακέτα κάλυψης</span><div class="print-synt-pk-txt">'+pkTxt+'</div></div>'+
+    '<div class="print-synt-col-metrics"><div class="atlas-metrics-row atlas-metrics-row--print">'+
+    cell('Ημέρες μισθωτή',metricVal('cnt-metric-misthoti'),false)+
+    cell('Ημέρες μη μισθωτή',metricVal('cnt-metric-nmisthoti'),false)+
+    cell('Άθροισμα ημερών',metricVal('cnt-metric-sum'),true)+
+    cell('Διαδοχική',metricVal('cnt-metric-diadochiki'),false)+
+    cell('Συνολικά έτη',metricVal('cnt-metric-years'),false)+
+    '</div></div></div>';
+  var tbl=sec.querySelector('#cnt-synoptiko-body table.cnt-synoptiko-table');
+  var tableHtml='';
+  if(tbl){
+    var tClone=tbl.cloneNode(true);
+    tClone.classList.add('wrap-cells');
+    tClone.querySelectorAll('[style]').forEach(function(el){el.removeAttribute('style');});
+    tableHtml='<div class="cnt-synoptiko-print-wrap">'+tClone.outerHTML+'</div>';
+  }else{
+    tableHtml='<p class="print-description">Δεν υπάρχουν δεδομένα για εμφάνιση με τα τρέχοντα φίλτρα.</p>';
+  }
+  var disclaimer='<div class="print-disclaimer"><strong>ΣΗΜΑΝΤΙΚΗ ΣΗΜΕΙΩΣΗ:</strong> Η παρούσα αναφορά βασίζεται αποκλειστικά στα δεδομένα που εμφανίζονται στο αρχείο ΑΤΛΑΣ/e-ΕΦΚΑ και αποτελεί απλή επεξεργασία των καταγεγραμμένων εγγραφών. Η πλατφόρμα ΑΤΛΑΣ μπορεί να περιέχει κενά ή σφάλματα και η αναφορά αυτή δεν υποκαθιστά νομική ή οικονομική συμβουλή σε καμία περίπτωση. Για θέματα συνταξιοδότησης και οριστικές απαντήσεις αρμόδιος παραμένει αποκλειστικά ο e-ΕΦΚΑ.</div>';
+  return '<div class="syntaksi-print count-synoptiko-print"><h1>'+safeTitle+'</h1>'+calcNote+summary+tableHtml+disclaimer+'</div>';
+}
 function _syntaksiPrefixFromSection(sec){var id=(sec&&sec.id)||'syntaksi-section';return id.replace(/-section$/,'')||'syntaksi';}
 function _syntaksiPrintBodyFor(sec){var pfx=_syntaksiPrefixFromSection(sec);var map=window._atlasSyntaksiPrint||{};if(typeof map[pfx]==='function')return map[pfx];if(typeof window._atlasSyntaksiGetPrintBody==='function')return window._atlasSyntaksiGetPrintBody;return null;}
 function _syntaksiPrintSectionContent(sec){if(!sec)sec=document.getElementById('syntaksi-section');var titleText=(sec&&sec.querySelector('h2')&&sec.querySelector('h2').textContent)||'Συντάξιμες Αποδοχές';var safeTitle=String(titleText).replace(/</g,'&lt;');var bodyFn=_syntaksiPrintBodyFor(sec);if(typeof bodyFn!=='function'){return'<div class="syntaksi-print"><h1>'+safeTitle+'</h1></div>';}var pb=bodyFn();if(!pb||!pb.ok){return'<div class="syntaksi-print"><h1>'+safeTitle+'</h1><p class="print-description">Επιλέξτε πακέτα κάλυψης στην καρτέλα Καταμέτρηση.</p></div>';}return'<div class="syntaksi-print"><h1>'+safeTitle+'</h1>'+pb.summaryHtml+pb.tableHtml+(pb.disclaimerHtml||'')+'</div>';}
 function _patchApdInPrintHtml(html){var live=document.getElementById('apd-section');if(!live||typeof html!=='string'||!html)return html||'';if(typeof window._atlasApdApply==='function')window._atlasApdApply();var liveMount=live.querySelector('#apd-tables-mount');if(!liveMount)return html;try{var doc=new DOMParser().parseFromString(html,'text/html');var printMount=doc.getElementById('apd-tables-mount');if(!printMount)return html;printMount.innerHTML=liveMount.innerHTML;var livePl=document.getElementById('apd-plafond');var printPl=doc.getElementById('apd-plafond');if(livePl&&printPl){printPl.value=livePl.value;Array.from(printPl.options).forEach(function(o){if(o.value===livePl.value)o.setAttribute('selected','selected');else o.removeAttribute('selected');});}return'<!DOCTYPE html>\n'+doc.documentElement.outerHTML;}catch(e){return html;}}
 function _openPrintWindow(printDoc){var w=window.open('','_blank');w.document.write(printDoc);w.document.close();w.focus();setTimeout(function(){w.print();w.close();},400);}
-function printSection(el){if(typeof updatePersonalTitle==='function')updatePersonalTitle();var source=el.classList&&el.classList.contains('print-section')?el:(el.closest&&el.closest('.print-section')||el);var apdSec=(source&&source.id==='apd-section')?source:(source&&source.querySelector?source.querySelector('#apd-section'):null)||(source&&source.closest?source.closest('#apd-section'):null);if(apdSec){var apdTitle=(apdSec.querySelector('h2')&&apdSec.querySelector('h2').textContent)||'ΑΠΔ/Πλαφόν';_openPrintWindow(buildSinglePrintDoc(apdTitle,_apdPrintSectionContent(apdSec)));return;}var synSec=(source&&source.classList&&source.classList.contains('syntaksi-layout'))?source:(source&&source.querySelector?source.querySelector('.syntaksi-layout'):null)||(source&&source.closest?source.closest('.syntaksi-layout'):null);if(synSec){var synTitle=(synSec.querySelector('h2')&&synSec.querySelector('h2').textContent)||'Συντάξιμες Αποδοχές';_openPrintWindow(buildSyntaksiPrintDoc(synTitle,_syntaksiPrintSectionContent(synSec)));return;}if(typeof persistInteractiveValues==='function')persistInteractiveValues(source);var clone=source.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var title=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'ATLAS';var bodyContent;var totalsTable=clone.querySelector('#totals-filter-table');if(totalsTable){var h2Text=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'Σύνολα';bodyContent='<div class="print-section"><h2>'+h2Text.replace(/</g,'&lt;')+'</h2>'+totalsTable.outerHTML+'</div>';}else{bodyContent=clone.outerHTML;}_openPrintWindow(buildSinglePrintDoc(title,bodyContent));}
-function openTableFs(el){var overlay=document.createElement('div');overlay.className='table-fullscreen';overlay.id='fs-overlay';var section=el.classList.contains('print-section')?el:el.closest('.print-section');var source=section||el;var heading=source.querySelector?source.querySelector('h2'):null;var titleText=heading?heading.textContent:'Πίνακας';var hasInteractive=source.querySelector&&source.querySelector('script');var toolbar=document.createElement('div');toolbar.className='fs-toolbar';toolbar.innerHTML='<span class="fs-title">'+titleText+'</span>';var actions=document.createElement('div');actions.className='fs-toolbar-actions';var printBtn=document.createElement('button');printBtn.className='fs-print-btn';printBtn.innerHTML='🖨 Εκτύπωση';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(){var bodyEl=overlay.querySelector('.fs-body');if(bodyEl){var apdSec=bodyEl.querySelector('#apd-section');if(apdSec){_openPrintWindow(buildSinglePrintDoc(titleText,_apdPrintSectionContent(apdSec)));return;}var synSec=bodyEl.querySelector('.syntaksi-layout');if(synSec){_openPrintWindow(buildSyntaksiPrintDoc(titleText,_syntaksiPrintSectionContent(synSec)));return;}if(typeof persistInteractiveValues==='function')persistInteractiveValues(bodyEl);var clone=bodyEl.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var totalsTable=clone.querySelector('#totals-filter-table');var bodyContent=totalsTable?'<div class="print-section"><h2>'+(titleText.replace(/</g,'&lt;')||'Σύνολα')+'</h2>'+totalsTable.outerHTML+'</div>':clone.innerHTML;_openPrintWindow(buildSinglePrintDoc(titleText,bodyContent));}};actions.appendChild(printBtn);if(typeof XLSX!=='undefined'){var xlsFsBtn=document.createElement('button');xlsFsBtn.className='fs-print-btn';xlsFsBtn.innerHTML='📊 Excel';xlsFsBtn.title='Εξαγωγή αυτού του πίνακα σε Excel (όπως εμφανίζεται)';xlsFsBtn.onclick=function(){var bodyEl=overlay.querySelector('.fs-body');if(bodyEl)exportTabExcel(bodyEl,titleText||'Πίνακας');};actions.appendChild(xlsFsBtn);}if(source&&source.classList&&source.classList.contains('syntaksi-layout')){var _synPfx=(source.id||'syntaksi-section').replace(/-section$/,'')||'syntaksi';var _jsonId=_synPfx+'-json-dl';var jsonFsBtn=document.createElement('button');jsonFsBtn.className='fs-json-btn';jsonFsBtn.innerHTML='JSON για Syntaksi Pro 3';jsonFsBtn.title='Εξαγωγή JSON για Syntaksi Pro 3';var liveJson=document.getElementById(_jsonId);if(liveJson&&liveJson.disabled)jsonFsBtn.disabled=true;jsonFsBtn.onclick=function(){var dl=document.getElementById(_jsonId);if(dl&&!dl.disabled)dl.click();else showToast('Δεν υπάρχουν δεδομένα για JSON.');};actions.appendChild(jsonFsBtn);}var closeBtn=document.createElement('button');closeBtn.className='fs-close';closeBtn.innerHTML='✕';closeBtn.title='Κλείσιμο (Esc)';closeBtn.onclick=closeTableFs;actions.appendChild(closeBtn);toolbar.appendChild(actions);var body=document.createElement('div');body.className='fs-body';if(hasInteractive){var placeholder=document.createElement('div');placeholder.id='fs-placeholder';placeholder.style.display='none';source.parentNode.insertBefore(placeholder,source);body.appendChild(source);overlay._fsSource=source;overlay._fsPlaceholder=placeholder;}else{body.appendChild(source.cloneNode(true));}overlay.appendChild(toolbar);overlay.appendChild(body);document.body.appendChild(overlay);document.body.style.overflow='hidden';}
+function printSection(el){if(typeof updatePersonalTitle==='function')updatePersonalTitle();var source=el.classList&&el.classList.contains('print-section')?el:(el.closest&&el.closest('.print-section')||el);var apdSec=(source&&source.id==='apd-section')?source:(source&&source.querySelector?source.querySelector('#apd-section'):null)||(source&&source.closest?source.closest('#apd-section'):null);if(apdSec){var apdTitle=(apdSec.querySelector('h2')&&apdSec.querySelector('h2').textContent)||'ΑΠΔ/Πλαφόν';_openPrintWindow(buildSinglePrintDoc(apdTitle,_apdPrintSectionContent(apdSec)));return;}var countSec=(source&&source.id==='count-section')?source:(source&&source.querySelector?source.querySelector('#count-section'):null)||(source&&source.closest?source.closest('#count-section'):null);if(countSec&&_countIsSynoptikoMode(countSec)){var cntTitle=(countSec.querySelector('h2')&&countSec.querySelector('h2').textContent)||'Συνοπτική Καταμέτρηση';_openPrintWindow(buildSyntaksiPrintDoc(cntTitle,_countSynoptikoPrintSectionContent(countSec)));return;}var synSec=(source&&source.classList&&source.classList.contains('syntaksi-layout'))?source:(source&&source.querySelector?source.querySelector('.syntaksi-layout'):null)||(source&&source.closest?source.closest('.syntaksi-layout'):null);if(synSec){var synTitle=(synSec.querySelector('h2')&&synSec.querySelector('h2').textContent)||'Συντάξιμες Αποδοχές';_openPrintWindow(buildSyntaksiPrintDoc(synTitle,_syntaksiPrintSectionContent(synSec)));return;}if(typeof persistInteractiveValues==='function')persistInteractiveValues(source);var clone=source.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var title=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'ATLAS';var bodyContent;var totalsTable=clone.querySelector('#totals-filter-table');if(totalsTable){var h2Text=(clone.querySelector('h2')&&clone.querySelector('h2').textContent)||'Σύνολα';bodyContent='<div class="print-section"><h2>'+h2Text.replace(/</g,'&lt;')+'</h2>'+totalsTable.outerHTML+'</div>';}else{bodyContent=clone.outerHTML;}_openPrintWindow(buildSinglePrintDoc(title,bodyContent));}
+function openTableFs(el){var overlay=document.createElement('div');overlay.className='table-fullscreen';overlay.id='fs-overlay';var section=el.classList.contains('print-section')?el:el.closest('.print-section');var source=section||el;var heading=source.querySelector?source.querySelector('h2'):null;var titleText=heading?heading.textContent:'Πίνακας';var hasInteractive=source.querySelector&&source.querySelector('script');var toolbar=document.createElement('div');toolbar.className='fs-toolbar';toolbar.innerHTML='<span class="fs-title">'+titleText+'</span>';var actions=document.createElement('div');actions.className='fs-toolbar-actions';var printBtn=document.createElement('button');printBtn.className='fs-print-btn';printBtn.innerHTML='🖨 Εκτύπωση';printBtn.title='Εκτύπωση μόνο αυτής της καρτέλας';printBtn.onclick=function(){var bodyEl=overlay.querySelector('.fs-body');if(bodyEl){var apdSec=bodyEl.querySelector('#apd-section');if(apdSec){_openPrintWindow(buildSinglePrintDoc(titleText,_apdPrintSectionContent(apdSec)));return;}var countSec=bodyEl.querySelector('#count-section');if(countSec&&_countIsSynoptikoMode(countSec)){_openPrintWindow(buildSyntaksiPrintDoc(titleText,_countSynoptikoPrintSectionContent(countSec)));return;}var synSec=bodyEl.querySelector('.syntaksi-layout');if(synSec){_openPrintWindow(buildSyntaksiPrintDoc(titleText,_syntaksiPrintSectionContent(synSec)));return;}if(typeof persistInteractiveValues==='function')persistInteractiveValues(bodyEl);var clone=bodyEl.cloneNode(true);clone.querySelectorAll('.section-actions,.btn-fs,.btn-print-tab').forEach(function(n){n.remove();});_stripHiddenCountForPrint(clone);var totalsTable=clone.querySelector('#totals-filter-table');var bodyContent=totalsTable?'<div class="print-section"><h2>'+(titleText.replace(/</g,'&lt;')||'Σύνολα')+'</h2>'+totalsTable.outerHTML+'</div>':clone.innerHTML;_openPrintWindow(buildSinglePrintDoc(titleText,bodyContent));}};actions.appendChild(printBtn);if(typeof XLSX!=='undefined'){var xlsFsBtn=document.createElement('button');xlsFsBtn.className='fs-print-btn';xlsFsBtn.innerHTML='📊 Excel';xlsFsBtn.title='Εξαγωγή αυτού του πίνακα σε Excel (όπως εμφανίζεται)';xlsFsBtn.onclick=function(){var bodyEl=overlay.querySelector('.fs-body');if(bodyEl)exportTabExcel(bodyEl,titleText||'Πίνακας');};actions.appendChild(xlsFsBtn);}if(source&&source.classList&&source.classList.contains('syntaksi-layout')){var _synPfx=(source.id||'syntaksi-section').replace(/-section$/,'')||'syntaksi';var _jsonId=_synPfx+'-json-dl';var jsonFsBtn=document.createElement('button');jsonFsBtn.className='fs-json-btn';jsonFsBtn.innerHTML='JSON για Syntaksi Pro 3';jsonFsBtn.title='Εξαγωγή JSON για Syntaksi Pro 3';var liveJson=document.getElementById(_jsonId);if(liveJson&&liveJson.disabled)jsonFsBtn.disabled=true;jsonFsBtn.onclick=function(){var dl=document.getElementById(_jsonId);if(dl&&!dl.disabled)dl.click();else showToast('Δεν υπάρχουν δεδομένα για JSON.');};actions.appendChild(jsonFsBtn);}var closeBtn=document.createElement('button');closeBtn.className='fs-close';closeBtn.innerHTML='✕';closeBtn.title='Κλείσιμο (Esc)';closeBtn.onclick=closeTableFs;actions.appendChild(closeBtn);toolbar.appendChild(actions);var body=document.createElement('div');body.className='fs-body';if(hasInteractive){var placeholder=document.createElement('div');placeholder.id='fs-placeholder';placeholder.style.display='none';source.parentNode.insertBefore(placeholder,source);body.appendChild(source);overlay._fsSource=source;overlay._fsPlaceholder=placeholder;}else{body.appendChild(source.cloneNode(true));}overlay.appendChild(toolbar);overlay.appendChild(body);document.body.appendChild(overlay);document.body.style.overflow='hidden';}
 function closeTableFs(){var overlay=document.getElementById('fs-overlay');if(overlay){if(overlay._fsSource&&overlay._fsPlaceholder){overlay._fsPlaceholder.parentNode.insertBefore(overlay._fsSource,overlay._fsPlaceholder);overlay._fsPlaceholder.remove();}overlay.remove();document.body.style.overflow='';}}
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeTableFs();});
 function _patchSyntaksiInPrintHtml(html){if(typeof html!=='string'||!html)return html||'';var liveList=document.querySelectorAll('.syntaksi-layout');if(!liveList||!liveList.length)return html;var printMap=window._atlasSyntaksiPrint||{};var any=false;try{var doc=new DOMParser().parseFromString(html,'text/html');Array.prototype.forEach.call(liveList,function(live){var pfx=(live.id||'syntaksi-section').replace(/-section$/,'')||'syntaksi';var fn=printMap[pfx]||window._atlasSyntaksiGetPrintBody;if(typeof fn!=='function')return;var pb=fn();if(!pb||!pb.ok)return;var sec=doc.getElementById(pfx+'-section');if(!sec)return;any=true;var printMount=doc.getElementById(pfx+'-table-mount');if(printMount){printMount.innerHTML=pb.tableHtml;printMount.removeAttribute('hidden');printMount.classList.add('syntaksi-print-table-mount');}var pe=doc.getElementById(pfx+'-empty');if(pe)pe.setAttribute('hidden','hidden');var fb=doc.getElementById(pfx+'-filters-bar');if(fb)fb.setAttribute('hidden','hidden');var act=doc.getElementById(pfx+'-json-dl');if(act)act.setAttribute('hidden','hidden');var liveMetrics=sec.querySelector('#'+pfx+'-metrics-wrap');if(liveMetrics)liveMetrics.setAttribute('hidden','hidden');var sumMount=sec.querySelector('.syntaksi-print-summary-mount');if(!sumMount){sumMount=doc.createElement('div');sumMount.className='syntaksi-print-summary-mount syntaksi-print';var mnt=doc.getElementById(pfx+'-table-mount');if(mnt)sec.insertBefore(sumMount,mnt);else sec.appendChild(sumMount);}sumMount.innerHTML=pb.summaryHtml;sec.classList.add('syntaksi-print');var h2=sec.querySelector('h2');if(h2&&!sec.querySelector('h1.syntaksi-print-h1')){var h1=doc.createElement('h1');h1.className='syntaksi-print-h1';h1.textContent=h2.textContent;h2.replaceWith(h1);}var oldDesc=sec.querySelector('p.print-description:not(.syntaksi-print-calc-note)');if(oldDesc)oldDesc.setAttribute('hidden','hidden');if(!sec.querySelector('.syntaksi-print-disclaimer')&&pb.disclaimerHtml){var disc=doc.createElement('div');disc.className='syntaksi-print-disclaimer';disc.innerHTML=pb.disclaimerHtml;sec.appendChild(disc);}});if(!any)return html;return'<!DOCTYPE html>\n'+doc.documentElement.outerHTML;}catch(e){return html;}}
@@ -9734,6 +10577,48 @@ function _atlasExtractCountTable(table){
   }
   return {cells:cells,headRows:1};
 }
+function _atlasExtractSynoptikoTable(table){
+  if(!table||!table.tHead||table.tHead.rows.length<2)return _atlasExtractTable(table);
+  var r0=table.tHead.rows[0],r1=table.tHead.rows[1];
+  var flat=[{t:'s',v:'ΕΤΟΣ'}];
+  var groups=[];
+  for(var i=0;i<r0.cells.length;i++){
+    var th=r0.cells[i];
+    var txt=_atlasCellText(th);
+    var cs=th.colSpan||1;
+    if(th.rowSpan>1&&/ΕΤΟΣ/i.test(txt))continue;
+    groups.push({label:txt,span:cs});
+  }
+  var m=0;
+  groups.forEach(function(g){
+    for(var j=0;j<g.span;j++){
+      var metric=(r1.cells[m]&&_atlasCellText(r1.cells[m]))||('Στήλη '+(j+1));
+      m++;
+      flat.push({t:'s',v:g.label?(g.label+' — '+metric):metric});
+    }
+  });
+  var cells=[flat];
+  for(var b=0;b<table.tBodies.length;b++){
+    var trs=table.tBodies[b].rows;
+    for(var r=0;r<trs.length;r++){
+      var tr=trs[r];
+      if(!_atlasRowVisible(tr))continue;
+      var row=[];
+      for(var c=0;c<tr.cells.length;c++){
+        row.push(_atlasParseCell(_atlasCellText(tr.cells[c])));
+      }
+      while(row.length<flat.length)row.push({t:'s',v:''});
+      if(row.length>flat.length)row=row.slice(0,flat.length);
+      cells.push(row);
+    }
+  }
+  return {cells:cells,headRows:1};
+}
+function _atlasCountExportRoot(root){
+  if(!root||!root.querySelector)return null;
+  var sec=(root.id==='count-section')?root:(root.querySelector('#count-section')||(root.closest&&root.closest('#count-section')));
+  return sec||null;
+}
 function _atlasHeaderSig(cells){if(!cells.length)return '';return (cells[0]||[]).map(function(o){return o&&o.v!=null?String(o.v):'';}).join('\u0001');}
 function _atlasCellsToSheet(cells){
   var ws={},maxR=cells.length,maxC=0,r,c;
@@ -9747,10 +10632,26 @@ function _atlasSanitizeFilename(s){return String(s||'ATLAS').replace(/[\/\\:*?"<
 function _atlasTabLabel(tid){var el=document.querySelector('.nav-item[data-tab="'+tid+'"]');return el?el.textContent.trim():tid;}
 function _atlasYearLabelBefore(table){var sec=table.closest?table.closest('.year-section'):null;if(sec){var h=sec.querySelector('.year-heading');if(h)return h.textContent.trim();}return '';}
 function _atlasPaneToSheets(root,label){
+  var countSec=_atlasCountExportRoot(root);
+  if(countSec&&_countIsSynoptikoMode(countSec)){
+    var synTbl=countSec.querySelector('#cnt-synoptiko-body table.cnt-synoptiko-table');
+    if(synTbl){
+      var synExt=_atlasExtractSynoptikoTable(synTbl);
+      if(synExt.cells.length){
+        return [{name:label||'Συνοπτική Καταμέτρηση',cells:synExt.cells}];
+      }
+    }
+  }
   var tables=root.querySelectorAll('table.print-table');
   var sheets=[],cur=null,curSig=null;
   for(var i=0;i<tables.length;i++){
     var tbl=tables[i];
+    if(tbl.classList&&tbl.classList.contains('cnt-synoptiko-table'))continue;
+    if(countSec&&countSec.contains(tbl)){
+      var analytic=countSec.querySelector('#count-analytic-wrap');
+      if(analytic&&analytic.hidden)continue;
+      if(analytic&&analytic.getAttribute('aria-hidden')==='true')continue;
+    }
     var isCount=tbl.classList&&tbl.classList.contains('count-unified');
     var ext=isCount?_atlasExtractCountTable(tbl):_atlasExtractTable(tbl);
     if(!ext.cells.length)continue;
@@ -9776,12 +10677,20 @@ function _atlasDownloadSheets(sheets,filename){
 }
 function _atlasBaseName(){var base=(typeof getFullSaveFilename==='function'?getFullSaveFilename():(_downloadFilename||'ATLAS Pro.html'));return base.replace(/\.html$/i,'');}
 function exportTabExcel(sourceEl,label){
-  var sheets=_atlasPaneToSheets(sourceEl,label||'Πίνακας');
-  if(!sheets.length&&sourceEl.matches&&sourceEl.matches('table.print-table')){
-    var ext=sourceEl.classList.contains('count-unified')?_atlasExtractCountTable(sourceEl):_atlasExtractTable(sourceEl);
-    if(ext.cells.length)sheets=[{name:label||'Πίνακας',cells:ext.cells}];
+  var countSec=_atlasCountExportRoot(sourceEl);
+  var exportLabel=label||'Πίνακας';
+  if(countSec&&_countIsSynoptikoMode(countSec)){
+    exportLabel='Συνοπτική Καταμέτρηση';
   }
-  _atlasDownloadSheets(sheets,_atlasSanitizeFilename(_atlasBaseName()+' - '+(label||'Πίνακας'))+'.xlsx');
+  var sheets=_atlasPaneToSheets(sourceEl,exportLabel);
+  if(!sheets.length&&sourceEl.matches&&sourceEl.matches('table.print-table')){
+    var ext;
+    if(sourceEl.classList.contains('cnt-synoptiko-table'))ext=_atlasExtractSynoptikoTable(sourceEl);
+    else if(sourceEl.classList.contains('count-unified'))ext=_atlasExtractCountTable(sourceEl);
+    else ext=_atlasExtractTable(sourceEl);
+    if(ext.cells.length)sheets=[{name:exportLabel,cells:ext.cells}];
+  }
+  _atlasDownloadSheets(sheets,_atlasSanitizeFilename(_atlasBaseName()+' - '+exportLabel)+'.xlsx');
 }
 function downloadExcelReport(){
   if(!_atlasExcelReady()){showToast('Δεν φορτώθηκε η βιβλιοθήκη Excel.');return;}
